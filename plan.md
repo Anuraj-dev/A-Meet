@@ -201,24 +201,86 @@ see join/leave presence notifications. No media yet — pure Socket.io learning 
 
 ---
 
-## Milestone 2 — WebRTC P2P 1:1, by hand  *(expand on arrival — the key learning milestone)*
+## Milestone 2 — WebRTC P2P 1:1, by hand  *(the key learning milestone — Opus)*
 
-1. Concept checkpoint: `getUserMedia`, `RTCPeerConnection`, SDP offer/answer, ICE candidates.
-2. Local media preview via `getUserMedia`.
-3. Signaling events over Socket.io: `ready`, `offer`, `answer`, `ice-candidate`.
-4. `RTCPeerConnection` with Google public STUN servers.
-5. Caller `createOffer` → callee `setRemoteDescription` → `createAnswer`.
-6. Trickle ICE exchange; `ontrack` → attach remote stream to a `<video>`.
-7. Render local + remote tiles (2 people).
-8. Clean teardown on leave / renegotiation.
-9. Verify a real 1:1 call across two tabs/devices. → **/journal M2.** *(Use Opus here.)*
+**Outcome:** Two logged-in tabs in the same room negotiate a direct peer-to-peer connection (no media
+server) and see each other's live camera + hear each other's mic. Built by hand to genuinely learn
+`getUserMedia` → `RTCPeerConnection` → SDP offer/answer → trickle ICE. Chat from M1 still works.
+
+**Mental model (read before coding):**
+- `getUserMedia` grabs the local camera/mic as a `MediaStream` (each track added to the peer connection).
+- An `RTCPeerConnection` (PC) is the pipe between two browsers. STUN servers help each side discover its
+  public-facing address for NAT traversal (no media flows through STUN — it's discovery only).
+- **SDP offer/answer** = the two sides exchanging "here's what media/codecs I support." Caller makes an
+  **offer**, callee replies with an **answer**. Each side sets the other's as its *remote description*.
+- **Trickle ICE** = candidates (possible network paths) are discovered async and sent as they appear,
+  rather than waiting. Each side `addIceCandidate`s the other's. Candidates that arrive before the
+  remote description is set must be **buffered**, then flushed.
+- **Who calls whom (no glare):** the **newcomer initiates** offers to everyone already present; existing
+  peers only ever answer. Since one side never offers, there's no offer collision to resolve.
+- Signaling is **socket-addressed**: every WebRTC message carries `to`/`from` *socketId* (a logged-in
+  user can have multiple tabs = multiple peers), kept separate from M1's userId-deduped presence events.
+
+### M2.0 — Signaling design note (do FIRST, no code) ✅
+- [x] Decide events + addressing (above). Newcomer-initiates avoids glare → no perfect-negotiation
+      rollback needed for 1:1. Keep WebRTC events fully separate from M1 chat/presence events.
+
+### M2.1 — Server: WebRTC signaling relay ✅
+- [x] Create `server/src/socket/webrtc.js` with its own ready-tracking
+      (`Map<roomId, Set<socketId>>` + reverse `Map<socketId, roomId>`), and `registerWebrtcHandlers(io, socket)`:
+      - `webrtc-ready(roomId)` → reply to sender `webrtc-peers` = socketIds **already** ready in the
+        room (sender added to the set *after* computing the list, so it never includes self).
+      - `webrtc-offer({ to, description })` → relay to `to` as `webrtc-offer({ from, description })`.
+      - `webrtc-answer({ to, description })` → relay as `webrtc-answer({ from, description })`.
+      - `webrtc-ice-candidate({ to, candidate })` → relay as `webrtc-ice-candidate({ from, candidate })`.
+      - `disconnect` → drop from ready set, broadcast `webrtc-peer-left({ socketId })` to the room
+        (socketId-level, so peers tear down the exact PC — distinct from M1's deduped `user-left`).
+- [x] In `handlers.js`, call `registerWebrtcHandlers(io, socket)` inside the existing `connection` callback.
+
+### M2.2 — Client: ICE config + VideoTile component ✅
+- [x] `client/src/services/webrtc.js` — export `ICE_SERVERS` (Google public STUN:
+      `stun:stun.l.google.com:19302` + a backup) and a `createPeerConnection()` factory.
+- [x] `client/src/components/VideoTile.jsx` — `<video autoPlay playsInline>` that attaches a
+      `MediaStream` via a ref (`el.srcObject = stream`); `muted` prop (local tile muted to avoid echo);
+      shows a name label.
+
+### M2.3 — Client: useWebRTC hook (the orchestration) ✅
+- [x] `client/src/hooks/useWebRTC.js` — `useWebRTC(roomId)` returning `{ localStream, remoteStreams }`
+      (`remoteStreams` keyed by socketId). In one effect:
+      - `getUserMedia({ video, audio })` → set `localStream` (guard against StrictMode double-mount with a
+        `cancelled` flag that stops the orphaned stream).
+      - `createPeer(peerId)`: new PC, add all local tracks, `onicecandidate`→emit `webrtc-ice-candidate`,
+        `ontrack`→store `e.streams[0]` under peerId, cache in a `Map` ref.
+      - `webrtc-peers` → for each peerId: `createOffer`→`setLocalDescription`→emit `webrtc-offer`.
+      - `webrtc-offer` → `createPeer`, `setRemoteDescription`, flush buffered candidates, `createAnswer`→
+        `setLocalDescription`→emit `webrtc-answer`.
+      - `webrtc-answer` → `setRemoteDescription` on that PC, flush buffered candidates.
+      - `webrtc-ice-candidate` → if remoteDescription set `addIceCandidate`, else buffer in a `Map` ref.
+      - `webrtc-peer-left` → close PC, drop from remoteStreams.
+      - After media ready + listeners registered, emit `webrtc-ready(roomId)`.
+      - Cleanup: `socket.off` all WebRTC events, close all PCs, stop local tracks, clear state.
+        (Socket connect/join/disconnect stays owned by RoomPage's existing chat effect.)
+
+### M2.4 — RoomPage: render local + remote tiles alongside chat ✅
+- [x] Call `useWebRTC(roomId)`; restructure body into a flex row: **video area** (grid of VideoTiles —
+      local first, muted; then one per remote stream) + the existing **chat panel** (width ~360, on the
+      right). Header/presence unchanged. Keep it functional — responsive polish + controls are M3.
+
+### M2.5 — Verify & close out
+- [ ] Two tabs (two Google accounts, or two tabs same account), same room URL: grant cam/mic, both see
+      each other's live video + hear audio; chat still works; closing one tab tears down the other's tile
+      cleanly; refresh re-negotiates. Check `chrome://webrtc-internals` if a connection won't establish.
+- [ ] **/journal M2.** *(Opus throughout this milestone.)*
 
 ---
 
 ## Milestone 3 — Pre-call screen + controls polish  *(expand on arrival)*
 
 1. Device enumeration/selection (`enumerateDevices`), preview, name/avatar entry.
-2. Mic toggle + cam toggle (`track.enabled`).
+2. Mic toggle + cam toggle (`track.enabled`). **[partially pulled forward in M2]** — in-call mic/cam
+   toggle buttons + placeholder-avatar tiles + a `webrtc-media-state` signal already shipped (needed to
+   verify M2 audio without echo on a single machine). M3 still owns: device selection, pre-call preview,
+   and acquiring the camera *on* after it was unavailable/off (needs renegotiation).
 3. Lobby page before joining; clean join/leave flow.
 4. Connection-state UI (connecting / connected / failed).
 5. Responsive 1:1 layout, MUI polish. Verify. → **/journal M3.**
@@ -285,4 +347,12 @@ see join/leave presence notifications. No media yet — pure Socket.io learning 
 ## Status log
 
 - **M0** — complete (2026-05-30). M0.6 verified end-to-end; M0.7 skipped /init (CLAUDE.md already complete).
-- **M1** — in progress (2026-05-30). Done: M1.0–M1.5. Next: M1.6 — verify with two browser tabs.
+- **M1** — code complete (2026-05-30). Done: M1.0–M1.5. M1.6 manual two-tab verify is Anuraj's.
+- **M2** — code complete (2026-05-30). Expanded to micro-steps; built M2.0–M2.4 (server signaling
+  relay `webrtc.js`, client `services/webrtc.js` + `VideoTile.jsx` + `hooks/useWebRTC.js`, RoomPage
+  video-grid + chat layout). Client lints clean + builds; server modules import clean.
+- **M2 fixes (2026-05-30, post first test):** single-camera testing exposed that a busy camera made
+  the 2nd tab's `getUserMedia` throw → it dropped out of signaling (perpetual "waiting", no audio).
+  Fixed: acquire audio+video **independently** and never bail; added `webrtc-media-state` signal +
+  placeholder-avatar tiles + mic/cam toggle buttons (M3.2 pulled forward) so audio is testable without
+  echo on one machine. Next: M2.5 — Anuraj re-verifies across two tabs, then **/journal M2**.

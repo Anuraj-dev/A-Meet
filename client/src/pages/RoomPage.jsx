@@ -4,9 +4,18 @@ import {
   Avatar, Box, Chip, Divider, IconButton, InputAdornment,
   Stack, TextField, Tooltip, Typography,
 } from '@mui/material';
-import { ArrowBack as ArrowBackIcon, Send as SendIcon } from '@mui/icons-material';
+import {
+  ArrowBack as ArrowBackIcon,
+  Send as SendIcon,
+  Mic as MicIcon,
+  MicOff as MicOffIcon,
+  Videocam as VideocamIcon,
+  VideocamOff as VideocamOffIcon,
+} from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import socket from '../services/socket';
+import { useWebRTC } from '../hooks/useWebRTC';
+import VideoTile from '../components/VideoTile';
 
 function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -21,6 +30,13 @@ export default function RoomPage() {
   const [users, setUsers] = useState([]);
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
+
+  const {
+    localStream, remoteStreams, peerStates,
+    localVideoOn, localAudioOn, hasCamera, hasMic,
+    toggleVideo, toggleAudio,
+  } = useWebRTC(roomId);
+  const remoteEntries = Object.entries(remoteStreams);
 
   useEffect(() => {
     socket.connect();
@@ -94,8 +110,117 @@ export default function RoomPage() {
         </Stack>
       </Box>
 
-      {/* Message list */}
-      <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1.5 }}>
+      {/* Body: video area + chat panel */}
+      <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        {/* Video area */}
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minWidth: 0,
+            bgcolor: 'background.default',
+          }}
+        >
+          {/* Tile grid */}
+          <Box
+            sx={{
+              flex: 1,
+              p: 2,
+              display: 'grid',
+              gap: 2,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gridAutoRows: '1fr',
+              alignContent: 'center',
+              minHeight: 0,
+            }}
+          >
+            {localStream && (
+              <VideoTile
+                stream={localStream}
+                muted
+                name={`${user?.name ?? 'You'} (You)`}
+                avatar={user?.avatar}
+                videoOn={localVideoOn}
+                audioOn={localAudioOn}
+              />
+            )}
+            {remoteEntries.map(([peerId, stream]) => {
+              const ps = peerStates[peerId];
+              return (
+                <VideoTile
+                  key={peerId}
+                  stream={stream}
+                  name={ps?.name ?? 'Participant'}
+                  avatar={ps?.avatar}
+                  videoOn={ps ? ps.video : stream.getVideoTracks().length > 0}
+                  audioOn={ps ? ps.audio : true}
+                />
+              );
+            })}
+            {remoteEntries.length === 0 && (
+              <Box sx={{ gridColumn: '1 / -1', textAlign: 'center', alignSelf: 'center' }}>
+                <Typography variant="body2" color="text.disabled">
+                  Waiting for someone to join…
+                </Typography>
+              </Box>
+            )}
+          </Box>
+
+          {/* Control bar */}
+          <Stack
+            direction="row"
+            spacing={1.5}
+            justifyContent="center"
+            sx={{ py: 1.5, borderTop: 1, borderColor: 'divider' }}
+          >
+            <Tooltip title={!hasMic ? 'No microphone' : localAudioOn ? 'Mute' : 'Unmute'}>
+              <span>
+                <IconButton
+                  onClick={toggleAudio}
+                  disabled={!hasMic}
+                  sx={{
+                    bgcolor: localAudioOn ? 'action.hover' : 'error.main',
+                    color: localAudioOn ? 'text.primary' : 'error.contrastText',
+                    '&:hover': { bgcolor: localAudioOn ? 'action.selected' : 'error.dark' },
+                  }}
+                >
+                  {localAudioOn ? <MicIcon /> : <MicOffIcon />}
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title={!hasCamera ? 'No camera' : localVideoOn ? 'Turn off camera' : 'Turn on camera'}>
+              <span>
+                <IconButton
+                  onClick={toggleVideo}
+                  disabled={!hasCamera}
+                  sx={{
+                    bgcolor: localVideoOn ? 'action.hover' : 'error.main',
+                    color: localVideoOn ? 'text.primary' : 'error.contrastText',
+                    '&:hover': { bgcolor: localVideoOn ? 'action.selected' : 'error.dark' },
+                  }}
+                >
+                  {localVideoOn ? <VideocamIcon /> : <VideocamOffIcon />}
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+        </Box>
+
+        {/* Chat panel */}
+        <Box
+          sx={{
+            width: 360,
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+            borderLeft: 1,
+            borderColor: 'divider',
+          }}
+        >
+          {/* Message list */}
+          <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1.5 }}>
         {messages.length === 0 && (
           <Box sx={{ textAlign: 'center', mt: 6 }}>
             <Typography variant="body2" color="text.disabled">
@@ -182,6 +307,8 @@ export default function RoomPage() {
             },
           }}
         />
+      </Box>
+        </Box>
       </Box>
     </Box>
   );

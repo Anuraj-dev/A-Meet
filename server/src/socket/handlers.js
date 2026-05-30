@@ -1,7 +1,10 @@
 import { addUser, removeUser, getRoomUsers, isUserInRoom } from './room-manager.js';
+import { registerWebrtcHandlers } from './webrtc.js';
 
 export function registerHandlers(io) {
   io.on('connection', (socket) => {
+    registerWebrtcHandlers(io, socket);
+
     socket.on('join-room', (roomId) => {
       if (!roomId || typeof roomId !== 'string') return;
 
