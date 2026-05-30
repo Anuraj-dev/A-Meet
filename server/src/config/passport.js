@@ -23,7 +23,7 @@ if (env.google.clientId && env.google.clientSecret) {
               email: profile.emails?.[0]?.value || '',
               avatar: profile.photos?.[0]?.value || '',
             },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
+            { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
           );
           return done(null, user);
         } catch (err) {

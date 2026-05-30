@@ -8,7 +8,7 @@ A-Meet — a Google Meet clone built from scratch (MERN + Material UI + Socket.i
 Learning + portfolio project, built in staged milestones (see `plan.md`).
 
 ## Current milestone
-**M0 — Scaffold, Docker DB, Google Auth.**
+**M1 — WebSockets in isolation (Socket.io chat).** M0 complete.
 
 ## Operating ritual (every step)
 1. **Read** relevant context (`plan.md` + the files you'll touch + any unsure library doc) before coding.

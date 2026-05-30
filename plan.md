@@ -143,16 +143,58 @@ routed to a placeholder room page. No WebRTC yet.
 
 ---
 
-## Milestone 1 — WebSockets in isolation (Socket.io chat)  *(expand on arrival)*
+## Milestone 1 — WebSockets in isolation (Socket.io chat)
 
-1. Install `socket.io` (server) + `socket.io-client` (client).
-2. Attach Socket.io to the HTTP server (shared with Express) with matching CORS + credentials.
-3. Socket handshake auth middleware: verify the JWT cookie before allowing connection.
-4. Events: `join-room`, `user-joined`, `chat-message`, `user-left`, `disconnect`; in-memory room
-   participant map.
-5. Client socket service; connect on entering `/room/:id`; emit `join-room`.
-6. Chat UI in RoomPage: live message list + input + presence ("X joined/left").
-7. Verify with two browser tabs. → **/journal M1.**
+**Outcome:** Two logged-in browser tabs join the same room, send chat messages in real time, and
+see join/leave presence notifications. No media yet — pure Socket.io learning milestone.
+
+### M1.0 — Install packages
+- [x] `cd server && npm i socket.io`
+- [x] `cd client && npm i socket.io-client`
+
+### M1.1 — Attach Socket.io to the HTTP server
+- [x] In `server/src/server.js`, wrap the Express app in `http.createServer(app)` and pass it
+      to `new Server(httpServer, { cors: { origin: process.env.CLIENT_URL, credentials: true } })`.
+- [x] Export `io` from a module (`server/src/socket/io.js`) so other files can import it without
+      circular deps. Update `server.js` to import and initialise from that module.
+- [x] `httpServer.listen(PORT)` instead of `app.listen(PORT)`.
+
+### M1.2 — Socket auth middleware
+- [x] Create `server/src/middleware/socket-auth.js`: parse `socket.handshake.headers.cookie`
+      with the `cookie` npm module (already a transitive dep), extract the JWT cookie by name,
+      `jwt.verify` it, attach `socket.user = payload`; call `next()` on success,
+      `next(new Error('unauthorized'))` on failure.
+- [x] Register: `io.use(socketAuth)` before any `io.on('connection', …)`.
+
+### M1.3 — In-memory room map + server-side event handlers
+- [x] Create `server/src/socket/room-manager.js`: export a `Map<roomId, Map<socketId, user>>`.
+      Helpers: `addUser(roomId, socketId, user)`, `removeUser(socketId)`,
+      `getRoomUsers(roomId)`, `getUserRoom(socketId)`.
+- [x] Create `server/src/socket/handlers.js` and register it via `io.on('connection', …)`:
+      - `join-room(roomId)` → add to map, emit `room-users` to sender, broadcast `user-joined`
+        to room.
+      - `chat-message({ roomId, text })` → broadcast `chat-message` to room (with sender info).
+      - `disconnect` → look up user's room, remove from map, broadcast `user-left` to room.
+
+### M1.4 — Client socket service
+- [x] Create `client/src/services/socket.js`: create & export one `io(import.meta.env.VITE_SERVER_URL, { withCredentials: true })` instance (lazy-connect).
+- [x] Add `VITE_SERVER_URL=http://localhost:5000` to `client/.env` (and `.env.example`).
+- [x] In `RoomPage.jsx` `useEffect`: `socket.emit('join-room', roomId)` on mount;
+      return cleanup that calls `socket.disconnect()`.
+
+### M1.5 — Chat UI in RoomPage
+- [x] Add state: `messages` (array of `{ type: 'chat'|'event', sender, text, ts }`), `input` string,
+      `users` (online list).
+- [x] Socket listeners in the same `useEffect`: `chat-message` → append to messages;
+      `user-joined` / `user-left` → append event entry + update users list; `room-users` → seed list.
+- [x] Render with MUI: scrollable `Box` for the message list (auto-scroll to bottom via `useRef`);
+      `TextField` + `IconButton` (Send) pinned at the bottom; a compact user-presence chip row at the top.
+      Keep it simple — no drawer, no sidebar — everything inline in RoomPage for now.
+
+### M1.6 — Verify & close out
+- [ ] Two browser tabs (or incognito), same Google account or two accounts, same room URL.
+      Messages appear in both tabs; join/leave toasts/events show; refresh reconnects cleanly.
+- [ ] **/journal M1.**
 
 > **Why first:** builds the persistent-connection mental model you'll reuse for ALL signaling, with
 > zero media complexity.
@@ -242,4 +284,5 @@ routed to a placeholder room page. No WebRTC yet.
 
 ## Status log
 
-- **M0** — in progress (started 2026-05-30). Done: M0.0–M0.5. Next: M0.6 — Anuraj pastes Google OAuth credentials into server/.env, then end-to-end test.
+- **M0** — complete (2026-05-30). M0.6 verified end-to-end; M0.7 skipped /init (CLAUDE.md already complete).
+- **M1** — in progress (2026-05-30). Done: M1.0–M1.5. Next: M1.6 — verify with two browser tabs.

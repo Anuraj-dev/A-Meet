@@ -37,7 +37,7 @@ export default function LandingPage() {
           A-Meet
         </Typography>
         {user && (
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
             <Avatar src={user.avatar} alt={user.name} sx={{ width: 34, height: 34 }} />
             <Typography variant="body2" color="text.secondary">{user.name}</Typography>
             <Button size="small" onClick={logout} color="inherit">Sign out</Button>
@@ -47,8 +47,8 @@ export default function LandingPage() {
 
       {/* Main */}
       <Container maxWidth="sm" sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Stack spacing={4} alignItems="center" sx={{ width: '100%' }}>
-          <Stack spacing={1} alignItems="center">
+        <Stack spacing={4} sx={{ alignItems: 'center', width: '100%' }}>
+          <Stack spacing={1} sx={{ alignItems: 'center' }}>
             <Typography variant="h4" fontWeight={700}>
               Video calls for everyone
             </Typography>
@@ -86,14 +86,16 @@ export default function LandingPage() {
                   placeholder="Enter a code (e.g. abc-defg-hij)"
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value)}
-                  InputProps={{
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <Button type="submit" disabled={!joinCode.trim()}>
-                          Join
-                        </Button>
-                      </InputAdornment>
-                    ),
+                  slotProps={{
+                    input: {
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Button type="submit" disabled={!joinCode.trim()}>
+                            Join
+                          </Button>
+                        </InputAdornment>
+                      ),
+                    },
                   }}
                 />
               </Box>
