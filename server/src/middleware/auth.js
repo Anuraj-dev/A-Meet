@@ -28,11 +28,14 @@ export function signToken(user) {
 }
 
 // Shared cookie options for setting/clearing the auth cookie.
+// In production the React app (Vercel) and API (EC2) are on different origins,
+// so we need sameSite:'none' + secure:true so the browser sends the cookie on
+// cross-site fetch requests. In dev sameSite:'lax' is fine (both localhost).
 export function cookieOptions() {
   return {
     httpOnly: true,
-    secure: env.isProd, // HTTPS-only in production
-    sameSite: 'lax',
+    secure: env.isProd,
+    sameSite: env.isProd ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
   };

@@ -11,6 +11,7 @@ import {
   getOrCreateRoom, getRoom, addPeer, getPeer,
   listOtherProducers, removePeer, closeRoomIfEmpty,
 } from '../sfu/sfu-rooms.js';
+import { Room } from '../models/Room.js';
 
 // socketId → roomId, established on get-rtp-capabilities. SFU-scoped (independent
 // of M1's room-manager) and set before any transport work, so it never races
@@ -227,6 +228,19 @@ export function registerSfuHandlers(io, socket) {
     const roomId = socketRoom.get(socket.id);
     if (!roomId || typeof emoji !== 'string') return;
     io.in(roomId).emit('sfu-reaction', { emoji, socketId: socket.id });
+  });
+
+  // 13) Host ends the meeting for everyone: verify the caller is the room host,
+  //     notify all peers, then mark the Room inactive in the DB.
+  socket.on('sfu-end-meeting', async () => {
+    const roomId = socketRoom.get(socket.id);
+    if (!roomId) return;
+    try {
+      const room = await Room.findOne({ roomId });
+      if (!room || room.host.toString() !== socket.user?.id) return;
+      io.to(roomId).emit('sfu-meeting-ended');
+      await Room.updateOne({ roomId }, { $set: { active: false } });
+    } catch { /* ignore */ }
   });
 
   // 12) Teardown: closing the peer's transports cascades to its producers and

@@ -611,34 +611,384 @@ the M4 SFU swap unchanged. M5 adds a toggle button (show/hide the panel); no new
       Store as `room.audioLevelObserver`. On `volumes` event: broadcast `sfu-active-speaker
       { socketId: volumes[0].producer.appData.socketId }` to the room via `io`. On `silence`:
       broadcast `sfu-active-speaker { socketId: null }`. (Requires `io` passed into `getOrCreateRoom`.)
-- [ ] `server/src/socket/sfu-handlers.js` — in `sfu-produce` handler, when `kind === 'audio'`:
+- [x] `server/src/socket/sfu-handlers.js` — in `sfu-produce` handler, when `kind === 'audio'`:
       call `room.audioLevelObserver?.addProducer(producer)`. Also pass `appData` enriched with
       `socketId: socket.id` when creating the audio producer so the observer callback can map it.
-- [ ] `client/src/hooks/useMediasoup.js`: listen `sfu-active-speaker { socketId }` →
+- [x] `client/src/hooks/useMediasoup.js`: listen `sfu-active-speaker { socketId }` →
       set `activeSpeaker` state. Export `activeSpeaker`.
-- [ ] `client/src/components/VideoTile.jsx`: `activeSpeaker` prop → `box-shadow:
+- [x] `client/src/components/VideoTile.jsx`: `activeSpeaker` prop → `box-shadow:
       '0 0 0 3px #00c853'` pulsing border (CSS animation or just static green ring).
-- [ ] `client/src/pages/RoomPage.jsx`: pass `activeSpeaker={activeSpeaker === peerId}` to tiles.
+- [x] `client/src/pages/RoomPage.jsx`: pass `activeSpeaker={activeSpeaker === peerId}` to tiles.
 
 ### M5.8 — Verify & close out  *(Anuraj — manual, needs 3 tabs + camera/mic)*
 - [x] Screen share: tab A shares → tabs B+C see pinned screen tile + right-rail thumbnails;
       tab A shows "You are presenting"; tab A stops → layout reverts to grid.
 - [x] Chat toggle: hide/show panel; unread badge increments while hidden; messages still send.
-- [x] Reactions: click 👍 → emoji appears over sender's tile in all tabs, fades after 3 s.
+- [x] Reactions: click 👍 → emoji appears over sender's tile in all tabs, fades after 3s.
 - [x] Raise hand: ✋ badge on tile; toggle clears it; visible across tabs.
 - [x] Tick all M5 checkboxes. **/journal M5.**
 
 ---
 
-## Milestone 6 — Polish, TURN, security, deploy (+ CI/CD)  *(expand on arrival)*
+## Milestone 6 — Polish, TURN, security, deploy (+ CI/CD)  *(expanded 2026-05-30)*
 
-1. `coturn` TURN server (Docker) for NAT traversal.
-2. Reconnection handling (socket + transport recovery).
-3. Adaptive layout, end/leave states, error boundaries.
-4. `/security-review` then fix; `/code-review` pass.
-5. Production builds; env hardening.
-6. Deploy: client (static host) + server/mediasoup (VPS/container, UDP ports open).
-7. CI/CD pipeline. → **/journal M6.**
+**Outcome:** A-Meet runs in production on AWS, reachable over HTTPS with a real domain, Google
+OAuth working, TURN relay so NAT-blocked peers connect, CI/CD auto-deploys on push to `main`.
+
+**Production architecture (single-EC2, simplest viable):**
+```
+Browser ──HTTPS──► nginx (EC2 public IP / domain)
+                       ├─ static files  → /var/www/ameet  (React build)
+                       ├─ /api/*        → localhost:5000   (Express)
+                       └─ /socket.io/*  → localhost:5000   (Socket.io WS upgrade)
+                  PM2 keeps Node/mediasoup alive
+                  coturn (Docker) on same EC2 for TURN relay
+                  MongoDB Atlas free tier (managed, no EC2 complexity)
+```
+**Why single EC2, not S3+CloudFront+ALB:** mediasoup requires UDP directly to the server IP
+(ALBs don't support UDP). Keeping it simple on one EC2 avoids that complexity for a portfolio project.
+
+**Minimum EC2 spec:** `t3.medium` (2 vCPU, 4 GB RAM). mediasoup spawns one C++ worker per core
+and is CPU-intensive — `t3.micro` will lag under load.
+
+**Ports to open in AWS Security Group:**
+- 22 TCP  — SSH (your IP only)
+- 80 TCP  — HTTP (→ nginx, redirects to HTTPS)
+- 443 TCP — HTTPS (nginx)
+- 3478 TCP+UDP — TURN (coturn)
+- 40000–40100 UDP — mediasoup RTP media (must match `MEDIASOUP_MIN/MAX_PORT` env)
+
+**Domain requirement:** `getUserMedia` only works on HTTPS (browsers block it on plain HTTP).
+You need a domain + TLS cert. Options: buy a cheap `.xyz` (~$1/yr on Namecheap) or use a free
+subdomain service. Cert = Let's Encrypt / `certbot` (free, auto-renews).
+
+---
+
+### M6.0 — AWS account + EC2 setup  *(Anuraj — console steps, no code)*
+- [ ] **Create AWS account** at aws.amazon.com → root email + credit card. Enable MFA on root.
+- [ ] **Create an IAM user** (don't use root for daily work):
+      IAM → Users → Create user → name `ameet-admin` → Attach policy `AdministratorAccess`
+      → Security credentials tab → Create access key (CLI) → save the key pair.
+- [ ] **Launch EC2 instance:**
+      EC2 → Launch instance → name `ameet-server` → Ubuntu 22.04 LTS 64-bit →
+      instance type `t3.medium` → create a key pair (`.pem`), save it, `chmod 400 ameet.pem` →
+      Network settings: create a new security group, open ports per the list above → Launch.
+- [ ] **Allocate an Elastic IP** (so the IP doesn't change on stop/start):
+      EC2 → Elastic IPs → Allocate → Associate → select your instance.
+- [ ] **Get a domain** (Namecheap / Google Domains / Route 53 — your choice). Point its
+      **A record** to your Elastic IP. TTL can be 300s; propagation takes a few minutes.
+- [ ] **SSH into the instance:**
+      ```
+      ssh -i ameet.pem ubuntu@<elastic-ip>
+      ```
+      Then update the system:
+      ```
+      sudo apt update && sudo apt upgrade -y
+      ```
+- [ ] **Install Node.js 22 (nvm):**
+      ```
+      curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+      source ~/.bashrc
+      nvm install 22 && nvm use 22 && nvm alias default 22
+      node -v   # should say v22.x.x
+      ```
+- [ ] **Install Docker + Docker Compose:**
+      ```
+      sudo apt install -y docker.io docker-compose-plugin
+      sudo usermod -aG docker $USER   # then log out + back in
+      ```
+- [ ] **Install PM2, nginx, certbot:**
+      ```
+      npm install -g pm2
+      sudo apt install -y nginx certbot python3-certbot-nginx
+      ```
+- [ ] Tick this step.
+
+### M6.1 — MongoDB Atlas (managed DB)  *(Anuraj — console steps)*
+- [ ] Go to mongodb.com/atlas → Sign up → Create free cluster (`M0 Shared`, region nearest your EC2).
+- [ ] Database Access → Add database user → username `ameet` → auto-generate password (save it).
+- [ ] Network Access → Add IP address → add your EC2 Elastic IP (and your local IP for dev if needed).
+- [ ] Clusters → Connect → Drivers → Node.js → copy the connection string.
+      Replace `<password>` with your user password; replace `myFirstDatabase` with `ameet`.
+      Example: `mongodb+srv://ameet:<pw>@cluster0.xxxxx.mongodb.net/ameet?retryWrites=true&w=majority`
+- [ ] Paste the Atlas URI into the prod `.env` as `MONGO_URI` (set in M6.7). Tick this step.
+
+### M6.2 — coturn TURN server (Docker on EC2)
+- [x] Create `docker-compose.coturn.yml` at repo root (separate from the dev compose so it doesn't
+      pollute local dev):
+      ```yaml
+      services:
+        coturn:
+          image: coturn/coturn:latest
+          restart: unless-stopped
+          network_mode: host
+          volumes:
+            - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      ```
+- [x] Create `coturn/turnserver.conf`:
+      ```
+      listening-port=3478
+      tls-listening-port=5349
+      realm=<your-domain>
+      server-name=<your-domain>
+      lt-cred-mech
+      user=ameet:<TURN_SECRET>
+      fingerprint
+      no-multicast-peers
+      denied-peer-ip=0.0.0.0-0.255.255.255
+      denied-peer-ip=10.0.0.0-10.255.255.255
+      denied-peer-ip=172.16.0.0-172.31.255.255
+      denied-peer-ip=192.168.0.0-192.168.255.255
+      log-file=/var/log/coturn.log
+      ```
+- [x] Add `TURN_SECRET`, `TURN_USERNAME=ameet`, `TURN_DOMAIN` to `.env.example`.
+- [x] `client/src/services/webrtc.js` — update `ICE_SERVERS` export to include the TURN server:
+      ```js
+      export const ICE_SERVERS = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        {
+          urls: `turn:${import.meta.env.VITE_TURN_DOMAIN}:3478`,
+          username: import.meta.env.VITE_TURN_USERNAME,
+          credential: import.meta.env.VITE_TURN_SECRET,
+        },
+      ];
+      ```
+      Add `VITE_TURN_DOMAIN`, `VITE_TURN_USERNAME`, `VITE_TURN_SECRET` to `client/.env.example`.
+- [x] Tick this step.
+
+### M6.3 — Reconnection handling (socket + mediasoup transport recovery)
+- [x] **Socket auto-reconnect** — Socket.io client already reconnects automatically. The gap is
+      that `useMediasoup` never re-runs its setup effect after a reconnect. Fix:
+      `client/src/hooks/useMediasoup.js` — in the setup effect, listen for `socket.on('connect')`
+      (fires on reconnect too); if transports are already closed, re-run the full init sequence.
+      Guard with a `reconnecting` ref to prevent double-init.
+- [x] **"Reconnecting…" UI state** — export `socketConnected` (boolean) from `useMediasoup`
+      (derived from `socket.connected`, updated via `connect`/`disconnect` events).
+      `RoomPage.jsx` — if `!socketConnected`, show a full-width `Alert severity="warning"` banner
+      "Reconnecting…" above the video grid (non-blocking, doesn't unmount tiles).
+- [x] **Stale peer cleanup on reconnect** — on `connect` event in `useMediasoup`, emit
+      `sfu-get-producers` again (already implemented) so any new producers from peers who joined
+      during the disconnection are consumed.
+- [x] Tick this step.
+
+### M6.4 — Adaptive layout + error boundaries + leave polish
+- [x] **React error boundary** — create `client/src/components/ErrorBoundary.jsx` (class component,
+      MUI `Paper` fallback with "Something went wrong" + Reload button). Wrap `<RoomPage>` and
+      `<LobbyPage>` in `App.jsx`.
+- [x] **Camera/mic permission denied state** — in `useMediasoup.js` and `useLobbyMedia.js`, catch
+      `NotAllowedError` from `getUserMedia` → set a `permissionDenied` flag → export it.
+      `LobbyPage.jsx` / `RoomPage.jsx` — show an `Alert` "Camera/mic access denied. Check your
+      browser permissions." instead of a blank tile.
+- [x] **VideoTile 16:9 aspect ratio** — fix the deferred M3 note: wrap the `<video>` in a container
+      with `paddingTop: '56.25%'` (the `position: absolute / relative` trick) and switch remote
+      tiles to `objectFit: cover`. Local self-view (PiP) keeps `contain`.
+- [x] **Full-bleed off-camera tile color** — fix the deferred M4 note: when `!stream` or camera is
+      off on a remote tile, fill with a per-participant background color derived from
+      `name.charCodeAt(0) % colors.length` (a fixed palette of 8–10 Meet-like colors).
+- [x] **Leave / End meeting states** — when the host navigates to `/` via "End call", emit a
+      `sfu-end-meeting` event (server broadcasts `sfu-meeting-ended` to all remaining peers);
+      non-hosts receive it and are redirected to `/` with a "Meeting ended" snackbar.
+      Server handler: in `sfu-handlers.js`, `sfu-end-meeting` → verify `socket.id` is room host
+      (check Mongo Room doc) → `io.to(roomId).emit('sfu-meeting-ended')` → close the room.
+- [x] Tick this step.
+
+### M6.5 — Security review + hardening
+- [ ] Run `/security-review` on the current branch. Fix every finding before deploying.
+- [x] Install `helmet` (server): `cd server && npm i helmet`. Add `app.use(helmet())` in `app.js`
+      **before** all routes.
+- [x] Rate limiting: `cd server && npm i express-rate-limit`. Apply to auth routes (10 req/min)
+      and room creation (30 req/min).
+- [x] Cookie hardening: in `auth.controller.js`, set cookie options `secure: true, sameSite: 'none'`
+      in production (`process.env.NODE_ENV === 'production'`). Keep `httpOnly: true` always.
+- [x] CORS hardening: `app.js` — change `origin` to the exact prod domain in production
+      (read from `CLIENT_URL` env, already done) and add `allowedHeaders: ['Content-Type']`.
+- [x] Remove all `console.log` debug output from SFU handlers + useMediasoup (or guard with
+      `if (process.env.NODE_ENV !== 'production')`).
+- [ ] Run `/code-review` on M5+M6 diff. Fix all high-confidence findings.
+- [ ] Tick this step.
+
+### M6.6 — Production build config (nginx + PM2)
+- [x] **Vite build check:** `cd client && npm run build` — verify `dist/` is clean, no TS/lint errors.
+- [x] **nginx config** — create `deploy/nginx.conf` (committed to repo, copied to EC2):
+      ```nginx
+      server {
+          listen 80;
+          server_name <your-domain>;
+          return 301 https://$host$request_uri;
+      }
+      server {
+          listen 443 ssl;
+          server_name <your-domain>;
+          ssl_certificate /etc/letsencrypt/live/<your-domain>/fullchain.pem;
+          ssl_certificate_key /etc/letsencrypt/live/<your-domain>/privkey.pem;
+
+          root /var/www/ameet;
+          index index.html;
+
+          location /api/ {
+              proxy_pass http://localhost:5000;
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+          }
+          location /socket.io/ {
+              proxy_pass http://localhost:5000;
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+              proxy_set_header Host $host;
+          }
+          location / {
+              try_files $uri $uri/ /index.html;
+          }
+      }
+      ```
+- [x] **PM2 ecosystem file** — create `deploy/ecosystem.config.cjs`:
+      ```js
+      module.exports = {
+        apps: [{
+          name: 'ameet-server',
+          script: 'src/server.js',
+          cwd: '/home/ubuntu/ameet/server',
+          instances: 1,
+          env_production: {
+            NODE_ENV: 'production',
+            PORT: 5000,
+          },
+        }],
+      };
+      ```
+- [x] Tick this step.
+
+### M6.7a — Deploy frontend to Vercel  *(Anuraj — Vercel dashboard)*
+**Architecture:** React app → Vercel CDN · API + SFU → EC2 · DB → Atlas.
+Vercel handles SSL, CDN, and auto-deploys on every `git push main`.
+
+- [ ] Go to vercel.com → Sign up / log in with GitHub.
+- [ ] New Project → Import `Anuraj-dev/A-Meet` from GitHub.
+- [ ] **Configure build settings:**
+      - Root Directory: `client`
+      - Framework Preset: Vite (auto-detected)
+      - Build Command: `npm run build` (default)
+      - Output Directory: `dist` (default)
+- [ ] **Environment variables** (Vercel project Settings → Environment Variables):
+      ```
+      VITE_SERVER_URL    = https://api.<your-domain>
+      VITE_TURN_DOMAIN   = <your-domain>
+      VITE_TURN_USERNAME = ameet
+      VITE_TURN_SECRET   = <same TURN_SECRET as server/.env>
+      ```
+- [ ] Deploy → Vercel gives you a URL like `https://a-meet-xxx.vercel.app`.
+- [ ] (Optional) Add a custom domain in Vercel: `yourdomain.com` → your Vercel project.
+      Add Vercel's nameserver or CNAME record in your registrar.
+- [ ] Note the final Vercel URL — you'll need it in M6.7b as `CLIENT_URL`.
+- [ ] Tick this step.
+
+### M6.7b — Deploy backend to EC2  *(Anuraj — SSH steps)*
+- [ ] **Clone repo on EC2:**
+      ```
+      cd ~
+      git clone https://github.com/Anuraj-dev/A-Meet.git ameet
+      cd ameet
+      ```
+- [ ] **Install server deps (production only):**
+      ```
+      cd server && npm ci --omit=dev && cd ..
+      ```
+- [ ] **Create `server/.env` on EC2:**
+      ```
+      NODE_ENV=production
+      PORT=5000
+      MONGO_URI=<Atlas URI from M6.1>
+      GOOGLE_CLIENT_ID=<from Google Cloud>
+      GOOGLE_CLIENT_SECRET=<from Google Cloud>
+      JWT_SECRET=<openssl rand -hex 32>
+      CLIENT_URL=https://<your-vercel-or-custom-domain>
+      SERVER_URL=https://api.<your-domain>
+      MEDIASOUP_ANNOUNCED_IP=<EC2 Elastic IP>
+      MEDIASOUP_MIN_PORT=40000
+      MEDIASOUP_MAX_PORT=40100
+      MEDIASOUP_NUM_WORKERS=2
+      TURN_SECRET=<same TURN_SECRET as Vercel env>
+      TURN_USERNAME=ameet
+      TURN_DOMAIN=<your-domain>
+      ```
+      `CLIENT_URL` must match the Vercel URL exactly — it's used for CORS + OAuth redirect.
+- [ ] **DNS:** add an A record `api.<your-domain>` → EC2 Elastic IP.
+- [ ] **nginx config + SSL cert** (backend-only — no static files, Vercel handles those):
+      ```
+      sudo cp deploy/nginx.conf /etc/nginx/sites-available/ameet
+      # Edit it: replace API_DOMAIN with api.<your-domain>
+      sudo sed -i 's/API_DOMAIN/api.<your-domain>/g' /etc/nginx/sites-available/ameet
+      sudo ln -s /etc/nginx/sites-available/ameet /etc/nginx/sites-enabled/ameet
+      sudo rm -f /etc/nginx/sites-enabled/default
+      sudo nginx -t && sudo systemctl reload nginx
+      sudo certbot --nginx -d api.<your-domain>
+      sudo systemctl reload nginx
+      ```
+- [ ] **Start coturn:**
+      ```
+      docker compose -f docker-compose.coturn.yml up -d
+      ```
+      Edit `coturn/turnserver.conf` first: replace `YOUR_DOMAIN` + `TURN_SECRET_PLACEHOLDER`.
+- [ ] **Start Node server with PM2:**
+      ```
+      pm2 start deploy/ecosystem.config.cjs --env production
+      pm2 save && pm2 startup   # run the printed command
+      ```
+- [ ] Verify: `pm2 logs ameet-server` — should see "DB connected", "Workers ready", "Server :5000".
+- [ ] Tick this step.
+
+### M6.8 — Google OAuth production credentials  *(Anuraj — Google Cloud Console)*
+- [ ] Google Cloud Console → APIs & Services → Credentials → your OAuth client.
+- [ ] Add to **Authorized JavaScript origins:** `https://<your-domain>`.
+- [ ] Add to **Authorized redirect URIs:** `https://<your-domain>/api/auth/google/callback`.
+- [ ] Save. (Changes take effect within a few minutes.)
+- [ ] Tick this step.
+
+### M6.9 — CI/CD
+**Frontend (Vercel):** zero config. Vercel auto-deploys from GitHub on every push to `main`.
+Nothing to set up here.
+
+**Backend (EC2) — GitHub Actions:**
+- [ ] Create `.github/workflows/deploy-backend.yml`:
+      ```yaml
+      name: Deploy backend
+      on:
+        push:
+          branches: [main]
+          paths:
+            - 'server/**'
+            - 'deploy/**'
+      jobs:
+        deploy:
+          runs-on: ubuntu-latest
+          steps:
+            - name: Deploy server to EC2
+              uses: appleboy/ssh-action@v1
+              with:
+                host: ${{ secrets.EC2_HOST }}
+                username: ubuntu
+                key: ${{ secrets.EC2_SSH_KEY }}
+                script: |
+                  cd ~/ameet
+                  git pull origin main
+                  cd server && npm ci --omit=dev
+                  pm2 restart ameet-server
+      ```
+      This only triggers when server-side files change (frontend deploys via Vercel).
+- [ ] GitHub → repo Settings → Secrets → add:
+      `EC2_HOST` (Elastic IP), `EC2_SSH_KEY` (contents of `ameet.pem`).
+- [ ] Push to `main` → Actions tab → deploy-backend job passes.
+- [ ] Tick this step.
+
+### M6.10 — Verify & close out  *(Anuraj — manual production test)*
+- [ ] Open `https://<your-domain>` → Google login works → new meeting → lobby → join.
+- [ ] Two devices (phone + laptop) on different networks → both connect → TURN relay confirms
+      (check coturn logs: `sudo docker compose -f docker-compose.coturn.yml logs -f coturn`).
+- [ ] Screen share, reactions, raise hand all work in production.
+- [ ] CI/CD: make a trivial commit to `main` → Actions deploys → change appears live.
+- [ ] Tick all M6 checkboxes. **/journal M6.**
 
 ---
 
@@ -687,6 +1037,15 @@ the M4 SFU swap unchanged. M5 adds a toggle button (show/hide the panel); no new
   `RoomPage` gains presentation layout (screen pinned + right-rail thumbnails), chat toggle with
   unread badge, emoji reaction popover, raise-hand button. All client builds clean.
   **M5.8 verified by Anuraj 2026-05-30** — screen share, 3-tab call, all features confirmed.
+- **M6** — code-complete M6.2–M6.6 (2026-05-30): coturn Docker config + `ICE_SERVERS` TURN support;
+  `useMediasoup` refactored with reconnection (`setupSfu` split out, `onSocketConnect` re-runs SFU
+  signaling after disconnect, `socketConnected` + `permissionDenied` exported); `VideoTile` gains
+  `objectFit` prop + per-participant off-camera color; grid tiles get `aspectRatio: 16/9` wrappers +
+  local tile uses `contain`; `ErrorBoundary` class component wrapping Lobby+Room; `sfu-end-meeting`
+  server handler (host-verified, marks Room inactive, emits `sfu-meeting-ended`); `helmet` + `express-rate-limit`
+  added to server; `deploy/nginx.conf` + `deploy/ecosystem.config.cjs` committed. Client builds clean.
+  **Remaining for Anuraj:** M6.0 AWS setup, M6.1 Atlas, M6.5 `/security-review`, M6.7 deploy,
+  M6.8 Google OAuth prod creds, M6.9 CI/CD, M6.10 verify.
 - **M4** — code complete (2026-05-30). Mesh→SFU. Expanded M4 to micro-steps (M4.0–M4.9). Stack:
   **mediasoup 3.20.0** (server) + **mediasoup-client 3.20.0** (client), Node v22.22.2. Built:
   server `sfu/{config,workers,sfu-rooms}.js` + `socket/sfu-handlers.js` (ack-based signaling:

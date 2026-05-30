@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Avatar, Badge, Box, Chip, Divider, IconButton, InputAdornment,
-  Popover, Stack, TextField, Tooltip, Typography,
+  Alert, Avatar, Badge, Box, Chip, Divider, IconButton, InputAdornment,
+  Popover, Snackbar, Stack, TextField, Tooltip, Typography,
 } from '@mui/material';
 import {
   CallEnd as CallEndIcon,
@@ -39,8 +39,9 @@ export default function RoomPage() {
   const [input, setInput] = useState('');
   const [showChat, setShowChat] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [activeReactions, setActiveReactions] = useState({}); // socketId → emoji
+  const [activeReactions, setActiveReactions] = useState({});
   const [reactionAnchor, setReactionAnchor] = useState(null);
+  const [meetingEndedSnack, setMeetingEndedSnack] = useState(false);
   const bottomRef = useRef(null);
   const reactionTimers = useRef({});
 
@@ -57,7 +58,7 @@ export default function RoomPage() {
     toggleVideo, toggleAudio,
     isScreenSharing, localScreenStream, shareScreen, stopScreenShare,
     handRaised, toggleHand,
-    activeSpeaker,
+    activeSpeaker, socketConnected, permissionDenied,
   } = useMediasoup(roomId, devices);
 
   const remoteEntries = Object.entries(remoteStreams);
@@ -92,6 +93,10 @@ export default function RoomPage() {
       setMessages((prev) => [...prev, { type: 'chat', ...msg }]);
       setUnreadCount((n) => n + 1);
     });
+    socket.on('sfu-meeting-ended', () => {
+      setMeetingEndedSnack(true);
+      setTimeout(() => navigate('/'), 2500);
+    });
     socket.on('sfu-reaction', ({ emoji, socketId }) => {
       setActiveReactions((prev) => ({ ...prev, [socketId]: emoji }));
       clearTimeout(reactionTimers.current[socketId]);
@@ -107,6 +112,7 @@ export default function RoomPage() {
       socket.off('user-joined');
       socket.off('user-left');
       socket.off('chat-message');
+      socket.off('sfu-meeting-ended');
       socket.off('sfu-reaction');
       socket.disconnect();
     };
@@ -274,47 +280,49 @@ export default function RoomPage() {
   // Grid layout (0 or 2+ peers, no screen share)
   function renderGridLayout() {
     return (
-      <Box sx={{ flex: 1, position: 'relative', minHeight: 0, p: 2 }}>
+      <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
         <Box
           sx={{
-            height: '100%',
             display: 'grid',
             gap: 2,
             gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gridAutoRows: '1fr',
-            alignContent: 'center',
+            alignContent: 'start',
           }}
         >
           {localStream && (
-            <VideoTile
-              stream={localStream}
-              muted
-              name={`${user?.name ?? 'You'} (You)`}
-              avatar={user?.avatar}
-              videoOn={localVideoOn}
-              audioOn={localAudioOn}
-              activeReaction={activeReactions[socket.id]}
-            />
+            <Box sx={{ aspectRatio: '16/9', borderRadius: 2, overflow: 'hidden' }}>
+              <VideoTile
+                stream={localStream}
+                muted
+                name={`${user?.name ?? 'You'} (You)`}
+                avatar={user?.avatar}
+                videoOn={localVideoOn}
+                audioOn={localAudioOn}
+                objectFit="contain"
+                activeReaction={activeReactions[socket.id]}
+              />
+            </Box>
           )}
           {remoteEntries.map(([peerId, stream]) => {
             const ps = peerStates[peerId];
             return (
-              <VideoTile
-                key={peerId}
-                stream={stream}
-                name={ps?.name ?? 'Participant'}
-                avatar={ps?.avatar}
-                videoOn={ps ? ps.video : stream.getVideoTracks().length > 0}
-                audioOn={ps ? ps.audio : true}
-                connectionState={peerConnectionStates[peerId]}
-                handRaised={ps?.handRaised ?? false}
-                activeReaction={activeReactions[peerId]}
-                activeSpeaker={activeSpeaker === peerId}
-              />
+              <Box key={peerId} sx={{ aspectRatio: '16/9', borderRadius: 2, overflow: 'hidden' }}>
+                <VideoTile
+                  stream={stream}
+                  name={ps?.name ?? 'Participant'}
+                  avatar={ps?.avatar}
+                  videoOn={ps ? ps.video : stream.getVideoTracks().length > 0}
+                  audioOn={ps ? ps.audio : true}
+                  connectionState={peerConnectionStates[peerId]}
+                  handRaised={ps?.handRaised ?? false}
+                  activeReaction={activeReactions[peerId]}
+                  activeSpeaker={activeSpeaker === peerId}
+                />
+              </Box>
             );
           })}
           {remoteEntries.length === 0 && (
-            <Box sx={{ gridColumn: '1 / -1', textAlign: 'center', alignSelf: 'center' }}>
+            <Box sx={{ gridColumn: '1 / -1', textAlign: 'center', py: 8 }}>
               <Typography variant="body2" color="text.disabled">
                 Waiting for someone to join…
               </Typography>
@@ -327,6 +335,20 @@ export default function RoomPage() {
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
+      {/* Reconnection banner */}
+      {!socketConnected && (
+        <Alert severity="warning" sx={{ borderRadius: 0, py: 0.5 }}>
+          Connection lost — reconnecting…
+        </Alert>
+      )}
+
+      {/* Camera/mic permission denied */}
+      {permissionDenied && (
+        <Alert severity="error" sx={{ borderRadius: 0, py: 0.5 }}>
+          Camera and microphone access denied. Check your browser permissions and reload.
+        </Alert>
+      )}
+
       {/* Header */}
       <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: 1, borderColor: 'divider' }}>
         <Box sx={{ flex: 1 }}>
@@ -447,7 +469,10 @@ export default function RoomPage() {
 
             <Tooltip title="Leave call">
               <IconButton
-                onClick={() => navigate('/')}
+                onClick={() => {
+                  socket.emit('sfu-end-meeting');
+                  navigate('/');
+                }}
                 sx={{
                   bgcolor: 'error.main',
                   color: 'error.contrastText',
@@ -566,6 +591,16 @@ export default function RoomPage() {
           </Box>
         )}
       </Box>
+
+      {/* Meeting ended snackbar */}
+      <Snackbar
+        open={meetingEndedSnack}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="info" sx={{ width: '100%' }}>
+          The meeting has been ended by the host.
+        </Alert>
+      </Snackbar>
 
       {/* Emoji reaction picker */}
       <Popover
