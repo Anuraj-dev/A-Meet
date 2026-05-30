@@ -18,10 +18,15 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 25m
           script: |
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             cd ~/ameet
+            PREV=$(git rev-parse HEAD)
             git pull origin main
-            cd server && npm ci --omit=dev
+            cd server
+            if git diff --name-only "$PREV" HEAD | grep -q 'server/package-lock.json'; then
+              npm ci --omit=dev
+            fi
             pm2 restart ameet-server
