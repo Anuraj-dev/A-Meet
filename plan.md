@@ -274,16 +274,85 @@ server) and see each other's live camera + hear each other's mic. Built by hand 
 
 ---
 
-## Milestone 3 — Pre-call screen + controls polish  *(expand on arrival)*
+## Milestone 3 — Pre-call screen + controls polish
 
-1. Device enumeration/selection (`enumerateDevices`), preview, name/avatar entry.
-2. Mic toggle + cam toggle (`track.enabled`). **[partially pulled forward in M2]** — in-call mic/cam
-   toggle buttons + placeholder-avatar tiles + a `webrtc-media-state` signal already shipped (needed to
-   verify M2 audio without echo on a single machine). M3 still owns: device selection, pre-call preview,
-   and acquiring the camera *on* after it was unavailable/off (needs renegotiation).
-3. Lobby page before joining; clean join/leave flow.
-4. Connection-state UI (connecting / connected / failed).
-5. Responsive 1:1 layout, MUI polish. Verify. → **/journal M3.**
+**Outcome:** Users land on a lobby page before joining, pick their camera/mic, preview their video,
+then join the room. In-call controls are polished: connection-state badge per peer, renegotiation
+when a camera that was unavailable at join time is turned on, a proper Leave button, and a 1:1
+responsive layout (remote full-screen, local as PiP).
+
+**What M2 already shipped (don't redo):** in-call `toggleVideo` / `toggleAudio` (`track.enabled`),
+`webrtc-media-state` signal, placeholder-avatar tile when cam off, `hasCamera` / `hasMic` flags.
+
+### M3.0 — `useLobbyMedia` hook + LobbyPage
+- [x] Create `client/src/hooks/useLobbyMedia.js`:
+      - Request audio + video independently (same pattern as `useWebRTC`) → `enumerateDevices()` to
+        get labeled device lists.
+      - Expose: `previewStream`, `videoDevices`, `audioDevices`, `selectedVideoId`, `selectedAudioId`,
+        `videoOn`, `audioOn`, `setVideoDevice(id)`, `setAudioDevice(id)`, `toggleVideo()`,
+        `toggleAudio()`, `stop()` (stop all preview tracks for handoff to room).
+      - On `setVideoDevice`: stop old video tracks, re-acquire with new `deviceId: { exact: id }`.
+      - On `setAudioDevice`: stop old audio tracks, re-acquire with new `deviceId: { exact: id }`.
+- [x] Create `client/src/pages/LobbyPage.jsx`:
+      - Two-column layout (MUI): left = local video preview (`VideoTile`), right = controls.
+      - Controls: camera device `Select`, mic device `Select`, cam/mic toggle `IconButton`s,
+        display name (read-only from `AuthContext`), **"Join now"** `Button`.
+      - On "Join now": call `stop()` (release preview tracks), navigate to `/room/:roomId` passing
+        `{ videoDeviceId, audioDeviceId }` in `location.state`.
+
+### M3.1 — Route wiring: Landing → Lobby → Room
+- [x] `client/src/App.jsx`: add `/lobby/:roomId` route (wrapped in `ProtectedRoute`).
+- [x] `client/src/pages/LandingPage.jsx`: change both `handleNewMeeting` and `handleJoin` to
+      navigate to `/lobby/:roomId` instead of `/room/:roomId`.
+
+### M3.2 — Device constraints in useWebRTC
+- [x] `client/src/hooks/useWebRTC.js`:
+      - Accept second arg `devices = {}` (`{ videoDeviceId, audioDeviceId }`).
+      - In `init()`, use `{ deviceId: { exact: videoDeviceId } }` when `videoDeviceId` is provided,
+        otherwise fall back to `true` — for both audio and video.
+      - Store device IDs in a ref so `toggleVideo` (renegotiation path in M3.3) can use them.
+- [x] `client/src/pages/RoomPage.jsx`: `useLocation()` → read `state.videoDeviceId` /
+      `state.audioDeviceId` → pass to `useWebRTC`.
+
+### M3.3 — Mid-call renegotiation (cam-on after unavailable)
+- [x] `client/src/hooks/useWebRTC.js`:
+      - In `getOrCreatePeer`: add `pc.onnegotiationneeded` handler → if `pc.signalingState === 'stable'`,
+        `createOffer → setLocalDescription → emit webrtc-offer`. Guard with `try/catch`.
+      - `toggleVideo`: if no video tracks exist and user wants camera on:
+        `getUserMedia({ video: deviceId ? { deviceId: { exact } } : true })` → `addTrack` to
+        `localStreamRef.current` + all existing PCs → update stream state.
+        `onnegotiationneeded` fires per-PC and handles the re-offer automatically.
+
+### M3.4 — Connection-state badge per peer
+- [x] `client/src/hooks/useWebRTC.js`:
+      - In `getOrCreatePeer`: `pc.onconnectionstatechange = () =>` update a `peerConnectionStates`
+        state map `{ [peerId]: pc.connectionState }`.
+      - Export `peerConnectionStates` from the hook.
+- [x] `client/src/components/VideoTile.jsx`:
+      - Add `connectionState` prop. Show a small chip overlay when state is `'connecting'`,
+        `'failed'`, or `'disconnected'` (no badge needed for `'connected'`).
+- [x] `client/src/pages/RoomPage.jsx`: pass `peerConnectionStates[peerId]` to each remote tile.
+
+### M3.5 — 1:1 layout + Leave button
+- [x] `client/src/pages/RoomPage.jsx`:
+      - 1:1 case (exactly 1 remote entry): remote tile fills the full video area; local tile is
+        PiP overlay — position absolute, bottom-right, ~200 × 150 px, with a subtle border/shadow.
+      - Multi-peer: keep current auto-fit grid.
+      - Control bar: add red **"End call"** `IconButton` (`CallEnd` icon) that navigates to `/`;
+        keep mic + cam toggles.
+
+### M3.6 — Verify & close out
+- [ ] Manual test: lobby loads → cam/mic preview → device selectors work → "Join now" →
+      in-call controls work → connection badge shows while connecting → 1:1 layout → Leave → clean.
+- [ ] Tick all M3 checkboxes; update status log entry.
+- [ ] **/journal M3.**
+
+> **Deferred polish note (from M3 testing):** In 1:1 mode the remote tile uses `objectFit: contain`
+> which letterboxes when the container aspect ratio doesn't match the camera (typically 4:3 camera
+> in a wider container). Google Meet uses `cover` on a 16:9-constrained tile — video fills edge to
+> edge with minimal crop. Fix in M5/M6 polish pass: constrain `VideoTile` container to 16:9 via
+> `aspect-ratio: 16/9` (or `paddingTop: 56.25%` trick), then switch remote tile back to `cover`.
+> Local PiP self-view can stay `contain`.
 
 ---
 
@@ -356,3 +425,7 @@ server) and see each other's live camera + hear each other's mic. Built by hand 
   Fixed: acquire audio+video **independently** and never bail; added `webrtc-media-state` signal +
   placeholder-avatar tiles + mic/cam toggle buttons (M3.2 pulled forward) so audio is testable without
   echo on one machine. Next: M2.5 — Anuraj re-verifies across two tabs, then **/journal M2**.
+- **M3** — code complete (2026-05-30). M3.0–M3.5 built: `useLobbyMedia` hook, `LobbyPage` (device
+  enumeration + preview), routing Landing→Lobby→Room, device constraints in `useWebRTC`, mid-call
+  renegotiation for cam-on (`onnegotiationneeded`), connection-state badge on `VideoTile`,
+  1:1 PiP layout, red Leave button. Build clean. M3.6 manual verify is Anuraj's.

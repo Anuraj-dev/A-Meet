@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Avatar, Box, Typography } from '@mui/material';
+import { Avatar, Box, Chip, Typography } from '@mui/material';
 import { MicOff as MicOffIcon } from '@mui/icons-material';
 
 // A single video tile. A MediaStream can't be passed as a normal `src`; it has
@@ -9,6 +9,12 @@ import { MicOff as MicOffIcon } from '@mui/icons-material';
 // When `videoOn` is false (camera off, or never available) we keep the <video>
 // element mounted — it still carries the peer's audio — and lay a placeholder
 // avatar over it, like Google Meet. A mic-off badge shows when `audioOn` is false.
+const CONNECTION_BADGE = {
+  connecting: { label: 'Connecting…', color: 'warning' },
+  disconnected: { label: 'Reconnecting…', color: 'warning' },
+  failed: { label: 'Connection failed', color: 'error' },
+};
+
 export default function VideoTile({
   stream,
   muted = false,
@@ -16,6 +22,7 @@ export default function VideoTile({
   avatar,
   videoOn = true,
   audioOn = true,
+  connectionState,
 }) {
   const videoRef = useRef(null);
 
@@ -43,7 +50,7 @@ export default function VideoTile({
         style={{
           width: '100%',
           height: '100%',
-          objectFit: 'cover',
+          objectFit: 'contain',
           // Hide (don't unmount) the element when video is off, so audio keeps flowing.
           visibility: videoOn ? 'visible' : 'hidden',
         }}
@@ -83,6 +90,17 @@ export default function VideoTile({
         {!audioOn && <MicOffIcon sx={{ fontSize: 14 }} />}
         {name && <Typography variant="caption">{name}</Typography>}
       </Box>
+
+      {CONNECTION_BADGE[connectionState] && (
+        <Box sx={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)' }}>
+          <Chip
+            label={CONNECTION_BADGE[connectionState].label}
+            color={CONNECTION_BADGE[connectionState].color}
+            size="small"
+            sx={{ fontSize: 11 }}
+          />
+        </Box>
+      )}
     </Box>
   );
 }

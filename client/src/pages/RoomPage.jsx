@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Avatar, Box, Chip, Divider, IconButton, InputAdornment,
   Stack, TextField, Tooltip, Typography,
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon,
+  CallEnd as CallEndIcon,
   Send as SendIcon,
   Mic as MicIcon,
   MicOff as MicOffIcon,
@@ -24,6 +24,7 @@ function formatTime(ts) {
 export default function RoomPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const { state: locationState } = useLocation();
   const { user } = useAuth();
 
   const [messages, setMessages] = useState([]);
@@ -31,12 +32,20 @@ export default function RoomPage() {
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
 
+  const devices = {
+    videoDeviceId: locationState?.videoDeviceId ?? null,
+    audioDeviceId: locationState?.audioDeviceId ?? null,
+    startVideoOn: locationState?.startVideoOn ?? true,
+    startAudioOn: locationState?.startAudioOn ?? true,
+  };
+
   const {
-    localStream, remoteStreams, peerStates,
+    localStream, remoteStreams, peerStates, peerConnectionStates,
     localVideoOn, localAudioOn, hasCamera, hasMic,
     toggleVideo, toggleAudio,
-  } = useWebRTC(roomId);
+  } = useWebRTC(roomId, devices);
   const remoteEntries = Object.entries(remoteStreams);
+  const isSoloCall = remoteEntries.length === 1;
 
   useEffect(() => {
     socket.connect();
@@ -86,11 +95,6 @@ export default function RoomPage() {
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
       {/* Header */}
       <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: 1, borderColor: 'divider' }}>
-        <Tooltip title="Leave">
-          <IconButton size="small" onClick={() => navigate('/')}>
-            <ArrowBackIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
         <Box sx={{ flex: 1 }}>
           <Typography variant="subtitle2" fontWeight={700}>
             {roomId}
@@ -123,46 +127,96 @@ export default function RoomPage() {
           }}
         >
           {/* Tile grid */}
-          <Box
-            sx={{
-              flex: 1,
-              p: 2,
-              display: 'grid',
-              gap: 2,
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gridAutoRows: '1fr',
-              alignContent: 'center',
-              minHeight: 0,
-            }}
-          >
-            {localStream && (
-              <VideoTile
-                stream={localStream}
-                muted
-                name={`${user?.name ?? 'You'} (You)`}
-                avatar={user?.avatar}
-                videoOn={localVideoOn}
-                audioOn={localAudioOn}
-              />
-            )}
-            {remoteEntries.map(([peerId, stream]) => {
-              const ps = peerStates[peerId];
-              return (
-                <VideoTile
-                  key={peerId}
-                  stream={stream}
-                  name={ps?.name ?? 'Participant'}
-                  avatar={ps?.avatar}
-                  videoOn={ps ? ps.video : stream.getVideoTracks().length > 0}
-                  audioOn={ps ? ps.audio : true}
-                />
-              );
-            })}
-            {remoteEntries.length === 0 && (
-              <Box sx={{ gridColumn: '1 / -1', textAlign: 'center', alignSelf: 'center' }}>
-                <Typography variant="body2" color="text.disabled">
-                  Waiting for someone to join…
-                </Typography>
+          <Box sx={{ flex: 1, position: 'relative', minHeight: 0, p: isSoloCall ? 0 : 2 }}>
+            {isSoloCall ? (
+              // 1:1 layout: remote fills area, local is PiP
+              <>
+                <Box sx={{ position: 'absolute', inset: 0 }}>
+                  {(() => {
+                    const [peerId, stream] = remoteEntries[0];
+                    const ps = peerStates[peerId];
+                    return (
+                      <VideoTile
+                        stream={stream}
+                        name={ps?.name ?? 'Participant'}
+                        avatar={ps?.avatar}
+                        videoOn={ps ? ps.video : stream.getVideoTracks().length > 0}
+                        audioOn={ps ? ps.audio : true}
+                        connectionState={peerConnectionStates[peerId]}
+                      />
+                    );
+                  })()}
+                </Box>
+                {localStream && (
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      bottom: 16,
+                      right: 16,
+                      width: 200,
+                      height: 150,
+                      borderRadius: 2,
+                      overflow: 'hidden',
+                      boxShadow: 4,
+                      border: '2px solid',
+                      borderColor: 'divider',
+                      zIndex: 1,
+                    }}
+                  >
+                    <VideoTile
+                      stream={localStream}
+                      muted
+                      name={`${user?.name ?? 'You'} (You)`}
+                      avatar={user?.avatar}
+                      videoOn={localVideoOn}
+                      audioOn={localAudioOn}
+                    />
+                  </Box>
+                )}
+              </>
+            ) : (
+              // Grid layout: 0 or 2+ remote peers
+              <Box
+                sx={{
+                  height: '100%',
+                  display: 'grid',
+                  gap: 2,
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                  gridAutoRows: '1fr',
+                  alignContent: 'center',
+                }}
+              >
+                {localStream && (
+                  <VideoTile
+                    stream={localStream}
+                    muted
+                    name={`${user?.name ?? 'You'} (You)`}
+                    avatar={user?.avatar}
+                    videoOn={localVideoOn}
+                    audioOn={localAudioOn}
+                  />
+                )}
+                {remoteEntries.map(([peerId, stream]) => {
+                  const ps = peerStates[peerId];
+                  return (
+                    <VideoTile
+                      key={peerId}
+                      stream={stream}
+                      name={ps?.name ?? 'Participant'}
+                      avatar={ps?.avatar}
+                      videoOn={ps ? ps.video : stream.getVideoTracks().length > 0}
+                      audioOn={ps ? ps.audio : true}
+                      connectionState={peerConnectionStates[peerId]}
+                    />
+                  );
+                })}
+                {remoteEntries.length === 0 && (
+                  <Box sx={{ gridColumn: '1 / -1', textAlign: 'center', alignSelf: 'center' }}>
+                    <Typography variant="body2" color="text.disabled">
+                      Waiting for someone to join…
+                    </Typography>
+                  </Box>
+                )}
               </Box>
             )}
           </Box>
@@ -193,7 +247,6 @@ export default function RoomPage() {
               <span>
                 <IconButton
                   onClick={toggleVideo}
-                  disabled={!hasCamera}
                   sx={{
                     bgcolor: localVideoOn ? 'action.hover' : 'error.main',
                     color: localVideoOn ? 'text.primary' : 'error.contrastText',
@@ -203,6 +256,18 @@ export default function RoomPage() {
                   {localVideoOn ? <VideocamIcon /> : <VideocamOffIcon />}
                 </IconButton>
               </span>
+            </Tooltip>
+            <Tooltip title="Leave call">
+              <IconButton
+                onClick={() => navigate('/')}
+                sx={{
+                  bgcolor: 'error.main',
+                  color: 'error.contrastText',
+                  '&:hover': { bgcolor: 'error.dark' },
+                }}
+              >
+                <CallEndIcon />
+              </IconButton>
             </Tooltip>
           </Stack>
         </Box>
@@ -221,93 +286,98 @@ export default function RoomPage() {
         >
           {/* Message list */}
           <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1.5 }}>
-        {messages.length === 0 && (
-          <Box sx={{ textAlign: 'center', mt: 6 }}>
-            <Typography variant="body2" color="text.disabled">
-              Say hello — you're the first here.
-            </Typography>
-          </Box>
-        )}
-
-        {messages.map((msg, i) => {
-          if (msg.type === 'event') {
-            return (
-              <Box key={i} sx={{ textAlign: 'center', my: 1 }}>
-                <Chip label={msg.text} size="small" variant="outlined" sx={{ fontSize: 11, color: 'text.disabled', borderColor: 'divider' }} />
-              </Box>
-            );
-          }
-
-          const isMe = msg.sender?.id === user?.id;
-          return (
-            <Box
-              key={i}
-              sx={{
-                display: 'flex',
-                flexDirection: isMe ? 'row-reverse' : 'row',
-                alignItems: 'flex-end',
-                gap: 1,
-                mb: 1.5,
-              }}
-            >
-              {!isMe && (
-                <Tooltip title={msg.sender?.name}>
-                  <Avatar src={msg.sender?.avatar} alt={msg.sender?.name} sx={{ width: 28, height: 28, fontSize: 12 }}>
-                    {msg.sender?.name?.[0]}
-                  </Avatar>
-                </Tooltip>
-              )}
-              <Box sx={{ maxWidth: '70%' }}>
-                {!isMe && (
-                  <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-                    {msg.sender?.name}
-                  </Typography>
-                )}
-                <Box
-                  sx={{
-                    px: 1.5,
-                    py: 1,
-                    borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                    bgcolor: isMe ? 'primary.main' : 'action.hover',
-                    color: isMe ? 'primary.contrastText' : 'text.primary',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  <Typography variant="body2">{msg.text}</Typography>
-                </Box>
-                <Typography variant="caption" color="text.disabled" sx={{ ml: 0.5 }}>
-                  {formatTime(msg.ts)}
+            {messages.length === 0 && (
+              <Box sx={{ textAlign: 'center', mt: 6 }}>
+                <Typography variant="body2" color="text.disabled">
+                  Say hello — you're the first here.
                 </Typography>
               </Box>
-            </Box>
-          );
-        })}
-        <div ref={bottomRef} />
-      </Box>
+            )}
 
-      <Divider />
+            {messages.map((msg, i) => {
+              if (msg.type === 'event') {
+                return (
+                  <Box key={i} sx={{ textAlign: 'center', my: 1 }}>
+                    <Chip
+                      label={msg.text}
+                      size="small"
+                      variant="outlined"
+                      sx={{ fontSize: 11, color: 'text.disabled', borderColor: 'divider' }}
+                    />
+                  </Box>
+                );
+              }
 
-      {/* Input */}
-      <Box component="form" onSubmit={sendMessage} sx={{ px: 2, py: 1.5 }}>
-        <TextField
-          fullWidth
-          size="small"
-          placeholder="Send a message…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          slotProps={{
-            input: {
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton type="submit" size="small" disabled={!input.trim()} color="primary">
-                    <SendIcon fontSize="small" />
-                  </IconButton>
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
-      </Box>
+              const isMe = msg.sender?.id === user?.id;
+              return (
+                <Box
+                  key={i}
+                  sx={{
+                    display: 'flex',
+                    flexDirection: isMe ? 'row-reverse' : 'row',
+                    alignItems: 'flex-end',
+                    gap: 1,
+                    mb: 1.5,
+                  }}
+                >
+                  {!isMe && (
+                    <Tooltip title={msg.sender?.name}>
+                      <Avatar src={msg.sender?.avatar} alt={msg.sender?.name} sx={{ width: 28, height: 28, fontSize: 12 }}>
+                        {msg.sender?.name?.[0]}
+                      </Avatar>
+                    </Tooltip>
+                  )}
+                  <Box sx={{ maxWidth: '70%' }}>
+                    {!isMe && (
+                      <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+                        {msg.sender?.name}
+                      </Typography>
+                    )}
+                    <Box
+                      sx={{
+                        px: 1.5,
+                        py: 1,
+                        borderRadius: isMe ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                        bgcolor: isMe ? 'primary.main' : 'action.hover',
+                        color: isMe ? 'primary.contrastText' : 'text.primary',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      <Typography variant="body2">{msg.text}</Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.disabled" sx={{ ml: 0.5 }}>
+                      {formatTime(msg.ts)}
+                    </Typography>
+                  </Box>
+                </Box>
+              );
+            })}
+            <div ref={bottomRef} />
+          </Box>
+
+          <Divider />
+
+          {/* Input */}
+          <Box component="form" onSubmit={sendMessage} sx={{ px: 2, py: 1.5 }}>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Send a message…"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton type="submit" size="small" disabled={!input.trim()} color="primary">
+                        <SendIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+          </Box>
         </Box>
       </Box>
     </Box>

@@ -17,7 +17,7 @@ export default function LandingPage() {
     setCreating(true);
     try {
       const { data } = await api.post('/rooms');
-      navigate(`/room/${data.roomId}`);
+      navigate(`/lobby/${data.roomId}`);
     } finally {
       setCreating(false);
     }
@@ -26,7 +26,7 @@ export default function LandingPage() {
   function handleJoin(e) {
     e.preventDefault();
     const code = joinCode.trim();
-    if (code) navigate(`/room/${code}`);
+    if (code) navigate(`/lobby/${code}`);
   }
 
   return (

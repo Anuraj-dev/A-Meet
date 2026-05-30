@@ -2,26 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import socket from '../services/socket';
 import { createPeerConnection } from '../services/webrtc';
 
-// Orchestrates a hand-built WebRTC mesh (1:1 for M2, but the logic is per-peer
-// so it generalises). Returns local media + controls plus a map of remote
-// streams (keyed by socketId) and each peer's camera/mic on-off state.
+// Orchestrates a hand-built WebRTC mesh (1:1 for M2/M3, but per-peer so it
+// generalises). Returns local media + controls plus a map of remote streams
+// (keyed by socketId) and each peer's camera/mic on-off state.
 //
-// Resilient media acquisition: we request audio and video SEPARATELY so a busy
-// camera (e.g. a second tab on the same machine) only costs us video — the mic
-// still works. If everything fails we still join, sending no tracks, so the
-// peer connects and shows a placeholder. Never bail out of signaling.
+// Media acquisition: audio and video are requested SEPARATELY so a busy camera
+// only costs us video — the mic still works. Device IDs from the lobby are
+// forwarded as exact constraints. Never bail out of signaling on media failure.
 //
-// Signaling flow (newcomer-initiates, so there's no offer glare to resolve):
-//   1. acquire local media → 2. emit `webrtc-ready` → server replies
-//   `webrtc-peers` → 3. offer each existing peer → 4/5. answer/answer-handling
-//   → 6. trickle ICE (buffer candidates that beat the remote description).
-//
-// NOTE: the socket connect/join/disconnect lifecycle is owned by RoomPage's
-// chat effect. This hook only registers its own WebRTC listeners.
-export function useWebRTC(roomId) {
+// Renegotiation (M3.3): each PC has an onnegotiationneeded handler that fires
+// when addTrack is called (e.g., user turns camera on after joining without one).
+// It only acts when signalingState is 'stable' to avoid offer glare.
+export function useWebRTC(roomId, devices = {}) {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState({}); // socketId → MediaStream
   const [peerStates, setPeerStates] = useState({}); // socketId → { video, audio, name, avatar }
+  const [peerConnectionStates, setPeerConnectionStates] = useState({}); // socketId → RTCPeerConnectionState
   const [localVideoOn, setLocalVideoOn] = useState(false);
   const [localAudioOn, setLocalAudioOn] = useState(false);
   const [hasCamera, setHasCamera] = useState(false);
@@ -30,8 +26,10 @@ export function useWebRTC(roomId) {
   const localStreamRef = useRef(null);
   const pcsRef = useRef(new Map()); // socketId → RTCPeerConnection
   const pendingCandidatesRef = useRef(new Map()); // socketId → RTCIceCandidateInit[]
-  // Latest on/off state, read by signaling handlers without stale closures.
   const mediaStateRef = useRef({ video: false, audio: false });
+  // Keep device IDs accessible inside async callbacks without stale closures.
+  const devicesRef = useRef(devices);
+  useEffect(() => { devicesRef.current = devices; }, [devices]);
 
   const sendMediaState = useCallback((to) => {
     socket.emit('webrtc-media-state', {
@@ -48,23 +46,43 @@ export function useWebRTC(roomId) {
     tracks.forEach((t) => { t.enabled = next; });
     mediaStateRef.current.audio = next;
     setLocalAudioOn(next);
-    sendMediaState(); // broadcast to room
+    sendMediaState();
   }, [sendMediaState]);
 
+  // toggleVideo handles two cases:
+  //   1. A video track already exists → flip track.enabled (no renegotiation needed).
+  //   2. No video track → acquire camera and addTrack to all PCs, which fires
+  //      onnegotiationneeded per-PC and triggers a new offer automatically.
   const toggleVideo = useCallback(() => {
     const tracks = localStreamRef.current?.getVideoTracks() ?? [];
-    if (tracks.length === 0) return;
-    const next = !tracks[0].enabled;
-    tracks.forEach((t) => { t.enabled = next; });
-    mediaStateRef.current.video = next;
-    setLocalVideoOn(next);
-    sendMediaState(); // broadcast to room
+    if (tracks.length > 0) {
+      const next = !tracks[0].enabled;
+      tracks.forEach((t) => { t.enabled = next; });
+      mediaStateRef.current.video = next;
+      setLocalVideoOn(next);
+      sendMediaState();
+    } else {
+      const { videoDeviceId } = devicesRef.current;
+      const constraint = videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true;
+      navigator.mediaDevices.getUserMedia({ video: constraint })
+        .then((newStream) => {
+          const track = newStream.getVideoTracks()[0];
+          if (!track || !localStreamRef.current) return;
+          localStreamRef.current.addTrack(track);
+          // Rebuild state stream so React sees the new track.
+          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+          pcsRef.current.forEach((pc) => pc.addTrack(track, localStreamRef.current));
+          mediaStateRef.current.video = true;
+          setLocalVideoOn(true);
+          setHasCamera(true);
+          sendMediaState();
+        })
+        .catch((err) => console.warn('[webrtc] camera still unavailable:', err.name));
+    }
   }, [sendMediaState]);
 
   useEffect(() => {
     let cancelled = false;
-    // Stable Map identities for the effect's lifetime — captured so the cleanup
-    // closure references them directly (not `ref.current` read at teardown time).
     const pcs = pcsRef.current;
     const pendingCandidates = pendingCandidatesRef.current;
 
@@ -90,6 +108,24 @@ export function useWebRTC(roomId) {
         setRemoteStreams((prev) => ({ ...prev, [peerId]: stream }));
       };
 
+      // M3.3: renegotiation when a new track is added mid-call.
+      pc.onnegotiationneeded = async () => {
+        if (pc.signalingState !== 'stable') return;
+        try {
+          const offer = await pc.createOffer();
+          if (pc.signalingState !== 'stable') return;
+          await pc.setLocalDescription(offer);
+          socket.emit('webrtc-offer', { to: peerId, description: pc.localDescription });
+        } catch (err) {
+          console.warn('[webrtc] renegotiation offer failed:', err);
+        }
+      };
+
+      // M3.4: track connection state per peer.
+      pc.onconnectionstatechange = () => {
+        setPeerConnectionStates((prev) => ({ ...prev, [peerId]: pc.connectionState }));
+      };
+
       pcs.set(peerId, pc);
       return pc;
     }
@@ -101,7 +137,7 @@ export function useWebRTC(roomId) {
         try {
           await pc.addIceCandidate(candidate);
         } catch {
-          /* candidate may be stale after teardown — ignore */
+          /* stale after teardown */
         }
       }
       pendingCandidates.delete(peerId);
@@ -112,6 +148,8 @@ export function useWebRTC(roomId) {
       if (pc) {
         pc.onicecandidate = null;
         pc.ontrack = null;
+        pc.onnegotiationneeded = null;
+        pc.onconnectionstatechange = null;
         pc.close();
         pcs.delete(peerId);
       }
@@ -128,9 +166,13 @@ export function useWebRTC(roomId) {
         delete next[peerId];
         return next;
       });
+      setPeerConnectionStates((prev) => {
+        if (!(peerId in prev)) return prev;
+        const next = { ...prev };
+        delete next[peerId];
+        return next;
+      });
     }
-
-    // --- WebRTC signaling listeners ---
 
     const onPeers = async (peers) => {
       for (const peerId of peers) {
@@ -138,7 +180,7 @@ export function useWebRTC(roomId) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         socket.emit('webrtc-offer', { to: peerId, description: pc.localDescription });
-        sendMediaState(peerId); // tell this peer our current cam/mic state
+        sendMediaState(peerId);
       }
     };
 
@@ -149,7 +191,7 @@ export function useWebRTC(roomId) {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit('webrtc-answer', { to: from, description: pc.localDescription });
-      sendMediaState(from); // and let them know our state too
+      sendMediaState(from);
     };
 
     const onAnswer = async ({ from, description }) => {
@@ -184,19 +226,31 @@ export function useWebRTC(roomId) {
     const onPeerLeft = ({ socketId }) => closePeer(socketId);
 
     async function init() {
-      // Acquire audio + video independently — one failing must not sink the other.
+      const { videoDeviceId, audioDeviceId, startVideoOn = true, startAudioOn = true } = devicesRef.current;
       const stream = new MediaStream();
+
+      // Always acquire the track so hasMic/hasCamera reflect physical availability.
+      // start*On only controls track.enabled — muted ≠ no device.
       try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioStream.getAudioTracks().forEach((t) => stream.addTrack(t));
+        const audioConstraint = audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true;
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
+        audioStream.getAudioTracks().forEach((t) => {
+          t.enabled = startAudioOn;
+          stream.addTrack(t);
+        });
       } catch (err) {
         console.warn('[webrtc] microphone unavailable:', err.name);
       }
+
       try {
-        const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        videoStream.getVideoTracks().forEach((t) => stream.addTrack(t));
+        const videoConstraint = videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true;
+        const videoStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint });
+        videoStream.getVideoTracks().forEach((t) => {
+          t.enabled = startVideoOn;
+          stream.addTrack(t);
+        });
       } catch (err) {
-        console.warn('[webrtc] camera unavailable (likely in use by another tab):', err.name);
+        console.warn('[webrtc] camera unavailable:', err.name);
       }
 
       if (cancelled) {
@@ -204,16 +258,19 @@ export function useWebRTC(roomId) {
         return;
       }
 
-      const audioOn = stream.getAudioTracks().length > 0;
-      const videoOn = stream.getVideoTracks().length > 0;
-      mediaStateRef.current = { video: videoOn, audio: audioOn };
+      const hasMicTrack = stream.getAudioTracks().length > 0;
+      const hasCamTrack = stream.getVideoTracks().length > 0;
+      // enabled reflects lobby toggle — track may exist but start muted/off.
+      const audioIsOn = hasMicTrack && stream.getAudioTracks()[0].enabled;
+      const videoIsOn = hasCamTrack && stream.getVideoTracks()[0].enabled;
+      mediaStateRef.current = { video: videoIsOn, audio: audioIsOn };
 
       localStreamRef.current = stream;
       setLocalStream(stream);
-      setHasMic(audioOn);
-      setHasCamera(videoOn);
-      setLocalAudioOn(audioOn);
-      setLocalVideoOn(videoOn);
+      setHasMic(hasMicTrack);
+      setHasCamera(hasCamTrack);
+      setLocalAudioOn(audioIsOn);
+      setLocalVideoOn(videoIsOn);
 
       socket.on('webrtc-peers', onPeers);
       socket.on('webrtc-offer', onOffer);
@@ -239,6 +296,8 @@ export function useWebRTC(roomId) {
       pcs.forEach((pc) => {
         pc.onicecandidate = null;
         pc.ontrack = null;
+        pc.onnegotiationneeded = null;
+        pc.onconnectionstatechange = null;
         pc.close();
       });
       pcs.clear();
@@ -249,6 +308,7 @@ export function useWebRTC(roomId) {
 
       setRemoteStreams({});
       setPeerStates({});
+      setPeerConnectionStates({});
       setLocalStream(null);
     };
   }, [roomId, sendMediaState]);
@@ -257,6 +317,7 @@ export function useWebRTC(roomId) {
     localStream,
     remoteStreams,
     peerStates,
+    peerConnectionStates,
     localVideoOn,
     localAudioOn,
     hasCamera,
