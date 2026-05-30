@@ -1,0 +1,245 @@
+# A-Meet — Master Build Plan
+
+> **Single source of truth.** Every chat/agent reads this FIRST (see `CLAUDE.md`).
+> Tick checkboxes as work completes. M1–M6 get expanded to micro-steps at the start of their milestone.
+
+---
+
+## Context — why this project & this plan
+
+**A-Meet** is a Google Meet clone built from scratch by Anuraj (strong on MERN, **new to WebRTC,
+SFU, and WebSockets**). It is a learning + portfolio project: the goal is to genuinely *understand*
+real-time media, not hide it behind a hosted product. The repo at `/home/raja/Anuraj-Dev/A Meet`
+started empty (greenfield).
+
+This plan exists because the hard parts (WebRTC, SFU) are unfamiliar, so we build in **staged
+milestones** — each one teaches one new concept and is independently runnable. The plan is the
+contract that survives across multiple chats, so any fresh session can pick up exactly where we left off.
+
+**Locked decisions:** MERN · **JavaScript** (not TS) · **Material UI only** (no Bootstrap) ·
+Google Fonts · Passport `google-oauth20` + **JWT in httpOnly cookie** · **Joi** (API) + Mongoose (DB) ·
+Socket.io signaling · **mediasoup** self-built SFU · **Docker** for MongoDB + mongo-express GUI ·
+CI/CD deferred to M6.
+
+---
+
+## Operating rituals (apply to EVERY step)
+
+1. **Read → Do → Journal.**
+   - **Read** the relevant context first (this `plan.md`, the files you're about to touch, and any
+     library doc you're unsure of) *before* writing code. Never act blind.
+   - **Do** the step.
+   - **/journal** at the **end of each milestone** (not every step) + on any major breakthrough.
+2. **Update `plan.md`** — tick the step's checkbox the moment it's done, so status is always live.
+3. **Model usage:** Opus for architecture / learning a new concept (M2 & M4 especially) / nasty bugs /
+   security review; **Sonnet** for routine coding (most of M0, M1, M3); Haiku for trivial edits.
+4. **Chat boundaries:** roughly **one chat per milestone** (two for the big ones, M4 especially).
+   Start a fresh chat at each milestone boundary; the new chat reads `plan.md` + `CLAUDE.md` + memory
+   and continues cleanly.
+5. **Built-in skills, not custom agents:** use `/code-review`, `/security-review`, `/review`,
+   `/git-commit` rather than building bespoke subagents.
+6. **Commits** happen only when Anuraj explicitly asks (git is initialized in M0, but commits are on request).
+   When committing/opening PRs: **zero Claude/Anthropic attribution** — see Attribution policy in Conventions.
+
+---
+
+## Conventions
+
+- **Ports:** server `5000` · client (Vite) `5173` · MongoDB `27017` · mongo-express `8081`.
+- **Layout:** monorepo — `client/` + `server/` + root `docker-compose.yml` + root `package.json`
+  (scripts via `concurrently`).
+- **Secrets:** Claude scaffolds `.env` + `.env.example` with empty keys; **Anuraj pastes real secrets**.
+  `.env` is git-ignored.
+- **Auth flow:** Passport Google strategy with `session: false`; on callback, mint a JWT and set it as
+  an **httpOnly cookie**; protected routes/sockets verify that cookie. (No `express-session` needed.)
+- **Naming:** files `kebab-case` (`auth.routes.js`), React components `PascalCase.jsx`, Mongoose
+  models `PascalCase` singular (`User`, `Room`).
+- **Far-milestone rule:** M1–M6 below are ordered step-lists. At the **start** of each, expand it into
+  micro-steps in `plan.md` using current library APIs (esp. mediasoup in M4), then execute.
+- **Attribution policy (STRICT — non-negotiable):** Never add any Claude/Anthropic attribution
+  anywhere. No `Co-Authored-By: Claude`, no "Generated with Claude Code", no "written by Claude",
+  no AI/tool/company mention — in commit messages, PR titles/bodies, code comments, or docs.
+  All commits and PRs are authored as Anuraj alone. `CLAUDE.md` states this rule explicitly.
+
+---
+
+## Milestone 0 — Scaffold, Docker DB, Google Auth  *(detailed to micro-steps)*
+
+**Outcome:** `docker compose up` runs Mongo + mongo-express GUI; `npm run dev` runs client+server;
+you log in with Google, land on a page, click **New Meeting** → a room is created in Mongo → you're
+routed to a placeholder room page. No WebRTC yet.
+
+### M0.0 — Project contract files (do FIRST) ✅
+- [x] Create `plan.md` at repo root = this document (the living plan).
+- [x] Create `CLAUDE.md` at repo root: short pointer to plan.md + ritual + **strict Attribution policy** + conventions.
+- [x] Create `.gitignore` (`node_modules`, `.env`, `client/dist`, `*.log`, `.DS_Store`).
+- [x] `git init` (repo initialized on `main`). Commits await Anuraj's go-ahead.
+
+### M0.1 — Root scaffold ✅
+- [x] Create root `package.json` (private). Scripts: `dev`, `dev:server`, `dev:client`, `docker:up`, `docker:down`, `docker:logs`.
+- [x] `npm i -D concurrently` at root.
+- [x] Create `server/` directory (`client/` is created by Vite in M0.5).
+
+### M0.2 — Docker: MongoDB + mongo-express ✅
+- [x] Create root `docker-compose.yml`:
+      - service **mongo** (`mongo:7`), named volume `mongo-data`, port `27017:27017`,
+        env `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD` (from root `.env`).
+      - service **mongo-express** (`mongo-express:1.0.2`), port `8081:8081`, `depends_on: mongo`,
+        env `ME_CONFIG_MONGODB_SERVER`, `ME_CONFIG_MONGODB_ADMINUSERNAME/PASSWORD`,
+        `ME_CONFIG_MONGODB_URL`, `ME_CONFIG_BASICAUTH=false` (local-dev only, no login prompt —
+        1.0.2 mishandles the BASICAUTH_USERNAME/PASSWORD env vars).
+- [x] Create root `.env` (local dev creds) + `.env.example`.
+- [x] `docker compose up -d`; GUI verified at `http://localhost:8081` (HTTP 200).
+
+### M0.3 — Server scaffold (Express + Mongoose + Passport) ✅
+- [x] `cd server && npm init -y`.
+- [x] Install: `express mongoose dotenv cors cookie-parser passport passport-google-oauth20 jsonwebtoken joi nanoid` + dev `nodemon`.
+- [x] `server/.env` + `.env.example`: `PORT=5000`, `MONGO_URI` (points at docker mongo w/ creds + authSource=admin),
+      `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, `CLIENT_URL=http://localhost:5173`,
+      `SERVER_URL=http://localhost:5000`.
+- [x] Structure: `server/src/{config,models,routes,controllers,middleware}` + `app.js` + `server.js`.
+- [x] `config/db.js` — Mongoose connect with logging.
+- [x] `config/passport.js` — Google strategy (`session:false`); find-or-create User by `googleId`.
+- [x] `models/User.js` — `{ googleId, name, email, avatar }` + timestamps.
+- [x] `middleware/auth.js` — read JWT from httpOnly cookie, verify, attach `req.user`.
+- [x] `controllers/auth.controller.js` + `routes/auth.routes.js` —
+      `GET /api/auth/google`, `GET /api/auth/google/callback` (mint JWT → set cookie → redirect to client),
+      `GET /api/auth/me` (protected), `POST /api/auth/logout` (clear cookie).
+- [x] `app.js` — `cors({ origin: CLIENT_URL, credentials:true })`, `cookieParser`, `express.json`,
+      `passport.initialize()`, mount routes, central error handler.
+- [x] `server.js` — connect DB then `app.listen(PORT)`.
+
+### M0.4 — Room model + create/validate endpoints ✅
+- [x] `models/Room.js` — `{ roomId (unique, nanoid), host: ref User, active, participants:[] }` + timestamps.
+- [x] `controllers/room.controller.js` + `routes/room.routes.js` —
+      `POST /api/rooms` (protected → create room, return `roomId`),
+      `GET /api/rooms/:roomId` (validate room exists/active).
+- [x] **Joi** validation schemas for room inputs (defense-in-depth alongside Mongoose).
+
+### M0.5 — Client scaffold (Vite + Material UI) ✅
+- [x] `npm create vite@latest client -- --template react`; `cd client && npm i`.
+- [x] Install: `@mui/material @emotion/react @emotion/styled @mui/icons-material react-router-dom axios`.
+      Google Fonts via `<link>` in `index.html`.
+- [x] `vite.config.js` — dev proxy `/api` → `http://localhost:5000`.
+- [x] Structure: `src/{pages,components,context,api,theme}`.
+- [x] `theme/theme.js` — MUI dark theme (Meet-like); wrap app in `ThemeProvider` + `CssBaseline`.
+- [x] `api/axios.js` — instance, `withCredentials:true`.
+- [x] `context/AuthContext.jsx` — load `/api/auth/me` on mount; expose `user`, `login`, `logout`.
+- [x] `pages/LandingPage.jsx` — logged-out: "Sign in with Google"; logged-in: **New Meeting** +
+      "Join with code" input.
+- [x] `pages/RoomPage.jsx` — placeholder (real video lands in M2+).
+- [x] `components/ProtectedRoute.jsx` + routing in `App.jsx`. Build verified (vite build clean).
+
+### M0.6 — Wire auth end-to-end (Anuraj sets up Google Cloud OAuth)
+- [x] Anuraj creates an OAuth Client in Google Cloud Console; paste ID/secret into `server/.env`.
+      Authorized origin `http://localhost:5173`; redirect URI `http://localhost:5000/api/auth/google/callback`.
+- [x] Manual test: login → Google → callback → cookie set → `/me` returns user → New Meeting → room in
+      Mongo (verify in mongo-express) → routed to `/room/:roomId`.
+
+### M0.7 — Close out
+- [ ] Run `/init` to refine `CLAUDE.md`; ensure it points to `plan.md`.
+- [ ] Tick all M0 checkboxes; set "Current milestone: M1" in `CLAUDE.md`.
+- [ ] **/journal** the M0 milestone.
+
+---
+
+## Milestone 1 — WebSockets in isolation (Socket.io chat)  *(expand on arrival)*
+
+1. Install `socket.io` (server) + `socket.io-client` (client).
+2. Attach Socket.io to the HTTP server (shared with Express) with matching CORS + credentials.
+3. Socket handshake auth middleware: verify the JWT cookie before allowing connection.
+4. Events: `join-room`, `user-joined`, `chat-message`, `user-left`, `disconnect`; in-memory room
+   participant map.
+5. Client socket service; connect on entering `/room/:id`; emit `join-room`.
+6. Chat UI in RoomPage: live message list + input + presence ("X joined/left").
+7. Verify with two browser tabs. → **/journal M1.**
+
+> **Why first:** builds the persistent-connection mental model you'll reuse for ALL signaling, with
+> zero media complexity.
+
+---
+
+## Milestone 2 — WebRTC P2P 1:1, by hand  *(expand on arrival — the key learning milestone)*
+
+1. Concept checkpoint: `getUserMedia`, `RTCPeerConnection`, SDP offer/answer, ICE candidates.
+2. Local media preview via `getUserMedia`.
+3. Signaling events over Socket.io: `ready`, `offer`, `answer`, `ice-candidate`.
+4. `RTCPeerConnection` with Google public STUN servers.
+5. Caller `createOffer` → callee `setRemoteDescription` → `createAnswer`.
+6. Trickle ICE exchange; `ontrack` → attach remote stream to a `<video>`.
+7. Render local + remote tiles (2 people).
+8. Clean teardown on leave / renegotiation.
+9. Verify a real 1:1 call across two tabs/devices. → **/journal M2.** *(Use Opus here.)*
+
+---
+
+## Milestone 3 — Pre-call screen + controls polish  *(expand on arrival)*
+
+1. Device enumeration/selection (`enumerateDevices`), preview, name/avatar entry.
+2. Mic toggle + cam toggle (`track.enabled`).
+3. Lobby page before joining; clean join/leave flow.
+4. Connection-state UI (connecting / connected / failed).
+5. Responsive 1:1 layout, MUI polish. Verify. → **/journal M3.**
+
+---
+
+## Milestone 4 — Group calls via mediasoup SFU  *(HARD — expand to micro-steps on arrival w/ current API; use Opus)*
+
+1. Concept checkpoint: Worker, Router, send/recv Transports, Producer, Consumer.
+2. Install `mediasoup` (server) + `mediasoup-client` (client).
+3. Server: create Worker(s); per-room Router with media codecs.
+4. SFU signaling: `getRouterRtpCapabilities`, `createWebRtcTransport`, `connectTransport`,
+   `produce`, `consume`, `resume`.
+5. Client: load Device with rtpCapabilities; create send/recv transports; produce local tracks;
+   consume remote producers.
+6. `new-producer` → consume; `producer-closed` → cleanup.
+7. Dynamic multi-participant video grid (MUI).
+8. Configure `listenIps` / `announcedIp` for local (and note deploy implications).
+9. Verify with 3+ participants. → **/journal M4.**
+
+---
+
+## Milestone 5 — Screen share + in-call chat + reactions  *(expand on arrival)*
+
+1. `getDisplayMedia` → separate screen-share Producer.
+2. Presentation layout (pinned big tile).
+3. In-call chat (reuse M1 socket or a WebRTC data channel).
+4. Emoji reactions + raise hand (socket events).
+5. (Optional) active-speaker detection via audio levels. Verify. → **/journal M5.**
+
+---
+
+## Milestone 6 — Polish, TURN, security, deploy (+ CI/CD)  *(expand on arrival)*
+
+1. `coturn` TURN server (Docker) for NAT traversal.
+2. Reconnection handling (socket + transport recovery).
+3. Adaptive layout, end/leave states, error boundaries.
+4. `/security-review` then fix; `/code-review` pass.
+5. Production builds; env hardening.
+6. Deploy: client (static host) + server/mediasoup (VPS/container, UDP ports open).
+7. CI/CD pipeline. → **/journal M6.**
+
+---
+
+## Verification — how to confirm M0 works end-to-end
+
+1. `docker compose up -d` → open `http://localhost:8081`, log into mongo-express GUI.
+2. `npm run dev` (root) → server on `:5000`, client on `:5173` with no console errors.
+3. Open `http://localhost:5173` → click **Sign in with Google** → complete Google consent →
+   redirected back **logged in** (avatar/name shows).
+4. Click **New Meeting** → in mongo-express, the `rooms` collection has a new doc with your
+   `googleId` as host; browser routes to `/room/:roomId` (placeholder page).
+5. Reload the page → still logged in (httpOnly cookie persists). `POST /api/auth/logout` clears it.
+
+---
+
+## Open items Anuraj owns (parallelizable)
+
+- Google Cloud OAuth Client (ID + secret) for M0.6.
+- Pasting all secrets into `.env` files (Claude leaves them empty).
+
+---
+
+## Status log
+
+- **M0** — in progress (started 2026-05-30). Done: M0.0–M0.5. Next: M0.6 — Anuraj pastes Google OAuth credentials into server/.env, then end-to-end test.
