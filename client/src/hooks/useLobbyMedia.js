@@ -8,6 +8,7 @@ export function useLobbyMedia() {
   const [selectedAudioId, setSelectedAudioId] = useState('');
   const [videoOn, setVideoOn] = useState(false);
   const [audioOn, setAudioOn] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
 
   const streamRef = useRef(null);
 
@@ -41,19 +42,21 @@ export function useLobbyMedia() {
 
     async function init() {
       const stream = new MediaStream();
+      let deniedCount = 0;
 
       try {
         const a = await navigator.mediaDevices.getUserMedia({ audio: true });
         a.getAudioTracks().forEach((t) => stream.addTrack(t));
-      } catch {
-        // mic unavailable
+      } catch (err) {
+        if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') deniedCount++;
       }
       try {
         const v = await navigator.mediaDevices.getUserMedia({ video: true });
         v.getVideoTracks().forEach((t) => stream.addTrack(t));
-      } catch {
-        // camera unavailable
+      } catch (err) {
+        if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') deniedCount++;
       }
+      if (deniedCount === 2) setPermissionDenied(true);
 
       if (cancelled) {
         stream.getTracks().forEach((t) => t.stop());
@@ -127,6 +130,7 @@ export function useLobbyMedia() {
     selectedAudioId,
     videoOn,
     audioOn,
+    permissionDenied,
     setVideoDevice,
     setAudioDevice,
     toggleVideo,

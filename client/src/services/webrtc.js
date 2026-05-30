@@ -1,12 +1,15 @@
-// WebRTC peer-connection config (M2).
-//
-// STUN servers let each browser discover its own public IP:port for NAT
-// traversal. No media flows through them — they answer "what does the world
-// see as your address?" so the two peers can find a direct path. For
-// symmetric-NAT cases that STUN can't solve we'd add a TURN relay (M6).
+const turnDomain = import.meta.env.VITE_TURN_DOMAIN;
+const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+const turnSecret = import.meta.env.VITE_TURN_SECRET;
+
+const turnServer = turnDomain && turnSecret
+  ? [{ urls: `turn:${turnDomain}:3478`, username: turnUsername, credential: turnSecret }]
+  : [];
+
 export const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  ...turnServer,
 ];
 
 export function createPeerConnection() {

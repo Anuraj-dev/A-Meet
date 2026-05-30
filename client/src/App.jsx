@@ -3,6 +3,7 @@ import LandingPage from './pages/LandingPage';
 import LobbyPage from './pages/LobbyPage';
 import RoomPage from './pages/RoomPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 
 export default function App() {
   return (
@@ -12,7 +13,9 @@ export default function App() {
         path="/lobby/:roomId"
         element={
           <ProtectedRoute>
-            <LobbyPage />
+            <ErrorBoundary>
+              <LobbyPage />
+            </ErrorBoundary>
           </ProtectedRoute>
         }
       />
@@ -20,7 +23,9 @@ export default function App() {
         path="/room/:roomId"
         element={
           <ProtectedRoute>
-            <RoomPage />
+            <ErrorBoundary>
+              <RoomPage />
+            </ErrorBoundary>
           </ProtectedRoute>
         }
       />

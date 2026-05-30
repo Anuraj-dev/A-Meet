@@ -8,6 +8,19 @@ const CONNECTION_BADGE = {
   failed: { label: 'Connection failed', color: 'error' },
 };
 
+// Deterministic per-participant background color when camera is off.
+const PEER_COLORS = [
+  '#1a73e8', '#34a853', '#ea4335', '#fbbc04',
+  '#673ab7', '#e91e63', '#00bcd4', '#ff5722',
+];
+
+function getPeerColor(name) {
+  if (!name) return PEER_COLORS[0];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return PEER_COLORS[h % PEER_COLORS.length];
+}
+
 export default function VideoTile({
   stream,
   muted = false,
@@ -19,6 +32,7 @@ export default function VideoTile({
   handRaised = false,
   activeReaction = null,
   activeSpeaker = false,
+  objectFit = 'cover',
 }) {
   const videoRef = useRef(null);
 
@@ -33,7 +47,7 @@ export default function VideoTile({
         position: 'relative',
         width: '100%',
         height: '100%',
-        bgcolor: '#202124',
+        bgcolor: videoOn ? '#202124' : getPeerColor(name),
         borderRadius: 2,
         overflow: 'hidden',
         boxShadow: activeSpeaker ? '0 0 0 3px #00c853' : 'none',
@@ -48,7 +62,7 @@ export default function VideoTile({
         style={{
           width: '100%',
           height: '100%',
-          objectFit: 'contain',
+          objectFit,
           visibility: videoOn ? 'visible' : 'hidden',
         }}
       />
@@ -63,7 +77,7 @@ export default function VideoTile({
             justifyContent: 'center',
           }}
         >
-          <Avatar src={avatar} alt={name} sx={{ width: 88, height: 88, fontSize: 36 }}>
+          <Avatar src={avatar} alt={name} sx={{ width: 88, height: 88, fontSize: 36, bgcolor: 'rgba(0,0,0,0.25)' }}>
             {name?.[0]}
           </Avatar>
         </Box>
