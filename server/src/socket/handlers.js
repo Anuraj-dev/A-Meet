@@ -1,15 +1,18 @@
-import { addUser, removeUser, getRoomUsers } from './room-manager.js';
+import { addUser, removeUser, getRoomUsers, isUserInRoom } from './room-manager.js';
 
 export function registerHandlers(io) {
   io.on('connection', (socket) => {
     socket.on('join-room', (roomId) => {
       if (!roomId || typeof roomId !== 'string') return;
 
+      const alreadyPresent = isUserInRoom(roomId, socket.user.id);
       socket.join(roomId);
       addUser(roomId, socket.id, socket.user);
 
       socket.emit('room-users', getRoomUsers(roomId));
-      socket.to(roomId).emit('user-joined', socket.user);
+      if (!alreadyPresent) {
+        socket.to(roomId).emit('user-joined', socket.user);
+      }
     });
 
     socket.on('chat-message', ({ roomId, text }) => {
@@ -28,7 +31,9 @@ export function registerHandlers(io) {
       const result = removeUser(socket.id);
       if (result) {
         const { roomId, user } = result;
-        socket.to(roomId).emit('user-left', user);
+        if (!isUserInRoom(roomId, user.id)) {
+          socket.to(roomId).emit('user-left', user);
+        }
       }
     });
   });

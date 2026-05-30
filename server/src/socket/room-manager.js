@@ -21,7 +21,22 @@ export function removeUser(socketId) {
 }
 
 export function getRoomUsers(roomId) {
-  return [...(rooms.get(roomId)?.values() ?? [])];
+  const seen = new Set();
+  const result = [];
+  for (const user of (rooms.get(roomId)?.values() ?? [])) {
+    if (!seen.has(user.id)) {
+      seen.add(user.id);
+      result.push(user);
+    }
+  }
+  return result;
+}
+
+export function isUserInRoom(roomId, userId) {
+  for (const user of (rooms.get(roomId)?.values() ?? [])) {
+    if (user.id === userId) return true;
+  }
+  return false;
 }
 
 export function getUserRoom(socketId) {
