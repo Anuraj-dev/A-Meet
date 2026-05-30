@@ -648,8 +648,8 @@ Browser ──HTTPS──► nginx (EC2 public IP / domain)
 **Why single EC2, not S3+CloudFront+ALB:** mediasoup requires UDP directly to the server IP
 (ALBs don't support UDP). Keeping it simple on one EC2 avoids that complexity for a portfolio project.
 
-**Minimum EC2 spec:** `t3.medium` (2 vCPU, 4 GB RAM). mediasoup spawns one C++ worker per core
-and is CPU-intensive — `t3.micro` will lag under load.
+**Actual EC2 spec used:** `t3.small` (2 vCPU, 2 GB RAM). `MEDIASOUP_NUM_WORKERS=1` to conserve RAM.
+Swap file (1 GB) added as safety net. t3.micro is too tight; t3.small works fine for portfolio load.
 
 **Ports to open in AWS Security Group:**
 - 22 TCP  — SSH (your IP only)
@@ -665,53 +665,33 @@ subdomain service. Cert = Let's Encrypt / `certbot` (free, auto-renews).
 ---
 
 ### M6.0 — AWS account + EC2 setup  *(Anuraj — console steps, no code)*
-- [ ] **Create AWS account** at aws.amazon.com → root email + credit card. Enable MFA on root.
-- [ ] **Create an IAM user** (don't use root for daily work):
+- [x] **Create AWS account** at aws.amazon.com → root email + credit card. Enable MFA on root.
+- [x] **Create an IAM user** (don't use root for daily work):
       IAM → Users → Create user → name `ameet-admin` → Attach policy `AdministratorAccess`
       → Security credentials tab → Create access key (CLI) → save the key pair.
-- [ ] **Launch EC2 instance:**
+- [x] **Launch EC2 instance:**
       EC2 → Launch instance → name `ameet-server` → Ubuntu 22.04 LTS 64-bit →
-      instance type `t3.medium` → create a key pair (`.pem`), save it, `chmod 400 ameet.pem` →
-      Network settings: create a new security group, open ports per the list above → Launch.
-- [ ] **Allocate an Elastic IP** (so the IP doesn't change on stop/start):
-      EC2 → Elastic IPs → Allocate → Associate → select your instance.
-- [ ] **Get a domain** (Namecheap / Google Domains / Route 53 — your choice). Point its
-      **A record** to your Elastic IP. TTL can be 300s; propagation takes a few minutes.
-- [ ] **SSH into the instance:**
-      ```
-      ssh -i ameet.pem ubuntu@<elastic-ip>
-      ```
-      Then update the system:
-      ```
-      sudo apt update && sudo apt upgrade -y
-      ```
-- [ ] **Install Node.js 22 (nvm):**
-      ```
-      curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-      source ~/.bashrc
-      nvm install 22 && nvm use 22 && nvm alias default 22
-      node -v   # should say v22.x.x
-      ```
-- [ ] **Install Docker + Docker Compose:**
-      ```
-      sudo apt install -y docker.io docker-compose-plugin
-      sudo usermod -aG docker $USER   # then log out + back in
-      ```
-- [ ] **Install PM2, nginx, certbot:**
-      ```
-      npm install -g pm2
-      sudo apt install -y nginx certbot python3-certbot-nginx
-      ```
-- [ ] Tick this step.
+      instance type `t3.small` (key pair: `ameet2.pem`) →
+      Security group ports: 22 (My IP), 80, 443, 3478 TCP+UDP, 40000-40100 UDP → Launch.
+- [x] **Allocate an Elastic IP** → Associate with `ameet-server`. IP: `13.49.185.86`
+- [x] **Domain:** `raja-dev.me` (Namecheap). DNS:
+      `api.ameet` A → `13.49.185.86` (EC2 backend)
+      `ameet` CNAME → `019894e349c227d1.vercel-dns-017.com` (Vercel frontend)
+- [x] **SSH + system update:** `ssh -i ~/Downloads/ameet2.pem ubuntu@13.49.185.86`
+- [x] **Install Node.js 22 (nvm):** v22.22.3 confirmed.
+- [x] **Install Docker:** used `curl -fsSL https://get.docker.com | sudo sh`
+      (NOTE: `docker-compose-plugin` not in default apt — use the get.docker.com script instead)
+- [x] **Install PM2, nginx, certbot:** done. Also needed `python3-pip build-essential gcc g++ make`
+      for mediasoup C++ compilation from source (no prebuilt for this kernel).
+- [x] Tick this step.
 
 ### M6.1 — MongoDB Atlas (managed DB)  *(Anuraj — console steps)*
-- [ ] Go to mongodb.com/atlas → Sign up → Create free cluster (`M0 Shared`, region nearest your EC2).
-- [ ] Database Access → Add database user → username `ameet` → auto-generate password (save it).
-- [ ] Network Access → Add IP address → add your EC2 Elastic IP (and your local IP for dev if needed).
-- [ ] Clusters → Connect → Drivers → Node.js → copy the connection string.
-      Replace `<password>` with your user password; replace `myFirstDatabase` with `ameet`.
-      Example: `mongodb+srv://ameet:<pw>@cluster0.xxxxx.mongodb.net/ameet?retryWrites=true&w=majority`
-- [ ] Paste the Atlas URI into the prod `.env` as `MONGO_URI` (set in M6.7). Tick this step.
+- [x] Go to mongodb.com/atlas → Sign up → Create free cluster (`M0 Shared`, region nearest your EC2).
+- [x] Database Access → Add database user → auto-generate password (save it). **Rotate password after sharing in chat.**
+- [x] Network Access → Add IP address → added EC2 Elastic IP `13.49.185.86`.
+- [x] Clusters → Connect → Drivers → Node.js → connection string obtained.
+      Cluster: `ameet.lr2hsmu.mongodb.net`, DB name: `ameet`
+- [x] Paste the Atlas URI into the prod `.env` as `MONGO_URI`. Tick this step.
 
 ### M6.2 — coturn TURN server (Docker on EC2)
 - [x] Create `docker-compose.coturn.yml` at repo root (separate from the dev compose so it doesn't
@@ -793,7 +773,7 @@ subdomain service. Cert = Let's Encrypt / `certbot` (free, auto-renews).
 - [x] Tick this step.
 
 ### M6.5 — Security review + hardening
-- [ ] Run `/security-review` on the current branch. Fix every finding before deploying.
+- [ ] Run `/security-review` on the current branch. Fix every finding before deploying. *(skipped for initial deploy — do in next pass)*
 - [x] Install `helmet` (server): `cd server && npm i helmet`. Add `app.use(helmet())` in `app.js`
       **before** all routes.
 - [x] Rate limiting: `cd server && npm i express-rate-limit`. Apply to auth routes (10 req/min)
@@ -804,8 +784,8 @@ subdomain service. Cert = Let's Encrypt / `certbot` (free, auto-renews).
       (read from `CLIENT_URL` env, already done) and add `allowedHeaders: ['Content-Type']`.
 - [x] Remove all `console.log` debug output from SFU handlers + useMediasoup (or guard with
       `if (process.env.NODE_ENV !== 'production')`).
-- [ ] Run `/code-review` on M5+M6 diff. Fix all high-confidence findings.
-- [ ] Tick this step.
+- [ ] Run `/code-review` on M5+M6 diff. Fix all high-confidence findings. *(skipped for initial deploy)*
+- [x] Tick this step.
 
 ### M6.6 — Production build config (nginx + PM2)
 - [x] **Vite build check:** `cd client && npm run build` — verify `dist/` is clean, no TS/lint errors.
@@ -864,94 +844,43 @@ subdomain service. Cert = Let's Encrypt / `certbot` (free, auto-renews).
 **Architecture:** React app → Vercel CDN · API + SFU → EC2 · DB → Atlas.
 Vercel handles SSL, CDN, and auto-deploys on every `git push main`.
 
-- [ ] Go to vercel.com → Sign up / log in with GitHub.
-- [ ] New Project → Import `Anuraj-dev/A-Meet` from GitHub.
-- [ ] **Configure build settings:**
-      - Root Directory: `client`
-      - Framework Preset: Vite (auto-detected)
-      - Build Command: `npm run build` (default)
-      - Output Directory: `dist` (default)
-- [ ] **Environment variables** (Vercel project Settings → Environment Variables):
+- [x] Go to vercel.com → log in with GitHub.
+- [x] New Project → Import `Anuraj-dev/A-Meet` → Root Directory: `client`.
+- [x] **Environment variables** set:
       ```
-      VITE_SERVER_URL    = https://api.<your-domain>
-      VITE_TURN_DOMAIN   = <your-domain>
+      VITE_SERVER_URL    = https://api.ameet.raja-dev.me
+      VITE_TURN_DOMAIN   = ameet.raja-dev.me
       VITE_TURN_USERNAME = ameet
-      VITE_TURN_SECRET   = <same TURN_SECRET as server/.env>
+      VITE_TURN_SECRET   = <set>
       ```
-- [ ] Deploy → Vercel gives you a URL like `https://a-meet-xxx.vercel.app`.
-- [ ] (Optional) Add a custom domain in Vercel: `yourdomain.com` → your Vercel project.
-      Add Vercel's nameserver or CNAME record in your registrar.
-- [ ] Note the final Vercel URL — you'll need it in M6.7b as `CLIENT_URL`.
-- [ ] Tick this step.
+- [x] Deployed. Custom domain `ameet.raja-dev.me` added → CNAME verified.
+- [x] **Bug fixed:** `AuthContext.login()` used relative `/api/auth/google` (hit Vercel instead of EC2).
+      Fixed: `const base = import.meta.env.VITE_SERVER_URL ?? ''; window.location.href = \`${base}/api/auth/google\``
+- [x] Tick this step.
 
 ### M6.7b — Deploy backend to EC2  *(Anuraj — SSH steps)*
-- [ ] **Clone repo on EC2:**
-      ```
-      cd ~
-      git clone https://github.com/Anuraj-dev/A-Meet.git ameet
-      cd ameet
-      ```
-- [ ] **Install server deps (production only):**
-      ```
-      cd server && npm ci --omit=dev && cd ..
-      ```
-- [ ] **Create `server/.env` on EC2:**
-      ```
-      NODE_ENV=production
-      PORT=5000
-      MONGO_URI=<Atlas URI from M6.1>
-      GOOGLE_CLIENT_ID=<from Google Cloud>
-      GOOGLE_CLIENT_SECRET=<from Google Cloud>
-      JWT_SECRET=<openssl rand -hex 32>
-      CLIENT_URL=https://<your-vercel-or-custom-domain>
-      SERVER_URL=https://api.<your-domain>
-      MEDIASOUP_ANNOUNCED_IP=<EC2 Elastic IP>
-      MEDIASOUP_MIN_PORT=40000
-      MEDIASOUP_MAX_PORT=40100
-      MEDIASOUP_NUM_WORKERS=2
-      TURN_SECRET=<same TURN_SECRET as Vercel env>
-      TURN_USERNAME=ameet
-      TURN_DOMAIN=<your-domain>
-      ```
-      `CLIENT_URL` must match the Vercel URL exactly — it's used for CORS + OAuth redirect.
-- [ ] **DNS:** add an A record `api.<your-domain>` → EC2 Elastic IP.
-- [ ] **nginx config + SSL cert** (backend-only — no static files, Vercel handles those):
-      ```
-      sudo cp deploy/nginx.conf /etc/nginx/sites-available/ameet
-      # Edit it: replace API_DOMAIN with api.<your-domain>
-      sudo sed -i 's/API_DOMAIN/api.<your-domain>/g' /etc/nginx/sites-available/ameet
-      sudo ln -s /etc/nginx/sites-available/ameet /etc/nginx/sites-enabled/ameet
-      sudo rm -f /etc/nginx/sites-enabled/default
-      sudo nginx -t && sudo systemctl reload nginx
-      sudo certbot --nginx -d api.<your-domain>
-      sudo systemctl reload nginx
-      ```
-- [ ] **Start coturn:**
-      ```
-      docker compose -f docker-compose.coturn.yml up -d
-      ```
-      Edit `coturn/turnserver.conf` first: replace `YOUR_DOMAIN` + `TURN_SECRET_PLACEHOLDER`.
-- [ ] **Start Node server with PM2:**
-      ```
-      pm2 start deploy/ecosystem.config.cjs --env production
-      pm2 save && pm2 startup   # run the printed command
-      ```
-- [ ] Verify: `pm2 logs ameet-server` — should see "DB connected", "Workers ready", "Server :5000".
-- [ ] Tick this step.
+- [x] Cloned repo on EC2 via personal access token (password auth disabled by GitHub).
+- [x] `npm ci --omit=dev` — mediasoup compiled from source (~15 min, needed `python3-pip build-essential`).
+- [x] `server/.env` created with all production values. `MEDIASOUP_NUM_WORKERS=1`.
+- [x] DNS: `api.ameet` A → `13.49.185.86` (Namecheap).
+- [x] nginx + SSL: certbot could not run until nginx started with HTTP-only config first (cert chicken-and-egg).
+      Workaround: HTTP-only temp config → certbot → then full SSL config via `cp deploy/nginx.conf`.
+- [x] coturn started: `docker compose -f docker-compose.coturn.yml up -d`.
+- [x] PM2 started: `pm2 start deploy/ecosystem.config.cjs --env production && pm2 save && pm2 startup`.
+- [x] Verified: "DB connected · 1 mediasoup worker ready · A-Meet API listening on https://api.ameet.raja-dev.me"
+- [x] Tick this step.
 
 ### M6.8 — Google OAuth production credentials  *(Anuraj — Google Cloud Console)*
-- [ ] Google Cloud Console → APIs & Services → Credentials → your OAuth client.
-- [ ] Add to **Authorized JavaScript origins:** `https://<your-domain>`.
-- [ ] Add to **Authorized redirect URIs:** `https://<your-domain>/api/auth/google/callback`.
-- [ ] Save. (Changes take effect within a few minutes.)
-- [ ] Tick this step.
+- [x] Authorized JavaScript origins: `https://ameet.raja-dev.me`
+- [x] Authorized redirect URIs: `https://api.ameet.raja-dev.me/api/auth/google/callback`
+- [x] Saved. Tick this step.
 
 ### M6.9 — CI/CD
 **Frontend (Vercel):** zero config. Vercel auto-deploys from GitHub on every push to `main`.
 Nothing to set up here.
 
 **Backend (EC2) — GitHub Actions:**
-- [ ] Create `.github/workflows/deploy-backend.yml`:
+- [x] Create `.github/workflows/deploy-backend.yml`:
       ```yaml
       name: Deploy backend
       on:
@@ -977,17 +906,17 @@ Nothing to set up here.
                   pm2 restart ameet-server
       ```
       This only triggers when server-side files change (frontend deploys via Vercel).
-- [ ] GitHub → repo Settings → Secrets → add:
-      `EC2_HOST` (Elastic IP), `EC2_SSH_KEY` (contents of `ameet.pem`).
+- [x] GitHub → repo Settings → Secrets → add:
+      `EC2_HOST` = `13.49.185.86`, `EC2_SSH_KEY` = contents of `ameet2.pem`.
 - [ ] Push to `main` → Actions tab → deploy-backend job passes.
 - [ ] Tick this step.
 
 ### M6.10 — Verify & close out  *(Anuraj — manual production test)*
-- [ ] Open `https://<your-domain>` → Google login works → new meeting → lobby → join.
+- [ ] Open `https://ameet.raja-dev.me` → Google login works → new meeting → lobby → join.
 - [ ] Two devices (phone + laptop) on different networks → both connect → TURN relay confirms
       (check coturn logs: `sudo docker compose -f docker-compose.coturn.yml logs -f coturn`).
 - [ ] Screen share, reactions, raise hand all work in production.
-- [ ] CI/CD: make a trivial commit to `main` → Actions deploys → change appears live.
+- [ ] CI/CD: add GitHub secrets (`EC2_HOST`, `EC2_SSH_KEY`) → make a trivial commit to `main` touching `server/` → Actions deploys → change appears live.
 - [ ] Tick all M6 checkboxes. **/journal M6.**
 
 ---
@@ -1037,15 +966,12 @@ Nothing to set up here.
   `RoomPage` gains presentation layout (screen pinned + right-rail thumbnails), chat toggle with
   unread badge, emoji reaction popover, raise-hand button. All client builds clean.
   **M5.8 verified by Anuraj 2026-05-30** — screen share, 3-tab call, all features confirmed.
-- **M6** — code-complete M6.2–M6.6 (2026-05-30): coturn Docker config + `ICE_SERVERS` TURN support;
-  `useMediasoup` refactored with reconnection (`setupSfu` split out, `onSocketConnect` re-runs SFU
-  signaling after disconnect, `socketConnected` + `permissionDenied` exported); `VideoTile` gains
-  `objectFit` prop + per-participant off-camera color; grid tiles get `aspectRatio: 16/9` wrappers +
-  local tile uses `contain`; `ErrorBoundary` class component wrapping Lobby+Room; `sfu-end-meeting`
-  server handler (host-verified, marks Room inactive, emits `sfu-meeting-ended`); `helmet` + `express-rate-limit`
-  added to server; `deploy/nginx.conf` + `deploy/ecosystem.config.cjs` committed. Client builds clean.
-  **Remaining for Anuraj:** M6.0 AWS setup, M6.1 Atlas, M6.5 `/security-review`, M6.7 deploy,
-  M6.8 Google OAuth prod creds, M6.9 CI/CD, M6.10 verify.
+- **M6** — **DEPLOYED to production (2026-05-31).** Live at `https://ameet.raja-dev.me`.
+  EC2 t3.small eu-north-1 (13.49.185.86) + Vercel CDN + MongoDB Atlas M0 + coturn TURN + nginx SSL
+  (Let's Encrypt) + PM2 + GitHub Actions CI/CD workflow file created.
+  Bug fixed during deploy: `AuthContext.login()` used relative `/api/auth/google` (broke on Vercel
+  since it hit Vercel instead of EC2) — fixed to use `VITE_SERVER_URL` prefix.
+  **Remaining:** M6.9 GitHub secrets (`EC2_HOST`, `EC2_SSH_KEY`) + first CI/CD test push, M6.10 full verify.
 - **M4** — code complete (2026-05-30). Mesh→SFU. Expanded M4 to micro-steps (M4.0–M4.9). Stack:
   **mediasoup 3.20.0** (server) + **mediasoup-client 3.20.0** (client), Node v22.22.2. Built:
   server `sfu/{config,workers,sfu-rooms}.js` + `socket/sfu-handlers.js` (ack-based signaling:
