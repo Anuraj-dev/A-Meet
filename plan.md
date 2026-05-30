@@ -594,9 +594,10 @@ the M4 SFU swap unchanged. M5 adds a toggle button (show/hide the panel); no new
         `Popover` with 6 `IconButton`s: 👍 ❤️ 😂 😮 👏 🎉. Click → `sendReaction(e)` → close.
       - Pass `activeReaction={activeReactions[peerId]}` and `activeReaction={activeReactions['me']}`
         (local) to the respective `VideoTile`s.
-- [ ] `client/src/components/VideoTile.jsx`: add `activeReaction` prop. When set, render a
+- [x] `client/src/components/VideoTile.jsx`: add `activeReaction` prop. When set, render a
       large emoji (`fontSize: 48px`) absolutely centered over the tile. No animation needed
       (the 3 s timeout handles the fade implicitly on removal).
+      *(UI pass 2026-05-31: now a container-query-scaled floating-emoji animation.)*
 
 ### M5.6 — VideoTile: raise-hand badge + reaction overlay
 - [x] `client/src/components/VideoTile.jsx`:
@@ -908,15 +909,15 @@ Nothing to set up here.
       This only triggers when server-side files change (frontend deploys via Vercel).
 - [x] GitHub → repo Settings → Secrets → add:
       `EC2_HOST` = `13.49.185.86`, `EC2_SSH_KEY` = contents of `ameet2.pem`.
-- [ ] Push to `main` → Actions tab → deploy-backend job passes.
-- [ ] Tick this step.
+- [x] Push to `main` → Actions tab → deploy-backend job passes.
+- [x] Tick this step.
 
 ### M6.10 — Verify & close out  *(Anuraj — manual production test)*
 - [ ] Open `https://ameet.raja-dev.me` → Google login works → new meeting → lobby → join.
 - [ ] Two devices (phone + laptop) on different networks → both connect → TURN relay confirms
       (check coturn logs: `sudo docker compose -f docker-compose.coturn.yml logs -f coturn`).
 - [ ] Screen share, reactions, raise hand all work in production.
-- [ ] CI/CD: add GitHub secrets (`EC2_HOST`, `EC2_SSH_KEY`) → make a trivial commit to `main` touching `server/` → Actions deploys → change appears live.
+- [x] CI/CD: add GitHub secrets (`EC2_HOST`, `EC2_SSH_KEY`) → make a trivial commit to `main` touching `server/` → Actions deploys → change appears live.
 - [ ] Tick all M6 checkboxes. **/journal M6.**
 
 ---
@@ -981,3 +982,30 @@ Nothing to set up here.
   Verified: worker smoke test, SFU module integration test (router/transport/ICE/teardown), server boot
   (DB + 12 workers), client lint + build. Mesh files (`webrtc.js`, `useWebRTC.js`, `services/webrtc.js`)
   left dormant for reference. **M4.9 = Anuraj's manual 3-tab verify, then /journal M4.**
+- **UI/UX pass** — (2026-05-31). The "later UI polish pass" (per memory `anuraj-ui-preferences` +
+  the deferred notes in M3/M4/M5): rebuilt the client to Google-Meet fidelity with an A-Meet accent.
+  - **Theme** (`theme/theme.js`): refined dark palette, Google-blue + A-Meet violet brand gradient,
+    **Outfit** display font for the wordmark/headings (added to `index.html`), control/tile semantic
+    tokens, flat panels, custom scrollbars, and shared keyframes (reaction float, speaker pulse,
+    fade/pop-in, hand wave) via `MuiCssBaseline`. (The Vite-boilerplate `index.css`/`App.css` were
+    already dead — globals now live in the theme.)
+  - **Sounds** (`services/sounds.js`): fully **synthesized** Web Audio cues (no asset files) — join,
+    leave, message, reaction, raise-hand, mic/cam toggle, screen-share start/stop, call-end. On/off
+    persisted in `localStorage` (toggle in the control-bar "More" menu), resumes on first gesture.
+    Wired in `RoomPage` (+ lobby toggle ticks). Server emit semantics respected (no double-fire).
+  - **VideoTile**: full-bleed Meet tile — container-query-scaled avatar/labels, per-participant
+    off-cam color, gradient name scrim + red mic-off pip, animated speaker ring, hand-raise badge,
+    floating-emoji reaction, local self-view **mirror**.
+  - **New components**: `ControlBar` (floating frosted pill bar, grouped circular buttons, red
+    end-call pill, responsive with a "More" overflow menu; screen-share hidden on xs), `ChatPanel`
+    (desktop side panel / mobile full-screen sheet), `BrandMark` (reusable gradient wordmark).
+  - **RoomPage**: full-bleed stage (grid / 1:1 PiP / presentation), minimal top info overlay
+    (live clock + code + copy link + participants), floating controls, slide-in chat, animated
+    reactions — fully responsive (xs↔desktop).
+  - **Lobby / Landing / CheckMeetingCode**: rebuilt to the same language + responsive.
+  - Addresses deferred items: M3 `contain`→`cover` 16:9 (done), M4 polish #2 full-bleed colored
+    off-cam tiles (done) + #3 VideoTile polish (done). **Not done:** M4 polish #1 (FLIP tile-reflow
+    animation) — tiles fade in; no spring/FLIP reflow yet.
+  - **Verified:** client lint clean (all touched files) + `vite build` clean. Pre-existing react-hooks
+    v7 lint errors remain in untouched files (`AuthContext.jsx`, `RoomGuard.jsx`, `useLobbyMedia.js`).
+    **Visual/responsive + sound verification is Anuraj's** (`npm run dev`; the room needs the live stack).

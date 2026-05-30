@@ -4,6 +4,7 @@ import LobbyPage from './pages/LobbyPage';
 import RoomPage from './pages/RoomPage';
 import ProtectedRoute from './components/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
+import RoomGuard from './components/RoomGuard';
 
 export default function App() {
   return (
@@ -14,7 +15,9 @@ export default function App() {
         element={
           <ProtectedRoute>
             <ErrorBoundary>
-              <LobbyPage />
+              <RoomGuard>
+                <LobbyPage />
+              </RoomGuard>
             </ErrorBoundary>
           </ProtectedRoute>
         }
@@ -24,7 +27,9 @@ export default function App() {
         element={
           <ProtectedRoute>
             <ErrorBoundary>
-              <RoomPage />
+              <RoomGuard>
+                <RoomPage />
+              </RoomGuard>
             </ErrorBoundary>
           </ProtectedRoute>
         }

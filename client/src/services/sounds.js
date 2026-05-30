@@ -1,0 +1,179 @@
+// A-Meet sound effects — fully synthesized with the Web Audio API.
+//
+// No audio files are bundled: every cue is generated from oscillators with
+// short ADSR envelopes through a shared compressor, so they stay crisp,
+// tiny, and tunable. Cues are intentionally soft and brief (Meet-like).
+//
+// Autoplay policy: an AudioContext starts "suspended" until a user gesture.
+// Since the user always reaches the call via a click (New meeting / Join),
+// the SPA already has gesture history; we still resume on the first pointer/
+// key event as a safety net. Playback is a no-op until then.
+//
+// Preference: on/off is persisted in localStorage ("ameet:sfx"), default on.
+
+const STORAGE_KEY = 'ameet:sfx';
+
+let ctx = null;
+let master = null;
+let enabled = readEnabled();
+let primed = false;
+
+function readEnabled() {
+  try {
+    return localStorage.getItem(STORAGE_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function audioSupported() {
+  return typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
+}
+
+function getCtx() {
+  if (ctx) return ctx;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  ctx = new AC();
+  // Gentle master chain: compressor smooths transients, low master gain keeps
+  // everything in pleasant background-cue territory.
+  const compressor = ctx.createDynamicsCompressor();
+  compressor.threshold.value = -18;
+  compressor.ratio.value = 6;
+  compressor.attack.value = 0.003;
+  compressor.release.value = 0.18;
+  master = ctx.createGain();
+  master.gain.value = 0.9;
+  master.connect(compressor);
+  compressor.connect(ctx.destination);
+  return ctx;
+}
+
+function resume() {
+  const c = getCtx();
+  if (c && c.state === 'suspended') c.resume().catch(() => {});
+}
+
+// Schedule one enveloped voice. `glideTo` sweeps the pitch over the note.
+function voice(c, {
+  freq,
+  type = 'sine',
+  start = 0,
+  duration = 0.3,
+  peak = 0.12,
+  attack = 0.008,
+  release,
+  glideTo,
+}) {
+  const t0 = c.currentTime + start;
+  const rel = release ?? duration * 0.7;
+  const osc = c.createOscillator();
+  const gain = c.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (glideTo) osc.frequency.exponentialRampToValueAtTime(glideTo, t0 + duration);
+
+  // Click-free envelope: ramp up from near-zero, hold, ramp back to near-zero.
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(peak, t0 + attack);
+  gain.gain.setValueAtTime(peak, t0 + Math.max(attack, duration - rel));
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.02);
+}
+
+// Note frequencies (equal temperament) used by the recipes.
+const N = {
+  D4: 293.66, A4: 440.0, C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99,
+  A5: 880.0, B5: 987.77, C6: 1046.5, E6: 1318.51, A6: 1760.0,
+};
+
+// Each recipe schedules a short sequence of voices.
+const RECIPES = {
+  // Warm two-note rise — someone joined.
+  join: (c) => {
+    voice(c, { freq: N.C5, type: 'sine', duration: 0.16, peak: 0.13 });
+    voice(c, { freq: N.G5, type: 'sine', start: 0.13, duration: 0.26, peak: 0.13 });
+  },
+  // Two-note fall — someone left.
+  leave: (c) => {
+    voice(c, { freq: N.G5, type: 'sine', duration: 0.16, peak: 0.12 });
+    voice(c, { freq: N.C5, type: 'sine', start: 0.13, duration: 0.28, peak: 0.12 });
+  },
+  // Soft marimba pop — incoming chat message.
+  message: (c) => {
+    voice(c, { freq: N.A5, type: 'triangle', duration: 0.18, peak: 0.11, release: 0.16 });
+    voice(c, { freq: N.E6, type: 'sine', duration: 0.12, peak: 0.04 });
+  },
+  // Light sparkle — emoji reaction.
+  reaction: (c) => {
+    voice(c, { freq: N.A6, type: 'triangle', duration: 0.09, peak: 0.06 });
+    voice(c, { freq: N.E6, type: 'triangle', start: 0.07, duration: 0.12, peak: 0.06 });
+  },
+  // Gentle rise — a hand was raised.
+  raiseHand: (c) => {
+    voice(c, { freq: N.D5, type: 'sine', duration: 0.14, peak: 0.1 });
+    voice(c, { freq: N.A5, type: 'sine', start: 0.12, duration: 0.22, peak: 0.1 });
+  },
+  // Subtle ticks for mic/cam toggles.
+  toggleOn: (c) => voice(c, { freq: N.A5, type: 'sine', duration: 0.07, peak: 0.07 }),
+  toggleOff: (c) => voice(c, { freq: N.D5, type: 'sine', duration: 0.07, peak: 0.07 }),
+  // Rising / falling swoops for screen share start / stop.
+  shareStart: (c) => voice(c, { freq: 320, glideTo: 760, type: 'sine', duration: 0.32, peak: 0.1 }),
+  shareStop: (c) => voice(c, { freq: 760, glideTo: 320, type: 'sine', duration: 0.3, peak: 0.1 }),
+  // Warm descending pair — leaving the call.
+  callEnd: (c) => {
+    voice(c, { freq: N.A4, type: 'sine', duration: 0.18, peak: 0.13 });
+    voice(c, { freq: N.D4, type: 'sine', start: 0.14, duration: 0.34, peak: 0.13 });
+  },
+};
+
+/** Play a named cue. No-op when sounds are off or audio is unsupported. */
+export function playSound(name) {
+  if (!enabled || !audioSupported()) return;
+  const recipe = RECIPES[name];
+  if (!recipe) return;
+  try {
+    const c = getCtx();
+    if (!c) return;
+    if (c.state === 'suspended') c.resume().catch(() => {});
+    recipe(c);
+  } catch {
+    /* audio not available — ignore */
+  }
+}
+
+export function isSoundEnabled() {
+  return enabled;
+}
+
+export function setSoundEnabled(value) {
+  enabled = !!value;
+  try {
+    localStorage.setItem(STORAGE_KEY, enabled ? 'on' : 'off');
+  } catch {
+    /* storage blocked — keep in-memory only */
+  }
+  if (enabled) resume();
+  return enabled;
+}
+
+export function toggleSound() {
+  return setSoundEnabled(!enabled);
+}
+
+// Resume the context on the first user gesture (autoplay-policy safety net).
+if (typeof window !== 'undefined') {
+  const prime = () => {
+    if (primed) return;
+    primed = true;
+    resume();
+    window.removeEventListener('pointerdown', prime);
+    window.removeEventListener('keydown', prime);
+  };
+  window.addEventListener('pointerdown', prime, { once: false });
+  window.addEventListener('keydown', prime, { once: false });
+}
