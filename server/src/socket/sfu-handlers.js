@@ -1,0 +1,215 @@
+// SFU signaling handlers (M4). The browser drives a fixed sequence; each step
+// is a Socket.io event with an ack callback (request/response), so the client
+// can `await` every round-trip. We never touch media bytes — mediasoup does —
+// we only create/connect transports and wire producers to consumers.
+//
+// Error convention: every ack returns either the result or `{ error: msg }`;
+// the client's request() helper rejects on `error`.
+
+import { webRtcTransportOptions } from '../sfu/config.js';
+import {
+  getOrCreateRoom, getRoom, addPeer, getPeer,
+  listOtherProducers, removePeer, closeRoomIfEmpty,
+} from '../sfu/sfu-rooms.js';
+
+// socketId → roomId, established on get-rtp-capabilities. SFU-scoped (independent
+// of M1's room-manager) and set before any transport work, so it never races
+// the chat effect's join-room.
+const socketRoom = new Map();
+
+export function registerSfuHandlers(io, socket) {
+  // 1) Entry point: lazily create the room's Router, register this peer, and
+  //    return the Router's rtpCapabilities so the client can load its Device.
+  socket.on('sfu-get-rtp-capabilities', async ({ roomId } = {}, callback) => {
+    try {
+      if (!roomId || typeof roomId !== 'string') throw new Error('roomId required');
+      const room = await getOrCreateRoom(roomId);
+      addPeer(roomId, socket.id, socket.user);
+      socketRoom.set(socket.id, roomId);
+      socket.join(roomId); // idempotent with chat's join; makes SFU self-sufficient
+      callback({ rtpCapabilities: room.router.rtpCapabilities });
+    } catch (err) {
+      callback({ error: err.message });
+    }
+  });
+
+  // 2) Create a send or recv WebRtcTransport for this peer. We return only the
+  //    client-needed bits; the server keeps the Transport object.
+  socket.on('sfu-create-transport', async ({ direction } = {}, callback) => {
+    try {
+      const roomId = socketRoom.get(socket.id);
+      const room = getRoom(roomId);
+      const peer = getPeer(roomId, socket.id);
+      if (!room || !peer) throw new Error('not in room');
+      if (direction !== 'send' && direction !== 'recv') throw new Error('bad direction');
+
+      const transport = await room.router.createWebRtcTransport({
+        ...webRtcTransportOptions,
+        appData: { direction },
+      });
+      peer.transports.set(transport.id, transport);
+
+      callback({
+        id: transport.id,
+        iceParameters: transport.iceParameters,
+        iceCandidates: transport.iceCandidates,
+        dtlsParameters: transport.dtlsParameters,
+      });
+    } catch (err) {
+      callback({ error: err.message });
+    }
+  });
+
+  // 3) Complete the DTLS handshake using the client's dtlsParameters. Fires
+  //    once per transport, the first time it's used.
+  socket.on('sfu-connect-transport', async ({ transportId, dtlsParameters } = {}, callback) => {
+    try {
+      const peer = getPeer(socketRoom.get(socket.id), socket.id);
+      const transport = peer?.transports.get(transportId);
+      if (!transport) throw new Error('transport not found');
+      await transport.connect({ dtlsParameters });
+      callback({ connected: true });
+    } catch (err) {
+      callback({ error: err.message });
+    }
+  });
+
+  // 4) The client produces a local track on its send transport. We create the
+  //    server-side Producer, then tell everyone else to consume it.
+  socket.on('sfu-produce', async ({ transportId, kind, rtpParameters, appData } = {}, callback) => {
+    try {
+      const roomId = socketRoom.get(socket.id);
+      const peer = getPeer(roomId, socket.id);
+      const transport = peer?.transports.get(transportId);
+      if (!transport) throw new Error('send transport not found');
+
+      const producer = await transport.produce({ kind, rtpParameters, appData });
+      peer.producers.set(producer.id, producer);
+      producer.on('transportclose', () => peer.producers.delete(producer.id));
+
+      socket.to(roomId).emit('sfu-new-producer', {
+        producerId: producer.id,
+        socketId: socket.id,
+        user: socket.user,
+        kind: producer.kind,
+        paused: producer.paused,
+        appData: producer.appData,
+      });
+
+      callback({ id: producer.id });
+    } catch (err) {
+      callback({ error: err.message });
+    }
+  });
+
+  // 5) The client consumes someone else's producer on its recv transport.
+  //    Created PAUSED — the client resumes (step 6) once the track is wired up,
+  //    so the first keyframe isn't lost into a not-yet-ready element.
+  socket.on('sfu-consume', async ({ transportId, producerId, rtpCapabilities } = {}, callback) => {
+    try {
+      const roomId = socketRoom.get(socket.id);
+      const room = getRoom(roomId);
+      const peer = getPeer(roomId, socket.id);
+      if (!room || !peer) throw new Error('not in room');
+      if (!room.router.canConsume({ producerId, rtpCapabilities })) {
+        throw new Error('cannot consume this producer');
+      }
+      const transport = peer.transports.get(transportId);
+      if (!transport) throw new Error('recv transport not found');
+
+      const consumer = await transport.consume({ producerId, rtpCapabilities, paused: true });
+      peer.consumers.set(consumer.id, consumer);
+
+      consumer.on('transportclose', () => peer.consumers.delete(consumer.id));
+      consumer.on('producerclose', () => {
+        peer.consumers.delete(consumer.id);
+        socket.emit('sfu-consumer-closed', { consumerId: consumer.id });
+      });
+
+      callback({
+        id: consumer.id,
+        producerId,
+        kind: consumer.kind,
+        rtpParameters: consumer.rtpParameters,
+        producerPaused: consumer.producerPaused,
+      });
+    } catch (err) {
+      callback({ error: err.message });
+    }
+  });
+
+  // 6) Resume a consumer once the client has attached its track.
+  socket.on('sfu-resume-consumer', async ({ consumerId } = {}, callback) => {
+    try {
+      const peer = getPeer(socketRoom.get(socket.id), socket.id);
+      const consumer = peer?.consumers.get(consumerId);
+      if (!consumer) throw new Error('consumer not found');
+      await consumer.resume();
+      callback({ resumed: true });
+    } catch (err) {
+      callback({ error: err.message });
+    }
+  });
+
+  // 7) A newcomer asks for producers already present so it can consume them.
+  socket.on('sfu-get-producers', (_payload, callback) => {
+    callback(listOtherProducers(socketRoom.get(socket.id), socket.id));
+  });
+
+  // 8) Mic-mute / camera-off = pause the producer (track stays, RTP stops).
+  //    We broadcast so others can show a muted/placeholder tile.
+  socket.on('sfu-pause-producer', async ({ producerId } = {}, callback) => {
+    try {
+      const roomId = socketRoom.get(socket.id);
+      const producer = getPeer(roomId, socket.id)?.producers.get(producerId);
+      if (!producer) throw new Error('producer not found');
+      await producer.pause();
+      socket.to(roomId).emit('sfu-producer-paused', { producerId, socketId: socket.id });
+      callback?.({ paused: true });
+    } catch (err) {
+      callback?.({ error: err.message });
+    }
+  });
+
+  socket.on('sfu-resume-producer', async ({ producerId } = {}, callback) => {
+    try {
+      const roomId = socketRoom.get(socket.id);
+      const producer = getPeer(roomId, socket.id)?.producers.get(producerId);
+      if (!producer) throw new Error('producer not found');
+      await producer.resume();
+      socket.to(roomId).emit('sfu-producer-resumed', { producerId, socketId: socket.id });
+      callback?.({ resumed: true });
+    } catch (err) {
+      callback?.({ error: err.message });
+    }
+  });
+
+  // 10) Raise hand: toggle for this peer; broadcast state to the room.
+  socket.on('sfu-raise-hand', ({ raised } = {}, callback) => {
+    const roomId = socketRoom.get(socket.id);
+    const peer = getPeer(roomId, socket.id);
+    if (!peer) return;
+    peer.handRaised = !!raised;
+    socket.to(roomId).emit('sfu-hand-raise-update', { socketId: socket.id, raised: peer.handRaised });
+    callback?.({ ok: true });
+  });
+
+  // 11) Emoji reaction: ephemeral relay only, no persistence. Use io.in so the
+  //     sender also receives the event (for local feedback).
+  socket.on('sfu-reaction', ({ emoji } = {}) => {
+    const roomId = socketRoom.get(socket.id);
+    if (!roomId || typeof emoji !== 'string') return;
+    io.in(roomId).emit('sfu-reaction', { emoji, socketId: socket.id });
+  });
+
+  // 12) Teardown: closing the peer's transports cascades to its producers and
+  //    consumers; tell others to drop this peer's tiles; free the room if empty.
+  socket.on('disconnect', () => {
+    const roomId = socketRoom.get(socket.id);
+    if (!roomId) return;
+    removePeer(roomId, socket.id);
+    socketRoom.delete(socket.id);
+    socket.to(roomId).emit('sfu-peer-left', { socketId: socket.id });
+    closeRoomIfEmpty(roomId);
+  });
+}

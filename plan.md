@@ -356,29 +356,277 @@ responsive layout (remote full-screen, local as PiP).
 
 ---
 
-## Milestone 4 — Group calls via mediasoup SFU  *(HARD — expand to micro-steps on arrival w/ current API; use Opus)*
+## Milestone 4 — Group calls via mediasoup SFU  *(HARD — Opus; expanded to micro-steps 2026-05-30)*
 
-1. Concept checkpoint: Worker, Router, send/recv Transports, Producer, Consumer.
-2. Install `mediasoup` (server) + `mediasoup-client` (client).
-3. Server: create Worker(s); per-room Router with media codecs.
-4. SFU signaling: `getRouterRtpCapabilities`, `createWebRtcTransport`, `connectTransport`,
-   `produce`, `consume`, `resume`.
-5. Client: load Device with rtpCapabilities; create send/recv transports; produce local tracks;
-   consume remote producers.
-6. `new-producer` → consume; `producer-closed` → cleanup.
-7. Dynamic multi-participant video grid (MUI).
-8. Configure `listenIps` / `announcedIp` for local (and note deploy implications).
-9. Verify with 3+ participants. → **/journal M4.**
+**Outcome:** 3+ logged-in tabs in the same room all see and hear each other through the **server**
+(mediasoup SFU) instead of the M2/M3 browser-to-browser mesh. Each browser uploads its camera **once**
+and downloads everyone else's; chat (M1) and the lobby (M3) are unchanged.
+
+**Why the mesh had to go (read first):** in a mesh, N participants means each browser holds **N−1**
+peer connections and uploads its video **N−1 times** — upload bandwidth and CPU explode past ~4 people.
+An **SFU (Selective Forwarding Unit)** flips this: each browser opens **one** connection to the server,
+uploads its camera **once**, and the server *forwards* (selects, doesn't mix/transcode) each person's
+media to everyone else. Per browser: 1 upload + (N−1) downloads, but only **2 transports total**.
+
+**The 7 mediasoup primitives (the milestone's whole vocabulary):**
+- **Worker** — a C++ subprocess doing the actual media work (DTLS/SRTP/RTP). ~1 per CPU core; we pool them.
+- **Router** — lives in a Worker; **one Router per room**. Routes RTP between transports and owns the
+  room's `mediaCodecs` (its `rtpCapabilities`).
+- **WebRtcTransport** — the ICE+DTLS pipe between one browser and the Router. Each peer needs **two**:
+  a **send** transport (browser → server, carries Producers) and a **recv** transport (server → browser,
+  carries Consumers). Split by direction so the two flows never interfere.
+- **Producer** — server-side handle for an **inbound** track (this peer's mic or cam). Created when the
+  client calls `sendTransport.produce(track)`, which the server services via `transport.produce(...)`.
+- **Consumer** — server-side handle for an **outbound** track (someone else's Producer, forwarded to
+  *this* peer). Created via `transport.consume(...)` on the peer's recv transport.
+
+**The signaling sequence (client drives; all request/response over Socket.io ack callbacks):**
+1. `sfu-get-rtp-capabilities` → server lazily creates the room's Router, returns `router.rtpCapabilities`.
+2. Client `device.load({ routerRtpCapabilities })` — teaches mediasoup-client what the Router supports.
+3. `sfu-create-transport {direction}` ×2 → server makes a WebRtcTransport, returns
+   `{id, iceParameters, iceCandidates, dtlsParameters}`; client builds send + recv transports.
+4. Transport `'connect'` event (fires once, on first use) → `sfu-connect-transport {transportId,
+   dtlsParameters}` → server `transport.connect(...)`. DTLS handshake completes.
+5. Send transport `'produce'` event → `sfu-produce {transportId, kind, rtpParameters}` → server
+   `transport.produce(...)` → returns `producerId`; server broadcasts `sfu-new-producer` to the room.
+6. Client `sendTransport.produce({track})` for the mic and cam tracks it has.
+7. `sfu-get-producers` → list of producers already in the room; for each, **consume** it.
+8. Consume: `sfu-consume {producerId, rtpCapabilities}` → server checks `router.canConsume`,
+   creates the Consumer **paused**, returns `{id, producerId, kind, rtpParameters}`; client
+   `recvTransport.consume(...)` → real track → `sfu-resume-consumer {consumerId}` → server
+   `consumer.resume()`. (Create-paused-then-resume avoids losing the first keyframe.)
+9. Live updates: `sfu-new-producer` → consume it; `sfu-producer-closed` → close that Consumer;
+   `sfu-peer-left` → tear down all of that peer's tiles. Mic/cam toggle = `producer.pause()/resume()`
+   broadcast as `sfu-producer-paused/resumed` (no renegotiation — producing a new track Just Works).
+
+**Coexistence with M2/M3:** the mesh files (`server/src/socket/webrtc.js`, `client/src/hooks/useWebRTC.js`,
+`client/src/services/webrtc.js`) stay in the repo **for reference** but go dormant — RoomPage switches to
+the new SFU hook. `useMediasoup` deliberately returns the **same shape** as `useWebRTC`
+(`{ localStream, remoteStreams (socketId→MediaStream), peerStates, localVideoOn, … toggleVideo, toggleAudio }`)
+so RoomPage is a near drop-in. (`peerConnectionStates` becomes a single recv-transport state, not per-peer.)
+
+### M4.0 — Concept checkpoint (no code) ✅
+- [x] Mental model written above (mesh→SFU, the 7 primitives, the 9-step signaling sequence). Confirmed
+      current API: **mediasoup 3.20.0** (server, needs Node ≥22 — have v22.22.2) +
+      **mediasoup-client 3.20.0** (client). Worker ships a prebuilt binary; gcc/make/python3 present as fallback.
+
+### M4.1 — Install deps + env ✅
+- [x] `npm i mediasoup` (server) — installed 3.20.0; worker binary present (9.1M) + smoke test passed
+      (worker spawns, router created, opus/VP8/rtx codecs available) on Fedora.
+- [x] `npm i mediasoup-client` (client) — 3.20.0.
+- [x] `server/.env(.example)`: added `MEDIASOUP_ANNOUNCED_IP`, `MEDIASOUP_MIN_PORT`, `MEDIASOUP_MAX_PORT`,
+      `MEDIASOUP_NUM_WORKERS`.
+- [x] Extended `config/env.js` with a `mediasoup` block (announcedIp, minPort, maxPort, numWorkers).
+
+### M4.2 — Server: codecs config + Worker pool ✅
+- [x] `server/src/sfu/config.js` — `mediaCodecs` (opus + VP8), `workerSettings`, `webRtcTransportOptions`
+      (`listenInfos` udp+tcp w/ `announcedAddress` from env, `enableUdp/Tcp`, `preferUdp`, init bitrate).
+- [x] `server/src/sfu/workers.js` — `createWorkers()` (pool = CPU cores, exit on `'died'`), `getWorker()`
+      round-robin. Wired `await createWorkers()` into `server.js` before `listen`. Verified: 12 workers boot.
+
+### M4.3 — Server: per-room Router + Peer state ✅
+- [x] `server/src/sfu/sfu-rooms.js` — `getOrCreateRoom` (lazy Router on round-robin worker),
+      `addPeer/getPeer/removePeer` (transport-close cascade), `listOtherProducers`, `closeRoomIfEmpty`.
+      Integration-tested: router caps, transport+ICE candidate, peer bookkeeping, empty-room teardown.
+
+### M4.4 — Server: SFU signaling handlers ✅
+- [x] `server/src/socket/sfu-handlers.js` — `registerSfuHandlers(io, socket)`, ack-based events
+      `sfu-get-rtp-capabilities` (+`socket.join`), `-create-transport`, `-connect-transport`, `-produce`,
+      `-consume` (paused), `-resume-consumer`, `-get-producers`, `-pause/resume-producer`. Broadcasts
+      `sfu-new-producer`, `-consumer-closed`, `-producer-paused/resumed`, `-peer-left`. disconnect → cascade.
+- [x] Registered `registerSfuHandlers` in `handlers.js` (mesh `webrtc.js` left dormant for reference).
+
+### M4.5 — Client: mediasoup signaling helper ✅
+- [x] `client/src/services/mediasoup-signal.js` — `request(event, data, timeoutMs=10000)` promisifies the
+      Socket.io ack (rejects on `error` or timeout). Reused for every SFU round-trip.
+
+### M4.6 — Client: useMediasoup hook (the orchestration) ✅
+- [x] `client/src/hooks/useMediasoup.js` — same return shape as `useWebRTC`. One StrictMode-guarded effect:
+      acquire mic+cam independently → `device.load()` → send + recv transports (`'connect'`/`'produce'`
+      relays) → produce local tracks (pause whichever lobby started "off") → register
+      `sfu-new-producer`/`-consumer-closed`/`-peer-left`/`-producer-paused`/`-resumed` → `sfu-get-producers`
+      then consume each, piling tracks into one MediaStream per remote socketId. `toggleAudio`/`toggleVideo`
+      pause/resume the Producer (or produce-on-demand if none). Cleanup closes transports + stops tracks.
+      Lint + client build clean.
+
+### M4.7 — RoomPage: switch to the SFU hook ✅
+- [x] `client/src/pages/RoomPage.jsx` — swapped `useWebRTC` → `useMediasoup` (identical destructure, so grid +
+      1:1 PiP layout + control bar + chat untouched). Per-peer badge now reflects recv-transport state.
+      Mesh files kept dormant for reference. Server boots clean (DB + 12 workers verified).
+
+### M4.8 — listenIps/announcedIp + deploy note ✅ (runtime confirm folded into M4.9)
+- [x] Documented (env `.env.example` comments + M4 intro): `MEDIASOUP_ANNOUNCED_IP=127.0.0.1` = same-machine
+      multi-tab only; **LAN testing** needs the host's LAN IP, **prod** needs the public IP; the UDP/TCP range
+      `MEDIASOUP_MIN/MAX_PORT` (40000–40100) must be opened in the firewall. TURN relay still deferred to M6.
+
+### M4.9 — Verify & close out  *(Anuraj — manual, needs camera/mic)*
+- [x] 3-tab verify done (Anuraj, 2026-05-30): SFU works — all tiles render, audio+video both ways,
+      cam-off shows placeholder, leave removes the tile, chat works.
+- [ ] **/journal M4** after final sign-off.
+
+**Fix applied during M4.9 testing (2026-05-30):** local self-tile showed a generic "You"/"Y" instead of the
+user's Google avatar+name. Root cause was latent since M0 — `/auth/me` returns `{ user }` but `AuthContext`
+did `setUser(data)` (wrapped), so every flat consumer (`user.name/avatar/id`) read `undefined`. Fixed at the
+source: `setUser(data.user)`. This also corrects Landing/Lobby name+avatar and chat `isMe` (now keyed on the
+same `payload.sub` as `socket.user.id`).
+
+**Deferred UI polish (from M4.9 — Anuraj wants these in the later UI pass, target M6 step 3 / dedicated UI milestone):**
+1. **Smooth tiling animation** — when a participant joins/leaves, animate the grid reflow (FLIP-style layout
+   transition) instead of the current abrupt re-layout, à la Google Meet.
+2. **Full-bleed participant-colored off-camera tiles** — when a peer's camera is off, fill the whole tile
+   with a solid per-participant color (hash of name/email, or avatar's dominant color) like Google Meet,
+   rather than the current dark `#202124` background + small centered avatar.
+3. General `VideoTile` styling polish (also see the M3 `contain`→`cover` 16:9 deferred note above).
 
 ---
 
-## Milestone 5 — Screen share + in-call chat + reactions  *(expand on arrival)*
+## Milestone 5 — Screen share + reactions + raise hand + chat toggle  *(expanded 2026-05-30)*
 
-1. `getDisplayMedia` → separate screen-share Producer.
-2. Presentation layout (pinned big tile).
-3. In-call chat (reuse M1 socket or a WebRTC data channel).
-4. Emoji reactions + raise hand (socket events).
-5. (Optional) active-speaker detection via audio levels. Verify. → **/journal M5.**
+**Outcome:** Any participant can share their screen (pinned presentation layout while sharing,
+grid resumes on stop). Emoji reactions float over the sender's tile. Raise hand shows a badge.
+Chat panel is toggleable (was always-on in M4). Active-speaker detection is optional.
+
+**In-call chat status:** M1's Socket.io chat is fully wired and working in RoomPage — it survived
+the M4 SFU swap unchanged. M5 adds a toggle button (show/hide the panel); no new chat infrastructure.
+
+### M5.0 — Design decisions (no code)
+- [x] **Screen share** = second mediasoup `sendTransport.produce()` call with
+      `appData: { source: 'screen' }`. Server must pass `appData` through `sfu-new-producer`
+      broadcast and `listOtherProducers` (currently missing). Receivers classify on
+      `appData.source` and route to a separate `remoteScreens` map (socketId → MediaStream).
+- [x] **Presentation layout**: when `isScreenSharing` or `remoteScreens` has entries, pin the
+      screen tile as the full-height center; camera tiles move to a right-rail strip (~180px).
+      When no screen share: existing grid / 1:1 PiP layout resumes.
+- [x] **Chat toggle**: `showChat` boolean state (default `true`). `Chat` icon button in
+      control bar toggles it. Unread badge when panel is hidden and a new message arrives.
+- [x] **Reactions** = ephemeral socket events only. Server relay (no persistence). Client
+      displays a large floating emoji overlay on the sender's tile for 3 s then removes.
+      Fixed set of 6 emojis in a `Popover`.
+- [x] **Raise hand** = per-user boolean. `sfu-raise-hand { raised }` → server sets
+      `peer.handRaised` and broadcasts `sfu-hand-raise-update { socketId, raised }` to room.
+      ✋ badge overlay on the sender's `VideoTile`. Client hook exposes `handRaised, toggleHand`.
+- [x] **Active speaker** (optional, M5.7): `AudioLevelObserver` per room; broadcasts
+      `sfu-active-speaker { socketId }` every 500 ms. Green pulsing border on loudest tile.
+
+### M5.1 — Server: propagate `appData` through SFU events
+- [x] `server/src/socket/sfu-handlers.js` — `sfu-produce` handler already calls
+      `transport.produce({ kind, rtpParameters, appData })`. Add `appData: producer.appData`
+      to the `sfu-new-producer` broadcast (currently missing, line ~91).
+- [x] `server/src/sfu/sfu-rooms.js` — `listOtherProducers`: add `appData: producer.appData`
+      to each result entry (currently missing, line ~62).
+
+### M5.2 — Server: raise-hand + reaction relay handlers
+- [x] `server/src/sfu/sfu-rooms.js` — `addPeer`: add `handRaised: false` to the peer object.
+- [x] `server/src/socket/sfu-handlers.js` — add two handlers inside `registerSfuHandlers`:
+      - `sfu-raise-hand { raised }` → `peer.handRaised = raised`;
+        broadcast `sfu-hand-raise-update { socketId: socket.id, raised }` to room.
+      - `sfu-reaction { emoji }` → relay to room as `sfu-reaction { emoji, socketId: socket.id }`.
+        No ack, no persistence.
+
+### M5.3 — Client: useMediasoup — screen share + separate remote screen streams
+- [x] `client/src/hooks/useMediasoup.js` — additions:
+      **State / refs:**
+      - `remoteScreens` state `{}` (socketId → MediaStream) + `screenStreamsRef` (Map).
+      - `screenProducerRef = useRef(null)`, `localScreenStream` state, `isScreenSharing` state.
+      - `handRaised` state (false).
+      - Update `producerInfoRef` entries to store `source` (`'screen'` | `'camera'`).
+      **Classification in `consumeProducer`:** accept `appData` in its argument; after consuming,
+      check `appData?.source === 'screen'` → add track to `screenStreamsRef.get(socketId)`,
+      update `remoteScreens`; otherwise existing camera path (`peerStreams`/`remoteStreams`).
+      **`closeConsumerById` + `removePeer`:** also clean up `screenStreamsRef`/`remoteScreens`
+      when the closed consumer's `source === 'screen'`.
+      **`dropPeer`:** also delete from `remoteScreens`.
+      **`shareScreen()`:**
+        - Guard: if `screenProducerRef.current`, return.
+        - `stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false })`.
+        - `track = stream.getVideoTracks()[0]`.
+        - `producer = await sendTransportRef.current.produce({ track, appData: { source: 'screen' } })`.
+        - `screenProducerRef.current = producer`. `setLocalScreenStream(stream)`. `setIsScreenSharing(true)`.
+        - `track.addEventListener('ended', stopScreenShare)` (OS stop-sharing button).
+        - `producer.on('transportclose', stopScreenShare)`.
+      **`stopScreenShare()`:**
+        - If no ref, return.
+        - `screenProducerRef.current.close()`. `screenProducerRef.current = null`.
+        - Stop all tracks in `localScreenStream`. `setLocalScreenStream(null)`. `setIsScreenSharing(false)`.
+      **`toggleHand()`:**
+        - Flip `handRaised` state; `socket.emit('sfu-raise-hand', { raised: !handRaised })`.
+      **`sfu-hand-raise-update` listener:** update `peerStates[socketId].handRaised`.
+      **Cleanup:** close `screenProducerRef.current`; clear `screenStreamsRef`; reset `remoteScreens`.
+      **Return shape additions:** `remoteScreens, isScreenSharing, localScreenStream, shareScreen,
+      stopScreenShare, handRaised, toggleHand`.
+
+### M5.4 — RoomPage: screen-share presentation layout + control bar
+- [x] `client/src/pages/RoomPage.jsx`:
+      - Destructure `remoteScreens, isScreenSharing, localScreenStream, shareScreen,
+        stopScreenShare, handRaised, toggleHand` from `useMediasoup`.
+      - Derive `activeScreenEntry`: prefer remote (`Object.entries(remoteScreens)[0]`) over local.
+        `hasScreen = isScreenSharing || !!activeScreenEntry`.
+      - **Presentation layout** (new top branch when `hasScreen`):
+        - Left/center area (`flex: 1`): big `VideoTile` for the screen stream, `objectFit: contain`,
+          label "You are presenting" (local) or sharer name (remote).
+        - Right rail (`width: 180px`): vertical `Stack` of small camera `VideoTile`s
+          (local first, then `remoteStreams` entries). Height auto; scroll if overflow.
+      - Keep existing 1:1 PiP + grid as the else branch.
+      - **Control bar additions:**
+        - `ScreenShare` / `StopScreenShare` `IconButton` (calls `shareScreen` / `stopScreenShare`);
+          highlighted `bgcolor: 'primary.main'` when `isScreenSharing`.
+        - `PanTool` `IconButton` for raise hand; `bgcolor: 'warning.main'` when `handRaised`.
+        - `Chat` / `ChatBubble` `IconButton` to toggle `showChat`; `Badge` with unread count.
+      - `showChat` state (default `true`); `unreadCount` state, reset to 0 on open.
+        Increment `unreadCount` in `chat-message` handler when `!showChat`.
+      - Chat panel: render only when `showChat`; same JSX as M4, no other changes.
+
+### M5.5 — RoomPage: emoji reactions
+- [x] `client/src/pages/RoomPage.jsx`:
+      - `activeReactions` state: `{}` (socketId → emoji string).
+      - In `useEffect` socket listeners, add `sfu-reaction { emoji, socketId }`:
+        set `activeReactions[socketId] = emoji`, then `setTimeout(() => clear it, 3000)`.
+      - `sendReaction(emoji)`:
+        - `socket.emit('sfu-reaction', { emoji })`.
+        - Also trigger locally (using `user?.id` as a key — but note: we need `socket.id`
+          for the `activeReactions` map; emit a synthetic local entry with a placeholder or
+          use our own socket id from the server event echo if the server sends back to all
+          including sender, otherwise just skip local echo).
+          **Simplest:** server uses `socket.to(roomId)` which excludes the sender — so add
+          a local `activeReactions` update in `sendReaction` using a sentinel `'me'` key,
+          or change server to `io.in(roomId)` to include sender. Use `io.in(roomId)` approach.
+      - Emoji picker: `reactionAnchor` state. `EmojiEmotions` `IconButton` in control bar →
+        `Popover` with 6 `IconButton`s: 👍 ❤️ 😂 😮 👏 🎉. Click → `sendReaction(e)` → close.
+      - Pass `activeReaction={activeReactions[peerId]}` and `activeReaction={activeReactions['me']}`
+        (local) to the respective `VideoTile`s.
+- [ ] `client/src/components/VideoTile.jsx`: add `activeReaction` prop. When set, render a
+      large emoji (`fontSize: 48px`) absolutely centered over the tile. No animation needed
+      (the 3 s timeout handles the fade implicitly on removal).
+
+### M5.6 — VideoTile: raise-hand badge + reaction overlay
+- [x] `client/src/components/VideoTile.jsx`:
+      - Add `handRaised` prop. When true, show a ✋ chip/badge in the top-left corner of the tile.
+      - Add `activeReaction` prop. When set, show a centered large emoji overlay.
+- [x] `client/src/pages/RoomPage.jsx`: pass `handRaised={peerStates[peerId]?.handRaised}` to
+      each remote tile; pass `handRaised={false}` (or omit) for local tile.
+
+### M5.7 — (Optional) Active-speaker detection
+- [ ] `server/src/sfu/sfu-rooms.js` — in `getOrCreateRoom`, after `createRouter`:
+      create `router.createAudioLevelObserver({ maxEntries: 1, threshold: -80, interval: 500 })`.
+      Store as `room.audioLevelObserver`. On `volumes` event: broadcast `sfu-active-speaker
+      { socketId: volumes[0].producer.appData.socketId }` to the room via `io`. On `silence`:
+      broadcast `sfu-active-speaker { socketId: null }`. (Requires `io` passed into `getOrCreateRoom`.)
+- [ ] `server/src/socket/sfu-handlers.js` — in `sfu-produce` handler, when `kind === 'audio'`:
+      call `room.audioLevelObserver?.addProducer(producer)`. Also pass `appData` enriched with
+      `socketId: socket.id` when creating the audio producer so the observer callback can map it.
+- [ ] `client/src/hooks/useMediasoup.js`: listen `sfu-active-speaker { socketId }` →
+      set `activeSpeaker` state. Export `activeSpeaker`.
+- [ ] `client/src/components/VideoTile.jsx`: `activeSpeaker` prop → `box-shadow:
+      '0 0 0 3px #00c853'` pulsing border (CSS animation or just static green ring).
+- [ ] `client/src/pages/RoomPage.jsx`: pass `activeSpeaker={activeSpeaker === peerId}` to tiles.
+
+### M5.8 — Verify & close out  *(Anuraj — manual, needs 3 tabs + camera/mic)*
+- [x] Screen share: tab A shares → tabs B+C see pinned screen tile + right-rail thumbnails;
+      tab A shows "You are presenting"; tab A stops → layout reverts to grid.
+- [x] Chat toggle: hide/show panel; unread badge increments while hidden; messages still send.
+- [x] Reactions: click 👍 → emoji appears over sender's tile in all tabs, fades after 3 s.
+- [x] Raise hand: ✋ badge on tile; toggle clears it; visible across tabs.
+- [x] Tick all M5 checkboxes. **/journal M5.**
 
 ---
 
@@ -429,3 +677,20 @@ responsive layout (remote full-screen, local as PiP).
   enumeration + preview), routing Landing→Lobby→Room, device constraints in `useWebRTC`, mid-call
   renegotiation for cam-on (`onnegotiationneeded`), connection-state badge on `VideoTile`,
   1:1 PiP layout, red Leave button. Build clean. M3.6 manual verify is Anuraj's.
+- **M5** — code complete (2026-05-30). Expanded M5 to micro-steps (M5.0–M5.8). Built: server
+  `appData` propagation fix (sfu-handlers + sfu-rooms), raise-hand (`sfu-raise-hand` / `sfu-hand-raise-update`)
+  and reaction relay (`sfu-reaction` via `io.in`); client `useMediasoup` extended with screen share
+  (`shareScreen`/`stopScreenShare`, `remoteScreens` map, screen-vs-camera classification by
+  `appData.source`, `handRaised`/`toggleHand`); `VideoTile` gains `handRaised` badge + `activeReaction`
+  emoji overlay; `RoomPage` gains presentation layout (screen pinned + right-rail thumbnails),
+  chat toggle with unread badge, emoji reaction popover, raise-hand button. Client build clean,
+  server modules import clean. M5.7 (AudioLevelObserver) left optional. M5.8 = Anuraj's manual verify.
+- **M4** — code complete (2026-05-30). Mesh→SFU. Expanded M4 to micro-steps (M4.0–M4.9). Stack:
+  **mediasoup 3.20.0** (server) + **mediasoup-client 3.20.0** (client), Node v22.22.2. Built:
+  server `sfu/{config,workers,sfu-rooms}.js` + `socket/sfu-handlers.js` (ack-based signaling:
+  rtp-capabilities → transports → produce → consume → resume; new-producer/producer-closed/peer-left
+  broadcasts; pause/resume for mute/cam-off), wired `createWorkers()` into `server.js`; client
+  `services/mediasoup-signal.js` + `hooks/useMediasoup.js` (drop-in for `useWebRTC`), RoomPage swapped.
+  Verified: worker smoke test, SFU module integration test (router/transport/ICE/teardown), server boot
+  (DB + 12 workers), client lint + build. Mesh files (`webrtc.js`, `useWebRTC.js`, `services/webrtc.js`)
+  left dormant for reference. **M4.9 = Anuraj's manual 3-tab verify, then /journal M4.**

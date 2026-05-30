@@ -8,7 +8,9 @@ A-Meet — a Google Meet clone built from scratch (MERN + Material UI + Socket.i
 Learning + portfolio project, built in staged milestones (see `plan.md`).
 
 ## Current milestone
-**M2 — WebRTC P2P 1:1, by hand.** M0–M2 complete; 
+**M5 — Screen share + reactions + raise hand + chat toggle.** M0–M4 complete; M5 code-complete
+(screen share via SFU, presentation layout, emoji reactions, raise-hand, chat toggle with unread
+badge), pending Anuraj's manual verify (M5.8) + /journal M5. See `plan.md` for live status.
 
 ## Operating ritual (every step)
 1. **Read** relevant context (`plan.md` + the files you'll touch + any unsure library doc) before coding.

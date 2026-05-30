@@ -10,7 +10,9 @@ export function AuthProvider({ children }) {
   async function refresh() {
     try {
       const { data } = await api.get('/auth/me');
-      setUser(data);
+      // /auth/me responds `{ user: {...} }`; store the flat user so consumers
+      // can read user.name / user.avatar / user.id directly.
+      setUser(data.user ?? null);
     } catch {
       setUser(null);
     } finally {

@@ -1,14 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Avatar, Box, Chip, Typography } from '@mui/material';
-import { MicOff as MicOffIcon } from '@mui/icons-material';
+import { MicOff as MicOffIcon, PanTool as PanToolIcon } from '@mui/icons-material';
 
-// A single video tile. A MediaStream can't be passed as a normal `src`; it has
-// to be assigned imperatively to the element's `srcObject`, so we use a ref.
-// The local tile is always `muted` to avoid hearing your own mic (echo).
-//
-// When `videoOn` is false (camera off, or never available) we keep the <video>
-// element mounted — it still carries the peer's audio — and lay a placeholder
-// avatar over it, like Google Meet. A mic-off badge shows when `audioOn` is false.
 const CONNECTION_BADGE = {
   connecting: { label: 'Connecting…', color: 'warning' },
   disconnected: { label: 'Reconnecting…', color: 'warning' },
@@ -23,6 +16,8 @@ export default function VideoTile({
   videoOn = true,
   audioOn = true,
   connectionState,
+  handRaised = false,
+  activeReaction = null,
 }) {
   const videoRef = useRef(null);
 
@@ -51,7 +46,6 @@ export default function VideoTile({
           width: '100%',
           height: '100%',
           objectFit: 'contain',
-          // Hide (don't unmount) the element when video is off, so audio keeps flowing.
           visibility: videoOn ? 'visible' : 'hidden',
         }}
       />
@@ -72,6 +66,7 @@ export default function VideoTile({
         </Box>
       )}
 
+      {/* Name + mic-off label */}
       <Box
         sx={{
           position: 'absolute',
@@ -91,6 +86,7 @@ export default function VideoTile({
         {name && <Typography variant="caption">{name}</Typography>}
       </Box>
 
+      {/* Connection badge */}
       {CONNECTION_BADGE[connectionState] && (
         <Box sx={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)' }}>
           <Chip
@@ -99,6 +95,44 @@ export default function VideoTile({
             size="small"
             sx={{ fontSize: 11 }}
           />
+        </Box>
+      )}
+
+      {/* Raise-hand badge */}
+      {handRaised && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            bgcolor: 'rgba(0,0,0,0.6)',
+            borderRadius: 1,
+            px: 0.75,
+            py: 0.25,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+          }}
+        >
+          <PanToolIcon sx={{ fontSize: 14, color: 'warning.light' }} />
+        </Box>
+      )}
+
+      {/* Emoji reaction overlay */}
+      {activeReaction && (
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          <Typography sx={{ fontSize: 52, lineHeight: 1, userSelect: 'none' }}>
+            {activeReaction}
+          </Typography>
         </Box>
       )}
     </Box>

@@ -1,9 +1,13 @@
 import { addUser, removeUser, getRoomUsers, isUserInRoom } from './room-manager.js';
 import { registerWebrtcHandlers } from './webrtc.js';
+import { registerSfuHandlers } from './sfu-handlers.js';
 
 export function registerHandlers(io) {
   io.on('connection', (socket) => {
+    // Mesh relay (M2/M3) stays registered for reference but is dormant — the
+    // client now drives the SFU path (M4) instead.
     registerWebrtcHandlers(io, socket);
+    registerSfuHandlers(io, socket);
 
     socket.on('join-room', (roomId) => {
       if (!roomId || typeof roomId !== 'string') return;

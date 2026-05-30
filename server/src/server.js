@@ -5,10 +5,12 @@ import { createApp } from './app.js';
 import { initSocket } from './socket/io.js';
 import { socketAuth } from './middleware/socket-auth.js';
 import { registerHandlers } from './socket/handlers.js';
+import { createWorkers } from './sfu/workers.js';
 
 async function start() {
   try {
     await connectDB();
+    await createWorkers();
     const app = createApp();
     const httpServer = http.createServer(app);
     const io = initSocket(httpServer);
