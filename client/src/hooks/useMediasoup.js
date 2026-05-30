@@ -23,6 +23,7 @@ export function useMediasoup(roomId, devices = {}) {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [localScreenStream, setLocalScreenStream] = useState(null);
   const [handRaised, setHandRaised] = useState(false);
+  const [activeSpeaker, setActiveSpeaker] = useState(null); // socketId of loudest speaker
 
   const deviceRef = useRef(null);
   const sendTransportRef = useRef(null);
@@ -291,6 +292,7 @@ export function useMediasoup(roomId, devices = {}) {
         return { ...prev, [socketId]: { ...prev[socketId], handRaised: raised } };
       });
     };
+    const onActiveSpeaker = ({ socketId }) => setActiveSpeaker(socketId);
 
     async function init() {
       const { videoDeviceId, audioDeviceId, startVideoOn = true, startAudioOn = true } = devicesRef.current;
@@ -379,6 +381,7 @@ export function useMediasoup(roomId, devices = {}) {
         socket.on('sfu-producer-paused', onProducerPaused);
         socket.on('sfu-producer-resumed', onProducerResumed);
         socket.on('sfu-hand-raise-update', onHandRaiseUpdate);
+        socket.on('sfu-active-speaker', onActiveSpeaker);
 
         const existing = await request('sfu-get-producers');
         if (cancelled) return;
@@ -398,6 +401,7 @@ export function useMediasoup(roomId, devices = {}) {
       socket.off('sfu-producer-paused', onProducerPaused);
       socket.off('sfu-producer-resumed', onProducerResumed);
       socket.off('sfu-hand-raise-update', onHandRaiseUpdate);
+      socket.off('sfu-active-speaker', onActiveSpeaker);
 
       try { sendTransportRef.current?.close(); } catch { /* gone */ }
       try { recvTransportRef.current?.close(); } catch { /* gone */ }
@@ -446,5 +450,6 @@ export function useMediasoup(roomId, devices = {}) {
     stopScreenShare,
     handRaised,
     toggleHand,
+    activeSpeaker,
   };
 }

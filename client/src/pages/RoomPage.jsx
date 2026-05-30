@@ -57,6 +57,7 @@ export default function RoomPage() {
     toggleVideo, toggleAudio,
     isScreenSharing, localScreenStream, shareScreen, stopScreenShare,
     handRaised, toggleHand,
+    activeSpeaker,
   } = useMediasoup(roomId, devices);
 
   const remoteEntries = Object.entries(remoteStreams);
@@ -161,6 +162,7 @@ export default function RoomPage() {
           connectionState: peerConnectionStates[peerId],
           handRaised: ps?.handRaised ?? false,
           reaction: activeReactions[peerId],
+          isSpeaker: activeSpeaker === peerId,
         };
       }),
     ].filter(Boolean);
@@ -198,7 +200,7 @@ export default function RoomPage() {
             borderColor: 'divider',
           }}
         >
-          {allCameraTiles.map(({ key, stream, muted, name, avatar, videoOn, audioOn, connectionState, handRaised: hr, reaction }) => (
+          {allCameraTiles.map(({ key, stream, muted, name, avatar, videoOn, audioOn, connectionState, handRaised: hr, reaction, isSpeaker }) => (
             <Box key={key} sx={{ width: '100%', aspectRatio: '16/9', flexShrink: 0, borderRadius: 1, overflow: 'hidden' }}>
               <VideoTile
                 stream={stream}
@@ -210,6 +212,7 @@ export default function RoomPage() {
                 connectionState={connectionState}
                 handRaised={hr}
                 activeReaction={reaction}
+                activeSpeaker={isSpeaker}
               />
             </Box>
           ))}
@@ -234,6 +237,7 @@ export default function RoomPage() {
             connectionState={peerConnectionStates[peerId]}
             handRaised={ps?.handRaised ?? false}
             activeReaction={activeReactions[peerId]}
+            activeSpeaker={activeSpeaker === peerId}
           />
         </Box>
         {localStream && (
@@ -305,6 +309,7 @@ export default function RoomPage() {
                 connectionState={peerConnectionStates[peerId]}
                 handRaised={ps?.handRaised ?? false}
                 activeReaction={activeReactions[peerId]}
+                activeSpeaker={activeSpeaker === peerId}
               />
             );
           })}

@@ -606,7 +606,7 @@ the M4 SFU swap unchanged. M5 adds a toggle button (show/hide the panel); no new
       each remote tile; pass `handRaised={false}` (or omit) for local tile.
 
 ### M5.7 — (Optional) Active-speaker detection
-- [ ] `server/src/sfu/sfu-rooms.js` — in `getOrCreateRoom`, after `createRouter`:
+- [x] `server/src/sfu/sfu-rooms.js` — in `getOrCreateRoom`, after `createRouter`:
       create `router.createAudioLevelObserver({ maxEntries: 1, threshold: -80, interval: 500 })`.
       Store as `room.audioLevelObserver`. On `volumes` event: broadcast `sfu-active-speaker
       { socketId: volumes[0].producer.appData.socketId }` to the room via `io`. On `silence`:
@@ -677,14 +677,16 @@ the M4 SFU swap unchanged. M5 adds a toggle button (show/hide the panel); no new
   enumeration + preview), routing Landing→Lobby→Room, device constraints in `useWebRTC`, mid-call
   renegotiation for cam-on (`onnegotiationneeded`), connection-state badge on `VideoTile`,
   1:1 PiP layout, red Leave button. Build clean. M3.6 manual verify is Anuraj's.
-- **M5** — code complete (2026-05-30). Expanded M5 to micro-steps (M5.0–M5.8). Built: server
-  `appData` propagation fix (sfu-handlers + sfu-rooms), raise-hand (`sfu-raise-hand` / `sfu-hand-raise-update`)
-  and reaction relay (`sfu-reaction` via `io.in`); client `useMediasoup` extended with screen share
-  (`shareScreen`/`stopScreenShare`, `remoteScreens` map, screen-vs-camera classification by
-  `appData.source`, `handRaised`/`toggleHand`); `VideoTile` gains `handRaised` badge + `activeReaction`
-  emoji overlay; `RoomPage` gains presentation layout (screen pinned + right-rail thumbnails),
-  chat toggle with unread badge, emoji reaction popover, raise-hand button. Client build clean,
-  server modules import clean. M5.7 (AudioLevelObserver) left optional. M5.8 = Anuraj's manual verify.
+- **M5** — complete (2026-05-30). Expanded M5 to micro-steps (M5.0–M5.8). Built: server
+  `appData` propagation fix (sfu-handlers + sfu-rooms), raise-hand (`sfu-raise-hand` / `sfu-hand-raise-update`),
+  reaction relay (`sfu-reaction` via `io.in`), `AudioLevelObserver` per room (`sfu-active-speaker`
+  every 500ms, lazily created on first peer join, audio producers registered per `sfu-produce`);
+  client `useMediasoup` extended with screen share (`shareScreen`/`stopScreenShare`, `remoteScreens`
+  map, screen-vs-camera classification by `appData.source`, `handRaised`/`toggleHand`, `activeSpeaker`);
+  `VideoTile` gains `handRaised` badge, `activeReaction` emoji overlay, `activeSpeaker` green border;
+  `RoomPage` gains presentation layout (screen pinned + right-rail thumbnails), chat toggle with
+  unread badge, emoji reaction popover, raise-hand button. All client builds clean.
+  **M5.8 verified by Anuraj 2026-05-30** — screen share, 3-tab call, all features confirmed.
 - **M4** — code complete (2026-05-30). Mesh→SFU. Expanded M4 to micro-steps (M4.0–M4.9). Stack:
   **mediasoup 3.20.0** (server) + **mediasoup-client 3.20.0** (client), Node v22.22.2. Built:
   server `sfu/{config,workers,sfu-rooms}.js` + `socket/sfu-handlers.js` (ack-based signaling:

@@ -18,6 +18,7 @@ export default function VideoTile({
   connectionState,
   handRaised = false,
   activeReaction = null,
+  activeSpeaker = false,
 }) {
   const videoRef = useRef(null);
 
@@ -35,6 +36,8 @@ export default function VideoTile({
         bgcolor: '#202124',
         borderRadius: 2,
         overflow: 'hidden',
+        boxShadow: activeSpeaker ? '0 0 0 3px #00c853' : 'none',
+        transition: 'box-shadow 0.3s ease',
       }}
     >
       <video

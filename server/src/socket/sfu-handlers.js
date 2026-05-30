@@ -20,6 +20,7 @@ const socketRoom = new Map();
 export function registerSfuHandlers(io, socket) {
   // 1) Entry point: lazily create the room's Router, register this peer, and
   //    return the Router's rtpCapabilities so the client can load its Device.
+  //    Also lazily creates the AudioLevelObserver on first peer join.
   socket.on('sfu-get-rtp-capabilities', async ({ roomId } = {}, callback) => {
     try {
       if (!roomId || typeof roomId !== 'string') throw new Error('roomId required');
@@ -27,6 +28,24 @@ export function registerSfuHandlers(io, socket) {
       addPeer(roomId, socket.id, socket.user);
       socketRoom.set(socket.id, roomId);
       socket.join(roomId); // idempotent with chat's join; makes SFU self-sufficient
+
+      // Set up AudioLevelObserver once per room (fires max 1 volume entry = loudest speaker).
+      if (!room.audioLevelObserver) {
+        room.audioLevelObserver = await room.router.createAudioLevelObserver({
+          maxEntries: 1,
+          threshold: -80,
+          interval: 500,
+        });
+        room.audioProducerToSocket = new Map(); // producerId → socketId
+        room.audioLevelObserver.on('volumes', (volumes) => {
+          const sid = room.audioProducerToSocket.get(volumes[0].producer.id);
+          if (sid) io.to(roomId).emit('sfu-active-speaker', { socketId: sid });
+        });
+        room.audioLevelObserver.on('silence', () => {
+          io.to(roomId).emit('sfu-active-speaker', { socketId: null });
+        });
+      }
+
       callback({ rtpCapabilities: room.router.rtpCapabilities });
     } catch (err) {
       callback({ error: err.message });
@@ -79,6 +98,7 @@ export function registerSfuHandlers(io, socket) {
   socket.on('sfu-produce', async ({ transportId, kind, rtpParameters, appData } = {}, callback) => {
     try {
       const roomId = socketRoom.get(socket.id);
+      const room = getRoom(roomId);
       const peer = getPeer(roomId, socket.id);
       const transport = peer?.transports.get(transportId);
       if (!transport) throw new Error('send transport not found');
@@ -86,6 +106,13 @@ export function registerSfuHandlers(io, socket) {
       const producer = await transport.produce({ kind, rtpParameters, appData });
       peer.producers.set(producer.id, producer);
       producer.on('transportclose', () => peer.producers.delete(producer.id));
+
+      // Register audio producers with the level observer (screen-share audio excluded).
+      if (kind === 'audio' && appData?.source !== 'screen' && room?.audioLevelObserver) {
+        room.audioProducerToSocket.set(producer.id, socket.id);
+        producer.on('close', () => room.audioProducerToSocket?.delete(producer.id));
+        try { await room.audioLevelObserver.addProducer({ producerId: producer.id }); } catch { /* ok */ }
+      }
 
       socket.to(roomId).emit('sfu-new-producer', {
         producerId: producer.id,
