@@ -23,7 +23,8 @@ export function AuthProvider({ children }) {
   useEffect(() => { refresh(); }, []);
 
   function login() {
-    window.location.href = '/api/auth/google';
+    const base = import.meta.env.VITE_SERVER_URL ?? '';
+    window.location.href = `${base}/api/auth/google`;
   }
 
   async function logout() {
