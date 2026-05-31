@@ -1,16 +1,8 @@
-const turnDomain = import.meta.env.VITE_TURN_DOMAIN;
-const turnUsername = import.meta.env.VITE_TURN_USERNAME;
-const turnSecret = import.meta.env.VITE_TURN_SECRET;
+// ICE config now lives in one place (services/ice-config.js) so the SFU and
+// this legacy P2P helper can't drift apart.
+import { ICE_SERVERS } from './ice-config';
 
-const turnServer = turnDomain && turnSecret
-  ? [{ urls: `turn:${turnDomain}:3478`, username: turnUsername, credential: turnSecret }]
-  : [];
-
-export const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  ...turnServer,
-];
+export { ICE_SERVERS };
 
 export function createPeerConnection() {
   return new RTCPeerConnection({ iceServers: ICE_SERVERS });

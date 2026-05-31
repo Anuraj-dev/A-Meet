@@ -34,6 +34,9 @@ export default function LandingPage() {
     if (!code) return;
     // Tolerate a pasted full URL/path — keep only the last path segment.
     if (code.includes('/')) code = code.split('/').filter(Boolean).pop();
+    // Codes are lowercase xxx-xxxx-xxx; normalize so uppercase (mobile
+    // autocapitalize) or stray spaces still resolve to the same room.
+    code = code.toLowerCase().replace(/\s+/g, '');
     if (code) navigate(`/lobby/${encodeURIComponent(code)}`);
   }
 

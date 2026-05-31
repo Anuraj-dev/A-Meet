@@ -15,6 +15,8 @@ import socket from '../services/socket';
 import { useMediasoup } from '../hooks/useMediasoup';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import VideoTile from '../components/VideoTile';
+import RemoteAudio from '../components/RemoteAudio';
+import RtcStatsOverlay from '../components/RtcStatsOverlay';
 import ControlBar from '../components/ControlBar';
 import ChatPanel from '../components/ChatPanel';
 import CallNotifications from '../components/CallNotifications';
@@ -122,7 +124,7 @@ export default function RoomPage() {
     toggleVideo, toggleAudio,
     isScreenSharing, localScreenStream, shareScreen, stopScreenShare,
     handRaised, toggleHand,
-    activeSpeaker, socketConnected, permissionDenied,
+    activeSpeaker, socketConnected, permissionDenied, rtcStats,
   } = useMediasoup(roomId, devices);
 
   const remoteEntries = Object.entries(remoteStreams);
@@ -279,6 +281,9 @@ export default function RoomPage() {
         return {
           key: peerId,
           stream,
+          // Audio plays via the dedicated <RemoteAudio> sink, so the tile's
+          // <video> is muted to avoid double audio.
+          muted: true,
           name: ps?.name ?? 'Participant',
           avatar: ps?.avatar,
           videoOn: ps ? ps.video : stream.getVideoTracks().length > 0,
@@ -361,6 +366,7 @@ export default function RoomPage() {
       <Box sx={{ position: 'absolute', inset: 0 }}>
         <VideoTile
           stream={stream}
+          muted
           name={ps?.name ?? 'Participant'}
           avatar={ps?.avatar}
           videoOn={ps ? ps.video : stream.getVideoTracks().length > 0}
@@ -479,6 +485,13 @@ export default function RoomPage() {
         overflow: 'hidden',
       }}
     >
+      {/* Remote audio: dedicated hidden <audio> per peer, mounted once outside
+          the tile layout so audio survives layout switches and late tracks. */}
+      <RemoteAudio streams={remoteStreams} />
+
+      {/* Dev-only WebRTC stats overlay (no-op in production builds). */}
+      <RtcStatsOverlay stats={rtcStats} />
+
       {/* Floating status banners */}
       {(!socketConnected || permissionDenied) && (
         <Box sx={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 1400, width: 'min(92%, 520px)' }}>
