@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Device } from 'mediasoup-client';
 import socket from '../services/socket';
 import { request } from '../services/mediasoup-signal';
+import { ICE_SERVERS, ICE_TRANSPORT_POLICY } from '../services/ice-config';
 
 export function useMediasoup(roomId, devices = {}) {
   const [localStream, setLocalStream] = useState(null);
@@ -19,6 +20,7 @@ export function useMediasoup(roomId, devices = {}) {
   const [activeSpeaker, setActiveSpeaker] = useState(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [rtcStats, setRtcStats] = useState(null); // dev-only diagnostics
 
   const deviceRef = useRef(null);
   const sendTransportRef = useRef(null);
@@ -185,16 +187,23 @@ export function useMediasoup(roomId, devices = {}) {
         });
         consumers.set(consumer.id, { consumer, socketId, producerId, kind: params.kind, source });
 
+        // We keep a single mutable MediaStream per peer as the accumulator
+        // (so we can add/remove tracks over the call), but publish a FRESH
+        // `new MediaStream(...)` snapshot into state on every change. A new
+        // reference forces the bound media elements to re-assign srcObject —
+        // without it, a track added to a stream that's already attached to a
+        // playing element (e.g. audio arriving after video) often isn't
+        // rendered by Chrome. That race is the root of "sometimes can't hear".
         if (source === 'screen') {
           let stream = screenStreams.get(socketId);
           if (!stream) { stream = new MediaStream(); screenStreams.set(socketId, stream); }
           stream.addTrack(consumer.track);
-          setRemoteScreens((prev) => ({ ...prev, [socketId]: stream }));
+          setRemoteScreens((prev) => ({ ...prev, [socketId]: new MediaStream(stream.getTracks()) }));
         } else {
           let stream = peerStreams.get(socketId);
           if (!stream) { stream = new MediaStream(); peerStreams.set(socketId, stream); }
           stream.addTrack(consumer.track);
-          setRemoteStreams((prev) => ({ ...prev, [socketId]: stream }));
+          setRemoteStreams((prev) => ({ ...prev, [socketId]: new MediaStream(stream.getTracks()) }));
         }
 
         await request('sfu-resume-consumer', { consumerId: consumer.id });
@@ -237,14 +246,14 @@ export function useMediasoup(roomId, devices = {}) {
           screenStreams.delete(socketId);
           setRemoteScreens((prev) => { const next = { ...prev }; delete next[socketId]; return next; });
         } else if (stream) {
-          setRemoteScreens((prev) => ({ ...prev, [socketId]: stream }));
+          setRemoteScreens((prev) => ({ ...prev, [socketId]: new MediaStream(stream.getTracks()) }));
         }
       } else {
         if (stream && stream.getTracks().length === 0) {
           peerStreams.delete(socketId);
           dropPeer(socketId);
         } else if (stream) {
-          setRemoteStreams((prev) => ({ ...prev, [socketId]: stream }));
+          setRemoteStreams((prev) => ({ ...prev, [socketId]: new MediaStream(stream.getTracks()) }));
           setPeerStates((prev) => {
             if (!prev[socketId]) return prev;
             const next = { ...prev[socketId] };
@@ -315,7 +324,13 @@ export function useMediasoup(roomId, devices = {}) {
 
       const sendParams = await request('sfu-create-transport', { direction: 'send' });
       if (cancelled) return;
-      const sendTransport = device.createSendTransport(sendParams);
+      // iceServers/iceTransportPolicy let the browser relay through coturn when
+      // the direct path to the SFU is blocked (strict NAT / firewalls).
+      const sendTransport = device.createSendTransport({
+        ...sendParams,
+        iceServers: ICE_SERVERS,
+        iceTransportPolicy: ICE_TRANSPORT_POLICY,
+      });
       sendTransport.on('connect', ({ dtlsParameters }, cb, errb) => {
         request('sfu-connect-transport', { transportId: sendTransport.id, dtlsParameters }).then(cb).catch(errb);
       });
@@ -327,7 +342,11 @@ export function useMediasoup(roomId, devices = {}) {
 
       const recvParams = await request('sfu-create-transport', { direction: 'recv' });
       if (cancelled) return;
-      const recvTransport = device.createRecvTransport(recvParams);
+      const recvTransport = device.createRecvTransport({
+        ...recvParams,
+        iceServers: ICE_SERVERS,
+        iceTransportPolicy: ICE_TRANSPORT_POLICY,
+      });
       recvTransport.on('connect', ({ dtlsParameters }, cb, errb) => {
         request('sfu-connect-transport', { transportId: recvTransport.id, dtlsParameters }).then(cb).catch(errb);
       });
@@ -350,7 +369,23 @@ export function useMediasoup(roomId, devices = {}) {
 
       const audioTrack = stream?.getAudioTracks()[0];
       if (audioTrack && device.canProduce('audio')) {
-        const p = await sendTransport.produce({ track: audioTrack, appData: { source: 'camera', mediaTag: 'audio' } });
+        const p = await sendTransport.produce({
+          track: audioTrack,
+          // Opus resilience for clear voice under packet loss (the "breaking"):
+          //   opusFec  — in-band forward error correction recovers lost packets.
+          //   opusNack — also allow retransmission of lost audio packets.
+          //   opusDtx  — discontinuous transmission: stop sending during silence.
+          //   opusStereo:false / opusPtime:20 — mono 20 ms voice frames (halves
+          //     bitrate vs stereo, no quality loss for speech).
+          codecOptions: {
+            opusStereo: false,
+            opusFec: true,
+            opusDtx: true,
+            opusNack: true,
+            opusPtime: 20,
+          },
+          appData: { source: 'camera', mediaTag: 'audio' },
+        });
         producers.set('audio', p);
         p.on('transportclose', () => producers.delete('audio'));
         if (!startAudioOn) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
@@ -501,6 +536,43 @@ export function useMediasoup(roomId, devices = {}) {
     };
   }, [roomId]);
 
+  // Dev-only WebRTC diagnostics: poll each consumer's inbound-rtp stats so the
+  // overlay can show packet loss, jitter, bitrate and FEC — the concrete signal
+  // for "is audio actually flowing cleanly?" Tree-shaken out of prod builds.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
+    const prev = new Map(); // consumerId → { bytes, ts }
+    const id = setInterval(async () => {
+      const consumers = consumersRef.current;
+      const out = [];
+      for (const [cid, entry] of consumers) {
+        try {
+          const report = await entry.consumer.getStats();
+          report.forEach((s) => {
+            if (s.type !== 'inbound-rtp') return;
+            const last = prev.get(cid);
+            let kbps = 0;
+            if (last && s.timestamp > last.ts) {
+              kbps = Math.round(((s.bytesReceived - last.bytes) * 8) / (s.timestamp - last.ts));
+            }
+            prev.set(cid, { bytes: s.bytesReceived, ts: s.timestamp });
+            out.push({
+              id: cid,
+              kind: entry.kind,
+              source: entry.source,
+              kbps,
+              packetsLost: s.packetsLost ?? 0,
+              jitter: s.jitter != null ? Math.round(s.jitter * 1000) : null,
+              fec: s.fecPacketsReceived ?? null,
+            });
+          });
+        } catch { /* consumer gone mid-poll */ }
+      }
+      setRtcStats({ transport: recvTransportRef.current?.connectionState ?? 'n/a', consumers: out });
+    }, 2000);
+    return () => clearInterval(id);
+  }, []);
+
   return {
     localStream,
     remoteStreams,
@@ -522,5 +594,6 @@ export function useMediasoup(roomId, devices = {}) {
     activeSpeaker,
     socketConnected,
     permissionDenied,
+    rtcStats,
   };
 }

@@ -32,11 +32,19 @@ export async function createRoom(req, res, next) {
 // GET /api/rooms/:roomId — validate a room exists and is active.
 export async function getRoom(req, res, next) {
   try {
-    const room = await Room.findOne({ roomId: req.params.roomId })
+    // Codes are generated lowercase; lowercase the lookup so an uppercase param
+    // (mobile autocapitalize, manual URL edit) still matches.
+    const roomId = String(req.params.roomId || '').toLowerCase();
+    const room = await Room.findOne({ roomId })
       .populate('host', 'name avatar')
       .lean();
-    if (!room || !room.active) {
+    if (!room) {
       return res.status(404).json({ error: 'Room not found' });
+    }
+    if (!room.active) {
+      // Existed but the host ended it — distinct from a wrong code so the client
+      // can show "this meeting has ended" instead of "check your code".
+      return res.status(410).json({ error: 'Meeting has ended', ended: true });
     }
     res.json({
       roomId: room.roomId,

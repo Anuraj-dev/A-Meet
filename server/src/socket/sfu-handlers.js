@@ -69,6 +69,25 @@ export function registerSfuHandlers(io, socket) {
       });
       peer.transports.set(transport.id, transport);
 
+      // Diagnostics: the selected ICE tuple reveals the negotiated media path
+      // (direct UDP / TCP / relay) — the key signal when peers can't see or hear
+      // each other across networks. We also surface ICE/DTLS failures.
+      transport.on('iceselectedtuplechange', (tuple) => {
+        const proto = tuple?.protocol ?? '?';
+        const remote = `${tuple?.remoteIp ?? '?'}:${tuple?.remotePort ?? '?'}`;
+        console.log(`[sfu] ${direction} ${socket.id} ICE selected ${proto} <- ${remote}`);
+      });
+      transport.on('icestatechange', (iceState) => {
+        if (iceState === 'disconnected' || iceState === 'failed') {
+          console.warn(`[sfu] ${direction} ${socket.id} ICE ${iceState}`);
+        }
+      });
+      transport.on('dtlsstatechange', (dtlsState) => {
+        if (dtlsState === 'failed' || dtlsState === 'closed') {
+          console.warn(`[sfu] ${direction} ${socket.id} DTLS ${dtlsState}`);
+        }
+      });
+
       callback({
         id: transport.id,
         iceParameters: transport.iceParameters,

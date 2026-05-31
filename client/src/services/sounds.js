@@ -8,10 +8,11 @@
 // Since the user always reaches the call via a click (New meeting / Join),
 // the SPA already has gesture history, so cues resume on demand.
 //
-// Crucially, the context is PARKED (suspended) whenever idle: a UI-sound
-// context left running holds a second audio-output stream open for the whole
-// call, which interferes with the WebRTC call audio and crackles (notably on
-// Linux/PipeWire). We resume just-in-time per cue and re-park ~1.2s later.
+// Crucially, the context is fully CLOSED whenever idle: a UI-sound context left
+// open holds a second audio-output stream for the whole call, which interferes
+// with the WebRTC call audio and crackles (notably on Linux/PipeWire, where
+// suspend() does NOT reliably release the output device). We create one
+// just-in-time per cue and close() it ~1.2s after the last cue.
 //
 // Preference: on/off is persisted in localStorage ("ameet:sfx"), default on.
 
@@ -20,8 +21,7 @@ const STORAGE_KEY = 'ameet:sfx';
 let ctx = null;
 let master = null;
 let enabled = readEnabled();
-let primed = false;
-let suspendTimer = null;
+let idleTimer = null;
 
 function readEnabled() {
   try {
@@ -58,14 +58,21 @@ function getCtx() {
 }
 
 // A UI-sound context must only hold the audio output device while a cue is
-// actually sounding. Left running through the call's silence, that second
-// active output stream interferes with the WebRTC call audio and produces a
-// constant crackle (very audible on Linux). So after each cue we park the
-// context (suspend) and resume it just-in-time for the next one.
-function scheduleIdleSuspend() {
-  clearTimeout(suspendTimer);
-  suspendTimer = setTimeout(() => {
-    if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {});
+// actually sounding. Left open through the call's silence, that second active
+// output stream interferes with the WebRTC call audio and produces a constant
+// crackle (very audible on Linux/PipeWire). suspend() doesn't reliably release
+// the device there, so we fully close() the context shortly after the last cue
+// and recreate it lazily for the next one. The 1.2s debounce lets a burst of
+// cues reuse one context before it's torn down.
+function scheduleIdleClose() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (ctx) {
+      const dying = ctx;
+      ctx = null;
+      master = null;
+      dying.close().catch(() => {});
+    }
   }, 1200);
 }
 
@@ -161,7 +168,7 @@ export function playSound(name) {
     if (!c) return;
     if (c.state !== 'running') c.resume().catch(() => {});
     recipe(c);
-    scheduleIdleSuspend();
+    scheduleIdleClose();
   } catch {
     /* audio not available — ignore */
   }
@@ -178,9 +185,8 @@ export function setSoundEnabled(value) {
   } catch {
     /* storage blocked — keep in-memory only */
   }
-  // Pre-create + park (don't leave it running) so enabling sounds never holds
-  // the audio output device idle against the call.
-  if (enabled) { getCtx(); scheduleIdleSuspend(); }
+  // Don't pre-create a context here: it would hold the audio output device idle
+  // against the live call. The next cue lazily creates one and closes it after.
   return enabled;
 }
 
@@ -188,17 +194,7 @@ export function toggleSound() {
   return setSoundEnabled(!enabled);
 }
 
-// Resume the context on the first user gesture (autoplay-policy safety net).
-if (typeof window !== 'undefined') {
-  const prime = () => {
-    if (primed) return;
-    primed = true;
-    // Pre-create on first gesture so the first cue is instant, then immediately
-    // park it — it must never hold the output device while idle (that crackles
-    // the live call audio).
-    const c = getCtx();
-    if (c && c.state === 'running') c.suspend().catch(() => {});
-  };
-  window.addEventListener('pointerdown', prime, { once: true });
-  window.addEventListener('keydown', prime, { once: true });
-}
+// No gesture pre-priming: the user always reaches a cue-playing screen via
+// clicks (New meeting / Join), so the page already has user-activation and the
+// just-in-time resume() inside playSound succeeds. We deliberately never hold an
+// AudioContext open ahead of time — that's what crackled the live call audio.
