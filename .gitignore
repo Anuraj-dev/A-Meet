@@ -8,6 +8,11 @@ node_modules/
 .env.local
 *.local
 
+# coturn config holds the realm + TURN secret (real values pasted on the server).
+# Tracking it caused deploy `git pull` to abort on the server's local edits.
+# Track only the placeholder template; the live file is server-local.
+coturn/turnserver.conf
+
 # Build output
 dist/
 build/
