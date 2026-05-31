@@ -1,110 +1,129 @@
 import { createTheme } from '@mui/material/styles';
 
-// A-Meet design language — Google Meet fidelity with a custom A-Meet accent.
-// Dark, full-bleed surfaces; the brand wordmark + hero use the Outfit display
-// font and a blue→violet gradient that is unique to us.
-
-const BRAND_GRADIENT = 'linear-gradient(135deg, #8ab4f8 0%, #c58af9 100%)';
+const BRAND_GRADIENT = 'linear-gradient(120deg, #1a73e8, #9334e6)';
+const GRAD_TEXT = 'linear-gradient(110deg, #5b8bff, #a855f7 60%, #00f5d4)';
 
 const theme = createTheme({
   palette: {
     mode: 'dark',
     background: {
-      default: '#202124', // the call canvas behind tiles (classic Meet)
-      paper: '#2a2b2e', //   chat panel, menus, dialogs
+      default: '#060810',
+      paper: 'rgba(255,255,255,0.045)',
     },
     primary: {
-      main: '#8ab4f8', //    Meet's dark-theme blue accent
-      contrastText: '#202124',
+      main: '#5b8bff',
+      dark: '#1a73e8',
+      contrastText: '#fff',
     },
     secondary: {
-      main: '#c58af9', //    A-Meet violet (pairs with the brand gradient)
+      main: '#9334e6',
+      light: '#a855f7',
     },
     error: {
-      main: '#ea4335', //    Google red — end-call, mic-off
-      dark: '#d33426',
+      main: '#ef4444',
+      dark: '#dc2626',
     },
     warning: {
-      main: '#fdd663', //    raise-hand amber
-      dark: '#f9ab00',
-      contrastText: '#202124',
+      main: '#f5b542',
+      dark: '#f97316',
+      contrastText: '#060810',
     },
     success: {
-      main: '#34a853', //    active speaker green
+      main: '#34d399',
+    },
+    info: {
+      main: '#00f5d4',
     },
     divider: 'rgba(255,255,255,0.10)',
     text: {
-      primary: '#e8eaed',
-      secondary: '#9aa0a6',
-      disabled: '#80868b',
+      primary: '#f2f4f9',
+      secondary: '#94a3b8',
+      disabled: '#475569',
     },
-    // Custom semantic tokens (accessed via theme.palette.* in sx callbacks).
-    brand: { gradient: BRAND_GRADIENT },
+    brand: {
+      gradient: BRAND_GRADIENT,
+      gradText: GRAD_TEXT,
+    },
     control: {
-      idle: '#3c4043', //     resting control button (Meet gray)
-      idleHover: '#4a4d51',
-      surface: 'rgba(32,33,36,0.72)', // frosted control-bar / pill surface
+      idle: 'rgba(255,255,255,0.07)',
+      idleHover: 'rgba(255,255,255,0.12)',
+      surface: 'rgba(6,8,16,0.6)',
     },
     tile: {
-      bg: '#3c4043', //       camera-on tile background while video loads
+      bg: '#0a0d18',
+    },
+    glass: {
+      surface: 'rgba(255,255,255,0.045)',
+      surface2: 'rgba(255,255,255,0.07)',
+      border: 'rgba(255,255,255,0.10)',
+      border2: 'rgba(255,255,255,0.16)',
     },
   },
 
   typography: {
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
-    h1: { fontFamily: '"Outfit", "Roboto", sans-serif', fontWeight: 600, letterSpacing: '-0.02em' },
-    h2: { fontFamily: '"Outfit", "Roboto", sans-serif', fontWeight: 600, letterSpacing: '-0.02em' },
-    h3: { fontFamily: '"Outfit", "Roboto", sans-serif', fontWeight: 600, letterSpacing: '-0.015em' },
-    h4: { fontFamily: '"Outfit", "Roboto", sans-serif', fontWeight: 600, letterSpacing: '-0.01em' },
-    h5: { fontFamily: '"Outfit", "Roboto", sans-serif', fontWeight: 600 },
-    h6: { fontFamily: '"Outfit", "Roboto", sans-serif', fontWeight: 600 },
-    button: { fontWeight: 500 },
+    fontFamily: '"DM Sans", system-ui, sans-serif',
+    h1: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 700, letterSpacing: '-0.04em' },
+    h2: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 700, letterSpacing: '-0.03em' },
+    h3: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.02em' },
+    h4: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.02em' },
+    h5: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.01em' },
+    h6: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600 },
+    button: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600 },
+    caption: { fontFamily: '"DM Sans", system-ui, sans-serif' },
+    overline: { fontFamily: '"JetBrains Mono", monospace', letterSpacing: '0.12em' },
   },
 
   shape: {
-    borderRadius: 12,
+    borderRadius: 16,
   },
 
   components: {
     MuiCssBaseline: {
       styleOverrides: {
-        'html, body, #root': {
-          height: '100%',
-        },
+        'html, body, #root': { height: '100%' },
         body: {
           margin: 0,
-          backgroundColor: '#202124',
+          backgroundColor: '#060810',
           overscrollBehavior: 'none',
-          // Thin, subtle scrollbars across the app (Firefox + WebKit).
-          scrollbarColor: 'rgba(255,255,255,0.22) transparent',
+          WebkitFontSmoothing: 'antialiased',
+          scrollbarColor: 'rgba(255,255,255,0.18) transparent',
           scrollbarWidth: 'thin',
         },
-        '*::-webkit-scrollbar': { width: 8, height: 8 },
+        '*::-webkit-scrollbar': { width: 6, height: 6 },
         '*::-webkit-scrollbar-track': { background: 'transparent' },
         '*::-webkit-scrollbar-thumb': {
-          backgroundColor: 'rgba(255,255,255,0.22)',
+          backgroundColor: 'rgba(255,255,255,0.18)',
           borderRadius: 8,
           border: '2px solid transparent',
           backgroundClip: 'content-box',
         },
-        '*::-webkit-scrollbar-thumb:hover': {
-          backgroundColor: 'rgba(255,255,255,0.32)',
+        '@keyframes floatY': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-14px)' },
         },
-        // Shared animations.
+        '@keyframes pulseRing': {
+          '0%': { transform: 'scale(1)', opacity: 0.7 },
+          '100%': { transform: 'scale(1.5)', opacity: 0 },
+        },
+        '@keyframes shimmer': {
+          '0%': { transform: 'translateX(-100%)' },
+          '55%, 100%': { transform: 'translateX(100%)' },
+        },
+        '@keyframes speakPulse': {
+          '0%': { boxShadow: '0 0 0 1px #5b8bff, 0 0 0 0 rgba(91,139,255,0.5)' },
+          '70%': { boxShadow: '0 0 0 2px #5b8bff, 0 0 0 14px rgba(91,139,255,0)' },
+          '100%': { boxShadow: '0 0 0 1px #5b8bff, 0 0 0 0 rgba(91,139,255,0)' },
+        },
+        '@keyframes blink': {
+          '0%, 100%': { opacity: 1 },
+          '50%': { opacity: 0.3 },
+        },
         '@keyframes ameet-reaction-float': {
           '0%': { opacity: 0, transform: 'translateY(28px) scale(0.4)' },
           '14%': { opacity: 1, transform: 'translateY(0) scale(1.1)' },
           '24%': { transform: 'translateY(-4px) scale(1)' },
           '72%': { opacity: 1, transform: 'translateY(-30px) scale(1)' },
           '100%': { opacity: 0, transform: 'translateY(-72px) scale(0.85)' },
-        },
-        '@keyframes ameet-speaker-pulse': {
-          '0%, 100%': { boxShadow: '0 0 0 2px #34a853, 0 0 14px 0 rgba(52,168,83,0.35)' },
-          '50%': { boxShadow: '0 0 0 3px #34a853, 0 0 22px 2px rgba(52,168,83,0.55)' },
-        },
-        '@keyframes ameet-fade-in': {
-          from: { opacity: 0, transform: 'translateY(8px)' },
-          to: { opacity: 1, transform: 'translateY(0)' },
         },
         '@keyframes ameet-pop-in': {
           '0%': { opacity: 0, transform: 'scale(0.8)' },
@@ -115,43 +134,54 @@ const theme = createTheme({
           '0%, 100%': { transform: 'rotate(-8deg)' },
           '50%': { transform: 'rotate(10deg)' },
         },
+        '@media (prefers-reduced-motion: reduce)': {
+          '*': { animationDuration: '0.01ms !important', transitionDuration: '0.01ms !important' },
+        },
       },
     },
 
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { textTransform: 'none', fontWeight: 500 },
-        sizeLarge: { paddingTop: 12, paddingBottom: 12 },
+        root: { textTransform: 'none', fontWeight: 600, fontFamily: '"Outfit", system-ui, sans-serif' },
+        sizeLarge: { paddingTop: 13, paddingBottom: 13 },
       },
     },
 
     MuiPaper: {
-      // Flat panels like Meet — drop MUI's elevation gradient overlay.
-      styleOverrides: { root: { backgroundImage: 'none' } },
+      styleOverrides: {
+        root: {
+          backgroundImage: 'none',
+          backgroundColor: 'rgba(6,8,16,0.8)',
+          backdropFilter: 'blur(20px)',
+          border: '1px solid rgba(255,255,255,0.10)',
+        },
+      },
     },
 
     MuiTooltip: {
       defaultProps: { arrow: true, enterDelay: 400, enterNextDelay: 200 },
       styleOverrides: {
         tooltip: {
-          backgroundColor: '#3c4043',
+          backgroundColor: '#1a1d2e',
           fontSize: 12,
           fontWeight: 500,
           padding: '6px 10px',
           borderRadius: 8,
+          border: '1px solid rgba(255,255,255,0.1)',
         },
-        arrow: { color: '#3c4043' },
+        arrow: { color: '#1a1d2e' },
       },
     },
 
     MuiMenu: {
       styleOverrides: {
         paper: {
-          backgroundColor: '#2a2b2e',
-          borderRadius: 12,
-          border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '0 8px 28px rgba(0,0,0,0.5)',
+          backgroundColor: 'rgba(8,10,22,0.95)',
+          borderRadius: 16,
+          border: '1px solid rgba(255,255,255,0.10)',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(20px)',
         },
       },
     },
@@ -159,21 +189,42 @@ const theme = createTheme({
     MuiPopover: {
       styleOverrides: {
         paper: {
-          backgroundColor: '#2a2b2e',
-          borderRadius: 16,
-          border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '0 8px 28px rgba(0,0,0,0.5)',
+          backgroundColor: 'rgba(8,10,22,0.95)',
+          borderRadius: 20,
+          border: '1px solid rgba(255,255,255,0.10)',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(20px)',
+        },
+      },
+    },
+
+    MuiTextField: {
+      styleOverrides: {
+        root: {
+          '& .MuiOutlinedInput-root': {
+            '& fieldset': { borderColor: 'rgba(255,255,255,0.10)' },
+            '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.20)' },
+            '&.Mui-focused fieldset': { borderColor: '#5b8bff' },
+          },
+        },
+      },
+    },
+
+    MuiSelect: {
+      styleOverrides: {
+        outlined: {
+          '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.10)' },
         },
       },
     },
 
     MuiChip: {
-      styleOverrides: { root: { fontWeight: 500 } },
+      styleOverrides: { root: { fontWeight: 500, fontFamily: '"DM Sans", sans-serif' } },
     },
 
     MuiIconButton: {
       styleOverrides: {
-        root: { transition: 'background-color 0.18s ease, color 0.18s ease, transform 0.12s ease' },
+        root: { transition: 'background-color 0.18s ease, color 0.18s ease, transform 0.18s ease' },
       },
     },
   },
