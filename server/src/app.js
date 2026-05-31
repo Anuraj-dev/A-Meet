@@ -14,6 +14,10 @@ const roomLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: tr
 export function createApp() {
   const app = express();
 
+  // Behind nginx/the reverse proxy — trust 1 hop so express-rate-limit
+  // reads the real client IP from X-Forwarded-For instead of erroring.
+  app.set('trust proxy', 1);
+
   app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false }));
   app.use(cors({ origin: env.clientUrl, credentials: true }));
   app.use(express.json());
