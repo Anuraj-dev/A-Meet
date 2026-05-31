@@ -6,8 +6,12 @@
 //
 // Autoplay policy: an AudioContext starts "suspended" until a user gesture.
 // Since the user always reaches the call via a click (New meeting / Join),
-// the SPA already has gesture history; we still resume on the first pointer/
-// key event as a safety net. Playback is a no-op until then.
+// the SPA already has gesture history, so cues resume on demand.
+//
+// Crucially, the context is PARKED (suspended) whenever idle: a UI-sound
+// context left running holds a second audio-output stream open for the whole
+// call, which interferes with the WebRTC call audio and crackles (notably on
+// Linux/PipeWire). We resume just-in-time per cue and re-park ~1.2s later.
 //
 // Preference: on/off is persisted in localStorage ("ameet:sfx"), default on.
 
@@ -17,6 +21,7 @@ let ctx = null;
 let master = null;
 let enabled = readEnabled();
 let primed = false;
+let suspendTimer = null;
 
 function readEnabled() {
   try {
@@ -34,7 +39,10 @@ function getCtx() {
   if (ctx) return ctx;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
-  ctx = new AC();
+  // Match WebRTC's 48 kHz output so the OS never has to resample our cues
+  // against the live call audio — a rate mismatch crackles on Linux/PipeWire.
+  try { ctx = new AC({ latencyHint: 'interactive', sampleRate: 48000 }); }
+  catch { ctx = new AC(); }
   // Gentle master chain: compressor smooths transients, low master gain keeps
   // everything in pleasant background-cue territory.
   const compressor = ctx.createDynamicsCompressor();
@@ -49,9 +57,16 @@ function getCtx() {
   return ctx;
 }
 
-function resume() {
-  const c = getCtx();
-  if (c && c.state === 'suspended') c.resume().catch(() => {});
+// A UI-sound context must only hold the audio output device while a cue is
+// actually sounding. Left running through the call's silence, that second
+// active output stream interferes with the WebRTC call audio and produces a
+// constant crackle (very audible on Linux). So after each cue we park the
+// context (suspend) and resume it just-in-time for the next one.
+function scheduleIdleSuspend() {
+  clearTimeout(suspendTimer);
+  suspendTimer = setTimeout(() => {
+    if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {});
+  }, 1200);
 }
 
 // Schedule one enveloped voice. `glideTo` sweeps the pitch over the note.
@@ -83,6 +98,11 @@ function voice(c, {
   gain.connect(master);
   osc.start(t0);
   osc.stop(t0 + duration + 0.02);
+  // Disconnect nodes once the oscillator ends so they are garbage-collected.
+  // Without this every sound leaves a dead gain node attached to `master`
+  // forever; hundreds of them force the audio render thread to process silent
+  // nodes every quantum, eventually causing buffer dropouts (clicks).
+  osc.addEventListener('ended', () => { osc.disconnect(); gain.disconnect(); }, { once: true });
 }
 
 // Note frequencies (equal temperament) used by the recipes.
@@ -139,8 +159,9 @@ export function playSound(name) {
   try {
     const c = getCtx();
     if (!c) return;
-    if (c.state === 'suspended') c.resume().catch(() => {});
+    if (c.state !== 'running') c.resume().catch(() => {});
     recipe(c);
+    scheduleIdleSuspend();
   } catch {
     /* audio not available — ignore */
   }
@@ -157,7 +178,9 @@ export function setSoundEnabled(value) {
   } catch {
     /* storage blocked — keep in-memory only */
   }
-  if (enabled) resume();
+  // Pre-create + park (don't leave it running) so enabling sounds never holds
+  // the audio output device idle against the call.
+  if (enabled) { getCtx(); scheduleIdleSuspend(); }
   return enabled;
 }
 
@@ -170,10 +193,12 @@ if (typeof window !== 'undefined') {
   const prime = () => {
     if (primed) return;
     primed = true;
-    resume();
-    window.removeEventListener('pointerdown', prime);
-    window.removeEventListener('keydown', prime);
+    // Pre-create on first gesture so the first cue is instant, then immediately
+    // park it — it must never hold the output device while idle (that crackles
+    // the live call audio).
+    const c = getCtx();
+    if (c && c.state === 'running') c.suspend().catch(() => {});
   };
-  window.addEventListener('pointerdown', prime, { once: false });
-  window.addEventListener('keydown', prime, { once: false });
+  window.addEventListener('pointerdown', prime, { once: true });
+  window.addEventListener('keydown', prime, { once: true });
 }

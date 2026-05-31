@@ -13,6 +13,7 @@ import {
   Mic as MicIcon,
   MicOff as MicOffIcon,
   PanTool as PanToolIcon,
+  PictureInPictureAlt as PipIcon,
   PresentToAll as PresentIcon,
   CancelPresentation as StopPresentIcon,
   Videocam as VideocamIcon,
@@ -62,6 +63,7 @@ export default function ControlBar({
   onReact,
   showChat, unreadCount, onToggleChat,
   soundEnabled, onToggleSound,
+  pipSupported, pipActive, onTogglePip,
   onCopyLink,
   onLeave,
 }) {
@@ -183,6 +185,12 @@ export default function ControlBar({
           <ListItemIcon><ContentCopyIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Copy joining link</ListItemText>
         </MenuItem>
+        {pipSupported && (
+          <MenuItem onClick={() => { closeMore(); onTogglePip(); }}>
+            <ListItemIcon><PipIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>{pipActive ? 'Close mini player' : 'Open mini player'}</ListItemText>
+          </MenuItem>
+        )}
         <MenuItem onClick={() => { onToggleSound(); }}>
           <ListItemIcon>{soundEnabled ? <VolumeUpIcon fontSize="small" /> : <VolumeOffIcon fontSize="small" />}</ListItemIcon>
           <ListItemText>Sound effects</ListItemText>

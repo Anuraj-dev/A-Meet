@@ -34,8 +34,8 @@ export function registerSfuHandlers(io, socket) {
       if (!room.audioLevelObserver) {
         room.audioLevelObserver = await room.router.createAudioLevelObserver({
           maxEntries: 1,
-          threshold: -80,
-          interval: 500,
+          threshold: -70,
+          interval: 800,
         });
         room.audioProducerToSocket = new Map(); // producerId → socketId
         room.audioLevelObserver.on('volumes', (volumes) => {

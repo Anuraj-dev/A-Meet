@@ -1009,3 +1009,27 @@ Nothing to set up here.
   - **Verified:** client lint clean (all touched files) + `vite build` clean. Pre-existing react-hooks
     v7 lint errors remain in untouched files (`AuthContext.jsx`, `RoomGuard.jsx`, `useLobbyMedia.js`).
     **Visual/responsive + sound verification is Anuraj's** (`npm run dev`; the room needs the live stack).
+
+- **UI/UX pass — round 2** (2026-05-31, Meet-fidelity feedback from screenshots). Five fixes/features:
+  - **Muted indicator** moved to the tile **top-right** corner (was a small bottom-left pip) — a
+    properly-sized, container-query-scaled translucent circle with a white mic-off icon, matching Meet.
+    (`VideoTile`.)
+  - **Off-cam background = profile photo**: when the camera is off, the person's avatar is blown up +
+    blurred into an ambient backdrop behind their crisp centred avatar (Meet style); falls back to the
+    flat peer color when there's no avatar. (`VideoTile`.) Peer-color hash extracted to
+    `utils/peer-color.js` (shared with the mini player).
+  - **Picture-in-Picture mini player** (`hooks/usePictureInPicture.js`, new): composites all camera
+    tiles onto an offscreen `<canvas>` → `captureStream()` → hidden `<video>` →
+    `requestPictureInPicture()`, so participants stay visible across tab/app switches. Manual toggle in
+    the ControlBar **More** menu ("Open/Close mini player"), feature-detected (Chromium; hidden on
+    Firefox/Safari), graceful fallback flash on failure. Redraw via `setInterval` (RAF pauses in
+    background tabs). Note: browsers require a user gesture, so it's a manual toggle (no auto-on-blur).
+  - **Chat message previews** (`components/CallNotifications.jsx`, new): when the chat is closed, an
+    incoming message pops a bottom-left card (avatar + name + 2-line message) in addition to the unread
+    badge; clicking opens the chat. (Unread now only counts while chat is closed — fixes a stale badge.)
+  - **Join/leave flashes**: dark frosted pills bottom-left ("<name> joined" / "<name> left", with
+    avatar). The copy-link confirmation now routes through this same notification system (removed the
+    standalone Snackbar).
+  - **Skipped (per Anuraj):** the host-only "sharable link" create-meeting popup.
+  - **Verified:** lint clean on all touched/new files + `vite build` clean. Visual/PiP/sound checks are
+    Anuraj's (`npm run dev`; PiP needs a Chromium browser + a second participant).

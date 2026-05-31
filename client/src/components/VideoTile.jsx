@@ -1,26 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Avatar, Box, Chip, Typography } from '@mui/material';
 import { MicOff as MicOffIcon } from '@mui/icons-material';
+import { getPeerColor } from '../utils/peer-color';
 
 const CONNECTION_BADGE = {
   connecting: { label: 'Connecting…', color: 'warning' },
   disconnected: { label: 'Reconnecting…', color: 'warning' },
   failed: { label: 'Connection failed', color: 'error' },
 };
-
-// Deterministic per-participant color when the camera is off (Meet-style
-// full-bleed colored tile). Saturated, legible against white avatars/text.
-const PEER_COLORS = [
-  '#1a73e8', '#1e8e3e', '#d93025', '#e37400',
-  '#9334e6', '#d01884', '#129eaf', '#c5221f',
-];
-
-function getPeerColor(name) {
-  if (!name) return PEER_COLORS[0];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return PEER_COLORS[h % PEER_COLORS.length];
-}
 
 export default function VideoTile({
   stream,
@@ -85,7 +72,9 @@ export default function VideoTile({
         }}
       />
 
-      {/* Off-camera state: depth gradient + scalable avatar/initial */}
+      {/* Off-camera state: the person's photo blurred into an ambient backdrop
+          (Meet-style), with their crisp avatar centred on top. Falls back to the
+          flat peer color when there's no avatar. */}
       {!videoOn && (
         <Box
           sx={{
@@ -94,21 +83,46 @@ export default function VideoTile({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundImage:
-              'radial-gradient(circle at 50% 38%, rgba(255,255,255,0.14), rgba(0,0,0,0.22) 72%)',
+            overflow: 'hidden',
           }}
         >
+          {avatar && (
+            <Box
+              aria-hidden
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                backgroundImage: `url("${avatar}")`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                // Blow the photo up so the blur never reveals tile edges.
+                transform: 'scale(1.4)',
+                filter: 'blur(36px) saturate(1.25)',
+              }}
+            />
+          )}
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              background: avatar
+                ? 'radial-gradient(circle at 50% 42%, rgba(0,0,0,0.15), rgba(0,0,0,0.6) 84%)'
+                : 'radial-gradient(circle at 50% 38%, rgba(255,255,255,0.14), rgba(0,0,0,0.22) 72%)',
+            }}
+          />
           <Avatar
             src={avatar}
             alt={name}
             sx={{
+              position: 'relative',
+              zIndex: 1,
               width: 'min(40cqmin, 132px)',
               height: 'min(40cqmin, 132px)',
               fontSize: 'min(18cqmin, 52px)',
               fontWeight: 600,
               color: '#fff',
-              bgcolor: 'rgba(0,0,0,0.28)',
-              boxShadow: '0 2px 14px rgba(0,0,0,0.35)',
+              bgcolor: 'rgba(0,0,0,0.35)',
+              boxShadow: '0 2px 18px rgba(0,0,0,0.45)',
             }}
           >
             {initial}
@@ -128,7 +142,7 @@ export default function VideoTile({
         />
       )}
 
-      {/* Name + mic-off indicator */}
+      {/* Name label (bottom-left) */}
       {name && (
         <Box
           sx={{
@@ -138,26 +152,9 @@ export default function VideoTile({
             right: 'clamp(8px, 3cqmin, 14px)',
             display: 'flex',
             alignItems: 'center',
-            gap: 0.75,
             minWidth: 0,
           }}
         >
-          {!audioOn && (
-            <Box
-              sx={{
-                flexShrink: 0,
-                width: 'clamp(18px, 6cqmin, 24px)',
-                height: 'clamp(18px, 6cqmin, 24px)',
-                borderRadius: '50%',
-                bgcolor: 'error.main',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <MicOffIcon sx={{ fontSize: 'clamp(11px, 3.6cqmin, 15px)', color: '#fff' }} />
-            </Box>
-          )}
           <Typography
             noWrap
             sx={{
@@ -169,6 +166,29 @@ export default function VideoTile({
           >
             {name}
           </Typography>
+        </Box>
+      )}
+
+      {/* Muted indicator (top-right) — matches Meet's corner placement */}
+      {!audioOn && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 'clamp(8px, 3cqmin, 14px)',
+            right: 'clamp(8px, 3cqmin, 14px)',
+            width: 'clamp(24px, 7.5cqmin, 32px)',
+            height: 'clamp(24px, 7.5cqmin, 32px)',
+            borderRadius: '50%',
+            bgcolor: 'rgba(0,0,0,0.55)',
+            backdropFilter: 'blur(4px)',
+            WebkitBackdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 1px 5px rgba(0,0,0,0.45)',
+          }}
+        >
+          <MicOffIcon sx={{ fontSize: 'clamp(13px, 4.4cqmin, 18px)', color: '#fff' }} />
         </Box>
       )}
 

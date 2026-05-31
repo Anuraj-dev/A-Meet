@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Alert, Avatar, AvatarGroup, Box, Chip, IconButton, Popover,
+  Alert, Avatar, AvatarGroup, Box, Button, Chip, Dialog, DialogActions,
+  DialogContent, DialogTitle, IconButton, Popover,
   Snackbar, Stack, Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
 import {
@@ -12,9 +13,11 @@ import {
 import { useAuth } from '../context/AuthContext';
 import socket from '../services/socket';
 import { useMediasoup } from '../hooks/useMediasoup';
+import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import VideoTile from '../components/VideoTile';
 import ControlBar from '../components/ControlBar';
 import ChatPanel from '../components/ChatPanel';
+import CallNotifications from '../components/CallNotifications';
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '👏', '🎉'];
@@ -48,13 +51,63 @@ export default function RoomPage() {
   const [activeReactions, setActiveReactions] = useState({});
   const [reactionAnchor, setReactionAnchor] = useState(null);
   const [meetingEndedSnack, setMeetingEndedSnack] = useState(false);
-  const [toast, setToast] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(() => isSoundEnabled());
+  const [isHost, setIsHost] = useState(false);
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  // Bottom-left transient flashes: join/leave, chat previews, copy confirmation.
+  const [notes, setNotes] = useState([]);
   const reactionTimers = useRef({});
-  // Live ref so the mount-only socket effect always compares against the
-  // current user id (auth may resolve after this component mounts).
+  const noteIdRef = useRef(0);
+  const noteTimers = useRef({});
+  // Live refs so the mount-only socket effect always sees current values
+  // (auth may resolve after mount; chat-open state changes over the call).
   const userIdRef = useRef(user?.id);
   useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
+  const showChatRef = useRef(false);
+  useEffect(() => { showChatRef.current = showChat; }, [showChat]);
+
+  // Determine whether the current user created (and therefore hosts) this room
+  // so we can offer "End for everyone" vs "Leave call" on the leave button.
+  useEffect(() => {
+    fetch(`/api/rooms/${roomId}`, { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.host && user?.id && data.host._id === user.id) setIsHost(true);
+      })
+      .catch(() => {});
+  }, [roomId, user?.id]);
+
+  // Push a transient notification; auto-dismisses after `duration` ms.
+  const pushNote = useCallback((note) => {
+    const id = (noteIdRef.current += 1);
+    setNotes((prev) => {
+      const next = [...prev, { id, ...note }];
+      // Cap at the 4 most recent; clear timers for any we evict so they
+      // don't linger and fire against a note that's no longer shown.
+      while (next.length > 4) {
+        const evicted = next.shift();
+        clearTimeout(noteTimers.current[evicted.id]);
+        delete noteTimers.current[evicted.id];
+      }
+      return next;
+    });
+    noteTimers.current[id] = setTimeout(() => {
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+      delete noteTimers.current[id];
+    }, note.duration ?? 4500);
+  }, []);
+
+  const dismissNote = useCallback((id) => {
+    clearTimeout(noteTimers.current[id]);
+    delete noteTimers.current[id];
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
+  // Clear any pending note timers on unmount.
+  useEffect(() => {
+    const timers = noteTimers.current;
+    return () => { Object.values(timers).forEach(clearTimeout); };
+  }, []);
 
   const devices = {
     videoDeviceId: locationState?.videoDeviceId ?? null,
@@ -83,6 +136,11 @@ export default function RoomPage() {
     ? (peerStates[pinnedScreenSid]?.name ?? 'Participant')
     : `${user?.name ?? 'You'}`;
 
+  // Composite every camera tile into a Picture-in-Picture "mini player" so
+  // participants stay visible after switching tabs.
+  const camTiles = cameraTiles();
+  const { pipSupported, pipActive, togglePiP } = usePictureInPicture(camTiles);
+
   useEffect(() => {
     socket.connect();
     socket.emit('join-room', roomId);
@@ -91,17 +149,30 @@ export default function RoomPage() {
     socket.on('user-joined', (u) => {
       setUsers((prev) => (prev.some((x) => x.id === u.id) ? prev : [...prev, u]));
       setMessages((prev) => [...prev, { type: 'event', text: `${u.name} joined`, ts: Date.now() }]);
+      pushNote({ kind: 'event', variant: 'join', name: u.name, avatar: u.avatar });
       playSound('join');
     });
     socket.on('user-left', (u) => {
       setUsers((prev) => prev.filter((x) => x.id !== u.id));
       setMessages((prev) => [...prev, { type: 'event', text: `${u.name} left`, ts: Date.now() }]);
+      pushNote({ kind: 'event', variant: 'leave', name: u.name, avatar: u.avatar });
       playSound('leave');
     });
     socket.on('chat-message', (msg) => {
       setMessages((prev) => [...prev, { type: 'chat', ...msg }]);
-      setUnreadCount((n) => n + 1);
-      if (msg.sender?.id !== userIdRef.current) playSound('message');
+      const fromOther = msg.sender?.id !== userIdRef.current;
+      if (fromOther) playSound('message');
+      // When the chat is closed, surface a Meet-style preview + unread badge.
+      if (fromOther && !showChatRef.current) {
+        setUnreadCount((n) => n + 1);
+        pushNote({
+          kind: 'chat',
+          name: msg.sender?.name,
+          avatar: msg.sender?.avatar,
+          text: msg.text,
+          duration: 6000,
+        });
+      }
     });
     socket.on('sfu-meeting-ended', () => {
       setMeetingEndedSnack(true);
@@ -163,19 +234,28 @@ export default function RoomPage() {
     if (isScreenSharing) { playSound('shareStop'); stopScreenShare(); }
     else { playSound('shareStart'); shareScreen(); }
   };
-  const handleLeave = () => {
+  const doLeave = (endForAll = false) => {
     playSound('callEnd');
-    socket.emit('sfu-end-meeting');
+    if (endForAll) socket.emit('sfu-end-meeting');
     navigate('/');
   };
+  const handleLeave = () => {
+    if (isHost) { setLeaveDialogOpen(true); return; }
+    doLeave(false);
+  };
   const handleToggleSound = () => setSoundEnabled(toggleSound());
+  const handleTogglePip = () => {
+    togglePiP().catch(() =>
+      pushNote({ kind: 'event', variant: 'info', text: "Couldn't open the mini player" }),
+    );
+  };
   async function handleCopyLink() {
     const link = `${window.location.origin}/lobby/${roomId}`;
     try {
       await navigator.clipboard.writeText(link);
-      setToast('Joining link copied to clipboard');
+      pushNote({ kind: 'event', variant: 'info', text: 'Joining link copied' });
     } catch {
-      setToast(link);
+      pushNote({ kind: 'event', variant: 'info', text: 'Press the link button to copy' });
     }
   }
 
@@ -510,10 +590,18 @@ export default function RoomPage() {
               onReact={(el) => setReactionAnchor(el)}
               showChat={showChat} unreadCount={unreadCount} onToggleChat={handleToggleChat}
               soundEnabled={soundEnabled} onToggleSound={handleToggleSound}
+              pipSupported={pipSupported} pipActive={pipActive} onTogglePip={handleTogglePip}
               onCopyLink={handleCopyLink}
               onLeave={handleLeave}
             />
           </Box>
+
+          {/* Join/leave flashes + chat-message previews (bottom-left) */}
+          <CallNotifications
+            notes={notes}
+            onOpenChat={() => { setShowChat(true); setUnreadCount(0); }}
+            onDismiss={dismissNote}
+          />
         </Box>
 
         {/* Chat */}
@@ -536,15 +624,30 @@ export default function RoomPage() {
         </Alert>
       </Snackbar>
 
-      {/* Copy / info toast */}
-      <Snackbar
-        open={Boolean(toast)}
-        autoHideDuration={2600}
-        onClose={() => setToast('')}
-        message={toast}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        sx={{ '& .MuiSnackbarContent-root': { borderRadius: 2 } }}
-      />
+      {/* Host leave confirmation — non-hosts leave immediately (no dialog) */}
+      <Dialog
+        open={leaveDialogOpen}
+        onClose={() => setLeaveDialogOpen(false)}
+        slotProps={{ paper: { sx: { borderRadius: 3, minWidth: 320 } } }}
+      >
+        <DialogTitle sx={{ pb: 1 }}>Leave this meeting?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            You're the host. You can leave quietly and let others continue, or end the meeting for everyone.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
+          <Button onClick={() => setLeaveDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => { setLeaveDialogOpen(false); doLeave(false); }}>Leave call</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() => { setLeaveDialogOpen(false); doLeave(true); }}
+          >
+            End for everyone
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Emoji reaction picker */}
       <Popover

@@ -17,7 +17,7 @@ export function useMediasoup(roomId, devices = {}) {
   const [localScreenStream, setLocalScreenStream] = useState(null);
   const [handRaised, setHandRaised] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState(null);
-  const [socketConnected, setSocketConnected] = useState(false);
+  const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
   const deviceRef = useRef(null);
@@ -331,10 +331,18 @@ export function useMediasoup(roomId, devices = {}) {
       recvTransport.on('connect', ({ dtlsParameters }, cb, errb) => {
         request('sfu-connect-transport', { transportId: recvTransport.id, dtlsParameters }).then(cb).catch(errb);
       });
+      // One recv transport serves every remote peer, so its live ICE/DTLS state
+      // is the receive health for all of them. consumeProducer stamps a peer's
+      // initial state when first consumed — often "connecting" mid-handshake.
+      // Without this listener that snapshot freezes, so the "Connecting…" badge
+      // never clears once the transport reaches "connected". (A peer leaving
+      // closes consumers, not this transport, so this won't false-flag tiles.)
       recvTransport.on('connectionstatechange', (state) => {
         setPeerConnectionStates((prev) => {
+          const ids = Object.keys(prev);
+          if (ids.length === 0) return prev;
           const next = {};
-          for (const id of Object.keys(prev)) next[id] = state;
+          for (const sid of ids) next[sid] = state;
           return next;
         });
       });
@@ -369,8 +377,18 @@ export function useMediasoup(roomId, devices = {}) {
       let deniedCount = 0;
 
       try {
-        const c = audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true;
-        const s = await navigator.mediaDevices.getUserMedia({ audio: c });
+        // Full WebRTC voice pipeline (Google Meet parity): echo cancellation +
+        // noise suppression + auto gain. Disabling NS/AGC or pinning a fixed
+        // sampleRate/channelCount on Linux (PipeWire/PulseAudio) forces resampling
+        // and drops the noise gate — that's what produced the constant crackle
+        // and feedback during silence. Let the browser negotiate the rate.
+        const audioConstraints = {
+          ...(audioDeviceId ? { deviceId: { exact: audioDeviceId } } : {}),
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        };
+        const s = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
         s.getAudioTracks().forEach((t) => stream.addTrack(t));
       } catch (err) {
         if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') deniedCount++;
