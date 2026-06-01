@@ -4,6 +4,19 @@ import socket from '../services/socket';
 import { request } from '../services/mediasoup-signal';
 import { ICE_SERVERS, ICE_TRANSPORT_POLICY } from '../services/ice-config';
 
+// Camera simulcast (3 spatial layers, each with L1T3 temporal layers). Single-
+// encoding video can't degrade per-receiver: when a viewer's downlink drops the
+// SFU keeps forwarding the full stream, congesting the shared transport and
+// breaking the (tiny) audio riding alongside it. With layers, the SFU drops a
+// temporal layer on the next frame — no keyframe wait — to free the pipe fast
+// enough to keep voice intact. Bitrates suit a talking-head meeting tile.
+const CAM_VIDEO_ENCODINGS = [
+  { scaleResolutionDownBy: 4, maxBitrate: 200_000, scalabilityMode: 'L1T3' },
+  { scaleResolutionDownBy: 2, maxBitrate: 500_000, scalabilityMode: 'L1T3' },
+  { scaleResolutionDownBy: 1, maxBitrate: 1_500_000, scalabilityMode: 'L1T3' },
+];
+const CAM_VIDEO_CODEC_OPTIONS = { videoGoogleStartBitrate: 1000 };
+
 export function useMediasoup(roomId, devices = {}) {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState({});
@@ -41,6 +54,8 @@ export function useMediasoup(roomId, devices = {}) {
   const gainSrcRef = useRef(null);
   const gainDestRef = useRef(null);
   const gainEngagedRef = useRef(false);
+  const micGainRef = useRef(1);        // desired mic gain (persists across reconnects)
+  const setMicGainRef = useRef(null);  // stable handle so the socket effect can re-apply
   const devicesRef = useRef(devices);
   const initializedRef = useRef(false);
   useEffect(() => { devicesRef.current = devices; }, [devices]);
@@ -92,7 +107,12 @@ export function useMediasoup(roomId, devices = {}) {
       if (!track || !localStreamRef.current) return;
       localStreamRef.current.addTrack(track);
       setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-      const newProducer = await sendTransport.produce({ track, appData: { source: 'camera', mediaTag: 'video' } });
+      const newProducer = await sendTransport.produce({
+        track,
+        encodings: CAM_VIDEO_ENCODINGS,
+        codecOptions: CAM_VIDEO_CODEC_OPTIONS,
+        appData: { source: 'camera', mediaTag: 'video' },
+      });
       producersRef.current.set('video', newProducer);
       newProducer.on('transportclose', () => producersRef.current.delete('video'));
       setLocalVideoOn(true);
@@ -140,40 +160,76 @@ export function useMediasoup(roomId, devices = {}) {
     }
   }, [stopScreenShare]);
 
+  // Mic input volume. At unity (100%) the producer carries the *raw* mic track
+  // untouched (keeps the live path clean — routing through Web Audio crackles on
+  // PipeWire). Off unity, the track is routed mic → GainNode → MediaStreamDest
+  // and swapped onto the producer via replaceTrack.
+  //
+  // The whole graph is built EXACTLY ONCE, synchronously. MUI's Slider fires
+  // onChange on every pointer move, so a single drag calls this many times in
+  // quick succession; the old code only set gainEngagedRef AFTER an `await`, so
+  // concurrent calls each spun up their own graph, the refs kept only the last,
+  // and the producer could end up wired to an orphaned (GC'd) destination node →
+  // the mic went silent. Building synchronously before the first await closes
+  // that race; later drag events just retune the existing gain node.
   const setMicGain = useCallback(async (value) => {
     const clamped = Math.max(0, Math.min(2, value));
+    micGainRef.current = clamped;
+    setMicGainState(clamped);
+
     const producer = producersRef.current.get('audio');
     const rawTrack = localStreamRef.current?.getAudioTracks()[0];
-    if (!producer || !rawTrack) { setMicGainState(clamped); return; }
+    if (!producer || !rawTrack) return;
 
     const EPS = 0.02;
-    if (Math.abs(clamped - 1) < EPS && gainEngagedRef.current) {
-      // Back to unity — bypass the gain graph, restore raw track
+
+    // Back to unity — bypass the gain graph, restore the untouched raw track.
+    if (Math.abs(clamped - 1) < EPS) {
+      if (!gainEngagedRef.current) return;
+      gainEngagedRef.current = false; // sync guard: blocks re-entry mid-await
       try { await producer.replaceTrack({ track: rawTrack }); } catch { /* ignore */ }
       try { gainSrcRef.current?.disconnect(); } catch { /* ignore */ }
       try { gainNodeRef.current?.disconnect(); } catch { /* ignore */ }
       try { gainDestRef.current?.disconnect(); } catch { /* ignore */ }
       gainSrcRef.current = null; gainNodeRef.current = null; gainDestRef.current = null;
-      gainEngagedRef.current = false;
-    } else if (Math.abs(clamped - 1) >= EPS) {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-      if (!gainEngagedRef.current) {
-        gainSrcRef.current = ctx.createMediaStreamSource(new MediaStream([rawTrack]));
-        gainNodeRef.current = ctx.createGain();
-        gainDestRef.current = ctx.createMediaStreamDestination();
-        gainSrcRef.current.connect(gainNodeRef.current);
-        gainNodeRef.current.connect(gainDestRef.current);
-        try { await producer.replaceTrack({ track: gainDestRef.current.stream.getAudioTracks()[0] }); } catch { /* ignore */ }
-        gainEngagedRef.current = true;
-      }
-      gainNodeRef.current.gain.value = clamped;
+      return;
     }
-    setMicGainState(clamped);
+
+    // Already routed through the gain graph — just retune (cheap, synchronous).
+    if (gainEngagedRef.current && gainNodeRef.current) {
+      gainNodeRef.current.gain.value = clamped;
+      return;
+    }
+
+    // First non-unity move: build the graph once. Everything that must exist
+    // before we yield (nodes, refs, engaged flag) is created up front so a
+    // racing drag event takes the retune path above instead of building again.
+    gainEngagedRef.current = true;
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const ctx = audioCtxRef.current;
+    const src = ctx.createMediaStreamSource(new MediaStream([rawTrack]));
+    const gain = ctx.createGain();
+    const dest = ctx.createMediaStreamDestination();
+    gain.gain.value = clamped;
+    src.connect(gain);
+    gain.connect(dest);
+    gainSrcRef.current = src;
+    gainNodeRef.current = gain;
+    gainDestRef.current = dest;
+
+    // A MediaStreamDestination outputs silence while its context is suspended,
+    // so make sure it's running before the producer starts pulling from it.
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* ignore */ } }
+    // Skip the swap if a unity reset slipped in during the await (it nulls dest).
+    if (gainEngagedRef.current && gainDestRef.current === dest) {
+      try { await producer.replaceTrack({ track: dest.stream.getAudioTracks()[0] }); } catch { /* ignore */ }
+    }
   }, []);
+  // Stable handle so the socket effect can re-apply mic gain after a reconnect
+  // without taking setMicGain as a dependency.
+  useEffect(() => { setMicGainRef.current = setMicGain; }, [setMicGain]);
 
   const toggleHand = useCallback(() => {
     const raised = !handRaisedRef.current;
@@ -439,7 +495,12 @@ export function useMediasoup(roomId, devices = {}) {
       }
       const videoTrack = stream?.getVideoTracks()[0];
       if (videoTrack && device.canProduce('video')) {
-        const p = await sendTransport.produce({ track: videoTrack, appData: { source: 'camera', mediaTag: 'video' } });
+        const p = await sendTransport.produce({
+          track: videoTrack,
+          encodings: CAM_VIDEO_ENCODINGS,
+          codecOptions: CAM_VIDEO_CODEC_OPTIONS,
+          appData: { source: 'camera', mediaTag: 'video' },
+        });
         producers.set('video', p);
         p.on('transportclose', () => producers.delete('video'));
         if (!startVideoOn) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
@@ -525,8 +586,20 @@ export function useMediasoup(roomId, devices = {}) {
       setPeerStates({});
       setPeerConnectionStates({});
 
+      // The audio producer is rebuilt from the raw mic track on reconnect, so any
+      // gain graph from before now feeds a dead producer. Drop it and re-apply the
+      // user's saved mic volume against the fresh producer.
+      try { gainSrcRef.current?.disconnect(); } catch { /* ignore */ }
+      try { gainNodeRef.current?.disconnect(); } catch { /* ignore */ }
+      try { gainDestRef.current?.disconnect(); } catch { /* ignore */ }
+      gainSrcRef.current = null; gainNodeRef.current = null; gainDestRef.current = null;
+      gainEngagedRef.current = false;
+
       try {
         await setupSfu(localStreamRef.current);
+        if (Math.abs(micGainRef.current - 1) >= 0.02) {
+          setMicGainRef.current?.(micGainRef.current);
+        }
       } catch (err) {
         if (!cancelled && import.meta.env.DEV) console.error('[sfu] reconnect failed:', err.message);
       }

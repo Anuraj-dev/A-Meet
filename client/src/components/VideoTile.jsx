@@ -37,6 +37,9 @@ export default function VideoTile({
 
   return (
     <Box
+      // `levelRef` lives on the root so the analyser's `--lvl` (0..1) cascades
+      // to every child — the avatar ring and the tile-edge mic meter both read it.
+      ref={levelRef}
       sx={{
         position: 'relative',
         width: '100%',
@@ -46,8 +49,6 @@ export default function VideoTile({
         bgcolor: videoOn ? 'tile.bg' : offColor,
         borderRadius: 'inherit',
         overflow: 'hidden',
-        transition: 'box-shadow 0.25s ease',
-        animation: activeSpeaker ? 'ameet-speaker-pulse 1.6s ease-in-out infinite' : 'none',
         // Subtle inset hairline gives every tile crisp definition on the canvas.
         '&::after': {
           content: '""',
@@ -59,35 +60,6 @@ export default function VideoTile({
         },
       }}
     >
-      {/* Level-reactive speaking rings — analyser-only, never wired to speakers */}
-      <Box
-        ref={levelRef}
-        aria-hidden
-        sx={{
-          position: 'absolute',
-          inset: 0,
-          borderRadius: 'inherit',
-          pointerEvents: 'none',
-          zIndex: 0,
-          '&::before, &::after': {
-            content: '""',
-            position: 'absolute',
-            inset: 0,
-            borderRadius: 'inherit',
-            border: '2px solid',
-            borderColor: 'primary.main',
-            opacity: 'calc(var(--lvl, 0) * 0.85)',
-            transform: 'scale(calc(1 + var(--lvl, 0) * 0.04))',
-            transition: 'opacity 0.05s, transform 0.05s',
-          },
-          '&::after': {
-            inset: '-4px',
-            opacity: 'calc(var(--lvl, 0) * 0.45)',
-            transform: 'scale(calc(1 + var(--lvl, 0) * 0.08))',
-          },
-        }}
-      />
-
       <video
         ref={videoRef}
         autoPlay
@@ -142,6 +114,28 @@ export default function VideoTile({
                 : 'radial-gradient(circle at 50% 38%, rgba(255,255,255,0.14), rgba(0,0,0,0.22) 72%)',
             }}
           />
+          {/* Voice-reactive ring around the avatar — confirms the mic is live
+              and shows speaking even with the camera off. Driven by --lvl, so it
+              grows/brightens in real time with the actual audio level. */}
+          <Box
+            aria-hidden
+            sx={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              width: 'min(40cqmin, 132px)',
+              height: 'min(40cqmin, 132px)',
+              transform: 'translate(-50%, -50%) scale(calc(1 + min(0.12, var(--lvl, 0) * 0.3)))',
+              borderRadius: '50%',
+              pointerEvents: 'none',
+              zIndex: 0,
+              // min() amplifies quiet speech (raw --lvl is modest) then clamps the
+              // glow so a shout doesn't blow out the tile.
+              boxShadow:
+                '0 0 min(30px, calc(var(--lvl,0) * 60px)) min(16px, calc(var(--lvl,0) * 32px)) rgba(52,211,153, min(0.8, calc(var(--lvl,0) * 2)))',
+              transition: 'box-shadow 0.08s linear, transform 0.08s linear',
+            }}
+          />
           <Avatar
             src={avatar}
             alt={name}
@@ -179,9 +173,9 @@ export default function VideoTile({
         <Box
           sx={{
             position: 'absolute',
-            left: 'clamp(8px, 3cqmin, 14px)',
-            bottom: 'clamp(8px, 3cqmin, 14px)',
-            right: 'clamp(8px, 3cqmin, 14px)',
+            left: 'clamp(10px, 3.5cqmin, 16px)',
+            bottom: 'clamp(10px, 3.5cqmin, 16px)',
+            right: 'clamp(10px, 3.5cqmin, 16px)',
             display: 'flex',
             alignItems: 'center',
             minWidth: 0,
@@ -206,8 +200,8 @@ export default function VideoTile({
         <Box
           sx={{
             position: 'absolute',
-            top: 'clamp(8px, 3cqmin, 14px)',
-            right: 'clamp(8px, 3cqmin, 14px)',
+            top: 'clamp(10px, 3.5cqmin, 16px)',
+            right: 'clamp(10px, 3.5cqmin, 16px)',
             width: 'clamp(24px, 7.5cqmin, 32px)',
             height: 'clamp(24px, 7.5cqmin, 32px)',
             borderRadius: '50%',
@@ -229,8 +223,8 @@ export default function VideoTile({
         <Box
           sx={{
             position: 'absolute',
-            top: 'clamp(8px, 3cqmin, 14px)',
-            left: 'clamp(8px, 3cqmin, 14px)',
+            top: 'clamp(10px, 3.5cqmin, 16px)',
+            left: 'clamp(10px, 3.5cqmin, 16px)',
             width: 'clamp(28px, 9cqmin, 38px)',
             height: 'clamp(28px, 9cqmin, 38px)',
             borderRadius: '50%',
@@ -297,6 +291,41 @@ export default function VideoTile({
             {activeReaction}
           </Box>
         </Box>
+      )}
+
+      {/* Real-time mic-level ring on the tile edge (camera on) — a thin green
+          inset border that brightens with your voice so you can see at a glance
+          that the mic is picking you up. Rendered last so it sits over the video. */}
+      {videoOn && (
+        <Box
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            borderRadius: 'inherit',
+            pointerEvents: 'none',
+            boxShadow:
+              'inset 0 0 0 min(3px, calc(var(--lvl,0) * 9px)) rgba(52,211,153, min(0.9, calc(var(--lvl,0) * 2.4)))',
+            transition: 'box-shadow 0.06s linear',
+          }}
+        />
+      )}
+
+      {/* Active-speaker focus ring — the SFU picks the loudest person and we
+          light their whole tile green (Google-Meet style) to keep the focus
+          on whoever is talking. */}
+      {activeSpeaker && (
+        <Box
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            borderRadius: 'inherit',
+            pointerEvents: 'none',
+            boxShadow: 'inset 0 0 0 3px #34d399, inset 0 0 14px rgba(52,211,153,0.45)',
+            animation: 'ameet-speaker-pulse 1.8s ease-in-out infinite',
+          }}
+        />
       )}
     </Box>
   );

@@ -8,11 +8,14 @@ import {
   Keyboard as KeyboardIcon,
   VideocamRounded as VideocamIcon,
   ArrowForward as ArrowIcon,
+  CalendarMonthRounded as CalendarIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 import BrandMark from '../components/BrandMark';
 import SpaceCanvas from '../components/SpaceCanvas';
+import ScheduleMeetingDialog from '../components/ScheduleMeetingDialog';
+import UpcomingMeetings from '../components/UpcomingMeetings';
 
 const DK = {
   bg:        '#0c0b12',
@@ -50,6 +53,9 @@ export default function LandingPage() {
   const [joinOpen, setJoinOpen] = useState(false);
   const [mounted,  setMounted]  = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [editingMeeting, setEditingMeeting] = useState(null);
+  const [meetingsKey, setMeetingsKey] = useState(0);
   const tileRefs = useRef([]);
 
   useEffect(() => {
@@ -69,6 +75,25 @@ export default function LandingPage() {
       const { data } = await api.post('/rooms');
       navigate(`/lobby/${data.roomId}`);
     } finally { setCreating(false); }
+  }
+
+  function openSchedule() {
+    setEditingMeeting(null);
+    setScheduleOpen(true);
+  }
+
+  function handleEditMeeting(meeting) {
+    setEditingMeeting(meeting);
+    setScheduleOpen(true);
+  }
+
+  function handleScheduleClose() {
+    setScheduleOpen(false);
+    setEditingMeeting(null);
+  }
+
+  function handleMeetingSaved() {
+    setMeetingsKey((k) => k + 1); // re-fetch the Upcoming list
   }
 
   function handleJoin(e) {
@@ -364,6 +389,23 @@ export default function LandingPage() {
                     >
                       Join with code
                     </Button>
+
+                    <Button
+                      size="large"
+                      startIcon={<CalendarIcon sx={{ color: DK.dim }} />}
+                      onClick={openSchedule}
+                      sx={{
+                        bgcolor: DK.surface, color: DK.ink,
+                        borderRadius: '999px', px: 3, py: 1.75, fontSize: 15.5, fontWeight: 700,
+                        fontFamily: DK.font,
+                        border: `1.5px solid ${DK.line2}`,
+                        backdropFilter: 'blur(8px)',
+                        '&:hover': { bgcolor: DK.surface2, borderColor: DK.teal, color: DK.teal, transform: 'translateY(-1px)' },
+                        transition: `border-color 0.2s ${EASE}, color 0.2s ${EASE}, background-color 0.2s ${EASE}, transform 0.2s ${EASE}`,
+                      }}
+                    >
+                      Schedule
+                    </Button>
                   </Stack>
                 </Box>
 
@@ -500,6 +542,13 @@ export default function LandingPage() {
             </Box>
           </Box>
         </Box>
+
+        {/* ── Upcoming meetings (signed-in) ─────────────────────────────── */}
+        {user && (
+          <Box sx={{ ...fadeUp(430), maxWidth: 640, width: '100%', mb: { xs: 4, md: 6 } }}>
+            <UpcomingMeetings refreshKey={meetingsKey} onEdit={handleEditMeeting} />
+          </Box>
+        )}
 
         {/* ── Footer ────────────────────────────────────────────────────── */}
         <Box sx={{ borderTop: `1px solid rgba(255,255,255,0.07)`, py: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

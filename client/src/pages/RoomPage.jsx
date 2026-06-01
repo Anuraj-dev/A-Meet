@@ -22,6 +22,7 @@ import ChatPanel from '../components/ChatPanel';
 import CallNotifications from '../components/CallNotifications';
 import ReactionsOverlay from '../components/ReactionsOverlay';
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
+import { copyMeetingScreenshot, downloadMeetingScreenshot } from '../utils/capture-screenshot';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '👏', '🎉'];
 
@@ -316,6 +317,30 @@ export default function RoomPage() {
       pushNote({ kind: 'event', variant: 'info', text: "Couldn't open the mini player" }),
     );
   };
+  // Capture the current meeting view (camera tiles + any on-stage share) and
+  // copy it to the clipboard as a PNG. Falls back to a file download when the
+  // browser can't write images to the clipboard (e.g. Firefox).
+  async function handleScreenshot() {
+    const tiles = cameraTiles().map(({ key, stream, name, videoOn, audioOn, mirror }) =>
+      ({ key, stream, name, videoOn, audioOn, mirror }));
+    // Prefix the share key so it can't collide with the 'local' camera tile.
+    const share = pinnedShare
+      ? { key: `share-${pinnedShare.key}`, stream: pinnedShare.stream, name: pinnedShare.name }
+      : null;
+    try {
+      await copyMeetingScreenshot({ tiles, share });
+      playSound('toggleOn');
+      pushNote({ kind: 'event', variant: 'info', text: 'Screenshot copied to clipboard' });
+    } catch {
+      try {
+        await downloadMeetingScreenshot({ tiles, share }, `a-meet-${roomId}`);
+        pushNote({ kind: 'event', variant: 'info', text: 'Screenshot saved' });
+      } catch {
+        pushNote({ kind: 'event', variant: 'info', text: "Couldn't capture a screenshot" });
+      }
+    }
+  }
+
   async function handleCopyLink() {
     const link = `${window.location.origin}/lobby/${roomId}`;
     try {
@@ -340,6 +365,7 @@ export default function RoomPage() {
         audioOn: localAudioOn,
         handRaised: false,
         activeReaction: activeReactions[socket.id],
+        activeSpeaker: activeSpeaker === socket.id,
         mirror: true,
       },
       ...remoteEntries.map(([peerId, stream]) => {
@@ -381,6 +407,7 @@ export default function RoomPage() {
             videoOn={localVideoOn}
             audioOn={localAudioOn}
             activeReaction={activeReactions[socket.id]}
+            activeSpeaker={activeSpeaker === socket.id}
             mirror
             objectFit="cover"
           />
@@ -607,7 +634,7 @@ export default function RoomPage() {
                 width: { xs: 140, sm: '100%' },
                 height: { xs: '100%', sm: 'auto' },
                 aspectRatio: { sm: '16/9' },
-                borderRadius: 2,
+                borderRadius: '16px',
                 overflow: 'hidden',
               }}
             >
@@ -646,7 +673,7 @@ export default function RoomPage() {
               right: { xs: 12, sm: 20 },
               width: { xs: 116, sm: 200 },
               aspectRatio: '16/9',
-              borderRadius: 3,
+              borderRadius: '16px',
               overflow: 'hidden',
               boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
               zIndex: 2,
@@ -661,6 +688,7 @@ export default function RoomPage() {
               videoOn={localVideoOn}
               audioOn={localAudioOn}
               activeReaction={activeReactions[socket.id]}
+              activeSpeaker={activeSpeaker === socket.id}
               mirror
             />
           </Box>
@@ -725,7 +753,7 @@ export default function RoomPage() {
               }}
             >
               {tiles.map(({ key, audioStream: tileAudioStream, ...t }) => (
-                <Box key={key} sx={{ aspectRatio: '16/9', borderRadius: 3, overflow: 'hidden' }}>
+                <Box key={key} sx={{ aspectRatio: '16/9', borderRadius: '16px', overflow: 'hidden' }}>
                   <VideoTile {...t} audioStream={tileAudioStream} />
                 </Box>
               ))}
@@ -881,6 +909,7 @@ export default function RoomPage() {
               soundEnabled={soundEnabled} onToggleSound={handleToggleSound}
               pipSupported={pipSupported} pipActive={pipActive} onTogglePip={handleTogglePip}
               onCopyLink={handleCopyLink}
+              onScreenshot={handleScreenshot}
               onLeave={handleLeave}
               micGain={micGain} onMicGainChange={setMicGain}
               outputVolume={outputVolume} onOutputVolumeChange={setOutputVolume}

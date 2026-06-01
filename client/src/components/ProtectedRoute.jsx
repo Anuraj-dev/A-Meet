@@ -1,9 +1,10 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
 
 export default function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -13,6 +14,13 @@ export default function ProtectedRoute({ children }) {
     );
   }
 
-  if (!user) return <Navigate to="/" replace />;
+  if (!user) {
+    // Remember the deep link (e.g. a /lobby/:roomId meeting invite) before
+    // bouncing to the home page, so sign-in returns the user here instead of
+    // stranding them on the landing page. login() carries this through OAuth.
+    const returnTo = location.pathname + location.search;
+    if (returnTo && returnTo !== '/') sessionStorage.setItem('ameet:returnTo', returnTo);
+    return <Navigate to="/" replace />;
+  }
   return children;
 }

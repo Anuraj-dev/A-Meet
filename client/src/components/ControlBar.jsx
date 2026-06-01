@@ -16,6 +16,7 @@ import {
   MicOff as MicOffIcon,
   MoreVert as MoreVertIcon,
   PanTool as PanToolIcon,
+  PhotoCamera as PhotoCameraIcon,
   PictureInPictureAlt as PipIcon,
   PresentToAll as PresentIcon,
   CancelPresentation as StopPresentIcon,
@@ -69,6 +70,7 @@ export default function ControlBar({
   soundEnabled, onToggleSound,
   pipSupported, pipActive, onTogglePip,
   onCopyLink,
+  onScreenshot,
   onLeave,
   micGain = 1, onMicGainChange,
   outputVolume = 1, onOutputVolumeChange,
@@ -265,6 +267,12 @@ export default function ControlBar({
           <ListItemIcon><ContentCopyIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Copy joining link</ListItemText>
         </MenuItem>
+        {onScreenshot && (
+          <MenuItem onClick={() => { closeMore(); onScreenshot(); }}>
+            <ListItemIcon><PhotoCameraIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Take screenshot</ListItemText>
+          </MenuItem>
+        )}
         {pipSupported && (
           <MenuItem onClick={() => { closeMore(); onTogglePip(); }}>
             <ListItemIcon><PipIcon fontSize="small" /></ListItemIcon>

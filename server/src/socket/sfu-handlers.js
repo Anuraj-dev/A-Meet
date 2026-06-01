@@ -167,6 +167,15 @@ export function registerSfuHandlers(io, socket) {
       const consumer = await transport.consume({ producerId, rtpCapabilities, paused: true });
       peer.consumers.set(consumer.id, consumer);
 
+      // Protect voice under congestion: when this recv transport's downlink
+      // can't satisfy every consumer, mediasoup distributes the available
+      // bitrate by priority (higher first). Audio gets the top slice so its
+      // ~40 kbps is reserved before video; paired with camera simulcast, the
+      // SFU then sheds video layers instead of dropping audio packets.
+      if (consumer.kind === 'audio') {
+        try { await consumer.setPriority(255); } catch { /* non-fatal */ }
+      }
+
       consumer.on('transportclose', () => peer.consumers.delete(consumer.id));
       consumer.on('producerclose', () => {
         peer.consumers.delete(consumer.id);

@@ -8,24 +8,122 @@ function generateRoomId() {
   return `${block(3)}-${block(4)}-${block(3)}`;
 }
 
-// POST /api/rooms — create a new room (host = current user).
+// Creates a Room with a freshly minted unique code, retrying a few times in the
+// (very unlikely) event of a collision. `fields` carries any extra data (host,
+// scheduling metadata, …). Returns the created doc, or null if all retries lost.
+async function createUniqueRoom(fields) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const roomId = generateRoomId();
+    try {
+      return await Room.create({ roomId, participants: [], ...fields });
+    } catch (err) {
+      if (err.code === 11000) continue; // duplicate roomId, retry
+      throw err;
+    }
+  }
+  return null;
+}
+
+// Shape a scheduled-meeting doc for the client (omit internals like participants).
+function toMeetingDto(room) {
+  return {
+    roomId: room.roomId,
+    title: room.title,
+    description: room.description,
+    scheduledFor: room.scheduledFor,
+    createdAt: room.createdAt,
+  };
+}
+
+// POST /api/rooms — create a new instant room (host = current user).
 export async function createRoom(req, res, next) {
   try {
-    // Retry a few times in the (very unlikely) event of a code collision.
-    let room;
-    for (let attempt = 0; attempt < 5 && !room; attempt++) {
-      const roomId = generateRoomId();
-      try {
-        room = await Room.create({ roomId, host: req.user.id, participants: [] });
-      } catch (err) {
-        if (err.code === 11000) continue; // duplicate roomId, retry
-        throw err;
-      }
-    }
+    const room = await createUniqueRoom({ host: req.user.id });
     if (!room) return res.status(500).json({ error: 'Could not generate a unique room code' });
     res.status(201).json({ roomId: room.roomId });
   } catch (err) {
     next(err);
+  }
+}
+
+// POST /api/rooms/scheduled — reserve a room for later (title + time + notes).
+// The link is joinable any time; `scheduledFor` is display-only metadata.
+export async function createScheduledRoom(req, res, next) {
+  try {
+    const { title, scheduledFor, description } = req.body;
+    const room = await createUniqueRoom({
+      host: req.user.id,
+      title,
+      scheduledFor,
+      description,
+    });
+    if (!room) return res.status(500).json({ error: 'Could not generate a unique room code' });
+    res.status(201).json(toMeetingDto(room));
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/rooms/mine — the signed-in user's upcoming (not-yet-ended) scheduled
+// meetings, soonest first.
+export async function listMyMeetings(req, res, next) {
+  try {
+    const rooms = await Room.find({
+      host: req.user.id,
+      scheduledFor: { $ne: null },
+      active: true,
+    })
+      .sort({ scheduledFor: 1 })
+      .lean();
+    res.json({ meetings: rooms.map(toMeetingDto) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Loads a scheduled meeting and asserts the caller hosts it. Returns the doc, or
+// sends the appropriate error response and returns null.
+async function loadOwnedMeeting(req, res) {
+  const roomId = String(req.params.roomId || '').toLowerCase();
+  const room = await Room.findOne({ roomId });
+  if (!room || !room.scheduledFor || !room.active) {
+    res.status(404).json({ error: 'Meeting not found' });
+    return null;
+  }
+  if (room.host.toString() !== req.user.id) {
+    res.status(403).json({ error: 'Only the host can change this meeting' });
+    return null;
+  }
+  return room;
+}
+
+// PATCH /api/rooms/scheduled/:roomId — host edits title / time / description.
+export async function updateScheduledRoom(req, res, next) {
+  try {
+    const room = await loadOwnedMeeting(req, res);
+    if (!room) return undefined;
+    const { title, scheduledFor, description } = req.body;
+    if (title !== undefined) room.title = title;
+    if (scheduledFor !== undefined) room.scheduledFor = scheduledFor;
+    if (description !== undefined) room.description = description;
+    await room.save();
+    return res.json(toMeetingDto(room));
+  } catch (err) {
+    return next(err);
+  }
+}
+
+// DELETE /api/rooms/scheduled/:roomId — host cancels. Soft-cancel via active:false
+// so a stale invite link lands on the "meeting has ended" screen (getRoom → 410).
+export async function cancelScheduledRoom(req, res, next) {
+  try {
+    const room = await loadOwnedMeeting(req, res);
+    if (!room) return undefined;
+    room.active = false;
+    await room.save();
+    return res.status(204).end();
+  } catch (err) {
+    return next(err);
   }
 }
 
@@ -50,6 +148,9 @@ export async function getRoom(req, res, next) {
       roomId: room.roomId,
       host: room.host,
       active: room.active,
+      title: room.title,
+      description: room.description,
+      scheduledFor: room.scheduledFor,
       createdAt: room.createdAt,
     });
   } catch (err) {

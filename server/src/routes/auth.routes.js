@@ -6,8 +6,15 @@ import { googleCallback, getMe, logout } from '../controllers/auth.controller.js
 
 const router = Router();
 
-// Kicks off the Google OAuth flow.
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'], session: false }));
+// Kicks off the Google OAuth flow. A `returnTo` query (the meeting link a
+// ProtectedRoute stashed before bouncing an unauthenticated visitor to the
+// home page) is round-tripped through the OAuth `state` param so Google hands
+// it back to our callback — letting us land the user back on the invite link
+// instead of the home page. (Validated for same-origin in the callback.)
+router.get('/google', (req, res, next) => {
+  const returnTo = typeof req.query.returnTo === 'string' ? req.query.returnTo : undefined;
+  passport.authenticate('google', { scope: ['profile', 'email'], session: false, state: returnTo })(req, res, next);
+});
 
 // Google redirects here after consent.
 router.get(

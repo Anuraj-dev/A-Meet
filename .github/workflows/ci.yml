@@ -1,0 +1,50 @@
+name: CI
+
+# Runs the test suites on every PR and on pushes to main, so a broken change is
+# caught before it reaches production.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    name: Server tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      # --ignore-scripts skips mediasoup's native worker build (a ~15-min C++
+      # compile). The test suite never imports mediasoup, and esbuild — vitest's
+      # transformer — resolves its binary from the @esbuild/* optional-dep
+      # package at runtime, so it works without its postinstall.
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  client:
+    name: Client tests + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      # Lint is intentionally not a gate yet: RoomPage.jsx has pre-existing
+      # react-hooks/set-state-in-effect errors unrelated to the test setup.
+      # Re-enable this step once those are resolved:
+      # - run: npm run lint
