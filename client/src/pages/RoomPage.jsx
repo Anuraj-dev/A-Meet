@@ -8,7 +8,7 @@ import {
 import {
   ContentCopy as ContentCopyIcon,
   PeopleAlt as PeopleAltIcon,
-  PresentToAll as PresentIcon,
+  StopScreenShare as StopScreenShareIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import socket from '../services/socket';
@@ -20,6 +20,7 @@ import RtcStatsOverlay from '../components/RtcStatsOverlay';
 import ControlBar from '../components/ControlBar';
 import ChatPanel from '../components/ChatPanel';
 import CallNotifications from '../components/CallNotifications';
+import ReactionsOverlay from '../components/ReactionsOverlay';
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '👏', '🎉'];
@@ -51,11 +52,18 @@ export default function RoomPage() {
   const [showChat, setShowChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [activeReactions, setActiveReactions] = useState({});
+  const [floatingReactions, setFloatingReactions] = useState([]);
+  const floatIdRef = useRef(0);
   const [reactionAnchor, setReactionAnchor] = useState(null);
+  const [outputVolume, setOutputVolume] = useState(1);
+  const [controlsPinned, setControlsPinned] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const hideTimer = useRef(null);
   const [meetingEndedSnack, setMeetingEndedSnack] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => isSoundEnabled());
   const [isHost, setIsHost] = useState(false);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [showScreenAnyway, setShowScreenAnyway] = useState(false);
   // Bottom-left transient flashes: join/leave, chat previews, copy confirmation.
   const [notes, setNotes] = useState([]);
   const reactionTimers = useRef({});
@@ -67,6 +75,10 @@ export default function RoomPage() {
   useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
   const showChatRef = useRef(false);
   useEffect(() => { showChatRef.current = showChat; }, [showChat]);
+  // Refs for stale-closure–safe reads inside the mount-only socket effect
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
+  const peerStatesRef = useRef({});
 
   // Determine whether the current user created (and therefore hosts) this room
   // so we can offer "End for everyone" vs "Leave call" on the leave button.
@@ -122,26 +134,71 @@ export default function RoomPage() {
     localStream, remoteStreams, remoteScreens, peerStates, peerConnectionStates,
     localVideoOn, localAudioOn, hasMic,
     toggleVideo, toggleAudio,
-    isScreenSharing, localScreenStream, shareScreen, stopScreenShare,
+    isScreenSharing, localScreenStream, localScreenSurface, shareScreen, stopScreenShare,
+    micGain, setMicGain,
     handRaised, toggleHand,
     activeSpeaker, socketConnected, permissionDenied, rtcStats,
   } = useMediasoup(roomId, devices);
 
+  // Keep peerStatesRef in sync so the mount-only socket effect can read fresh state
+  useEffect(() => { peerStatesRef.current = peerStates; }, [peerStates]);
+
   const remoteEntries = Object.entries(remoteStreams);
   const remoteScreenEntries = Object.entries(remoteScreens);
   const isSoloCall = remoteEntries.length === 1 && remoteScreenEntries.length === 0 && !isScreenSharing;
+  const isAlone = remoteEntries.length === 0 && !isScreenSharing;
   const hasScreen = isScreenSharing || remoteScreenEntries.length > 0;
 
-  const pinnedScreenSid = remoteScreenEntries[0]?.[0] ?? null;
-  const pinnedScreenStream = pinnedScreenSid ? remoteScreens[pinnedScreenSid] : localScreenStream;
-  const pinnedScreenName = pinnedScreenSid
-    ? (peerStates[pinnedScreenSid]?.name ?? 'Participant')
-    : `${user?.name ?? 'You'}`;
+  // Reset "show anyway" whenever a new screen share starts/stops.
+  useEffect(() => {
+    if (!isScreenSharing) setShowScreenAnyway(false);
+  }, [isScreenSharing]);
+
+  // Unified shares model — avoids self-mirror loop and supports multi-share
+  const shares = [
+    ...remoteScreenEntries.map(([sid, stream]) => ({
+      key: sid, stream, isLocal: false,
+      name: peerStates[sid]?.name ?? 'Participant', surface: null,
+    })),
+    ...(isScreenSharing && localScreenStream
+      ? [{ key: 'local', stream: localScreenStream, isLocal: true,
+           name: user?.name ?? 'You', surface: localScreenSurface }]
+      : []),
+  ];
+  const [pinnedShareKey, setPinnedShareKey] = useState(null);
+  const pinnedShare = shares.find((s) => s.key === pinnedShareKey)
+    ?? shares.find((s) => !s.isLocal)
+    ?? shares[0]
+    ?? null;
+
+  // Keep pinnedShareKey valid when shares list changes
+  useEffect(() => {
+    if (pinnedShareKey && !shares.find((s) => s.key === pinnedShareKey)) {
+      setPinnedShareKey(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shares.map((s) => s.key).join(',')]);
 
   // Composite every camera tile into a Picture-in-Picture "mini player" so
   // participants stay visible after switching tabs.
   const camTiles = cameraTiles();
-  const { pipSupported, pipActive, togglePiP } = usePictureInPicture(camTiles);
+  const { pipSupported, pipActive, togglePiP } = usePictureInPicture(camTiles, { auto: true });
+
+  // Controls auto-hide during screen share
+  const controlsShown = !hasScreen || controlsPinned || controlsVisible;
+  const handleStageMouseMove = () => {
+    if (!hasScreen) return;
+    setControlsVisible(true);
+    clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setControlsVisible(false), 3000);
+  };
+  // Reset controls when screen share ends
+  useEffect(() => {
+    if (!hasScreen) {
+      setControlsVisible(true);
+      clearTimeout(hideTimer.current);
+    }
+  }, [hasScreen]);
 
   useEffect(() => {
     socket.connect();
@@ -189,6 +246,14 @@ export default function RoomPage() {
           const next = { ...prev }; delete next[socketId]; return next;
         });
       }, 3000);
+      // Bottom-left floating stream — read fresh metadata via refs
+      const isSelf = socketId === socket.id;
+      const meta = isSelf
+        ? { name: userRef.current?.name, avatar: userRef.current?.avatar }
+        : { name: peerStatesRef.current[socketId]?.name, avatar: peerStatesRef.current[socketId]?.avatar };
+      const fid = (floatIdRef.current += 1);
+      setFloatingReactions((p) => [...p, { id: fid, emoji, ...meta }]);
+      setTimeout(() => setFloatingReactions((p) => p.filter((r) => r.id !== fid)), 1800);
     });
     // Separate listener purely for the raise-hand cue (peers only; server
     // excludes the sender, so this never fires for our own toggle). Removed by
@@ -267,6 +332,7 @@ export default function RoomPage() {
       localStream && {
         key: 'local',
         stream: localStream,
+        audioStream: localStream,
         muted: true,
         name: `${user?.name ?? 'You'} (You)`,
         avatar: user?.avatar,
@@ -281,6 +347,7 @@ export default function RoomPage() {
         return {
           key: peerId,
           stream,
+          audioStream: stream,
           // Audio plays via the dedicated <RemoteAudio> sink, so the tile's
           // <video> is muted to avoid double audio.
           muted: true,
@@ -299,28 +366,220 @@ export default function RoomPage() {
 
   // --- Layouts ---
 
+  // When the user is alone: show their own camera tile full-screen so the call
+  // doesn't feel like an empty room. Overlay an invite prompt above the control bar.
+  function renderAloneLayout() {
+    return (
+      <Box sx={{ position: 'absolute', inset: 0 }}>
+        {localStream ? (
+          <VideoTile
+            stream={localStream}
+            audioStream={localStream}
+            muted
+            name={`${user?.name ?? 'You'} (You)`}
+            avatar={user?.avatar}
+            videoOn={localVideoOn}
+            audioOn={localAudioOn}
+            activeReaction={activeReactions[socket.id]}
+            mirror
+            objectFit="cover"
+          />
+        ) : (
+          <Box sx={{ width: '100%', height: '100%', bgcolor: 'background.paper' }} />
+        )}
+        {/* Invite nudge — floats above the control bar */}
+        <Box
+          sx={{
+            position: 'absolute',
+            bottom: { xs: 96, sm: 116 },
+            left: '50%',
+            transform: 'translateX(-50%)',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 1.5,
+            pointerEvents: 'none',
+            width: 'max-content',
+            maxWidth: '90vw',
+          }}
+        >
+          <Box
+            sx={{
+              bgcolor: 'rgba(0,0,0,0.55)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: 3,
+              px: 3,
+              py: 1.5,
+            }}
+          >
+            <Typography variant="body1" sx={{ fontWeight: 600, color: '#fff' }}>
+              You're the only one here
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.65)', mt: 0.25 }}>
+              Share the joining link to invite others to the call.
+            </Typography>
+          </Box>
+          <Chip
+            icon={<ContentCopyIcon sx={{ fontSize: 15 }} />}
+            label={`Copy link · ${roomId}`}
+            onClick={handleCopyLink}
+            sx={{
+              bgcolor: 'rgba(255,255,255,0.1)',
+              color: '#fff',
+              backdropFilter: 'blur(8px)',
+              py: 2,
+              px: 0.5,
+              fontWeight: 500,
+              pointerEvents: 'auto',
+              cursor: 'pointer',
+              '& .MuiChip-icon': { color: 'rgba(255,255,255,0.7)' },
+              '&:hover': { bgcolor: 'rgba(255,255,255,0.18)' },
+            }}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
   function renderPresentationLayout() {
     const tiles = cameraTiles();
+    const showSwitcher = shares.length > 1;
     return (
       <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: { xs: 'column', sm: 'row' } }}>
         {/* Pinned screen */}
-        <Box sx={{ flex: 1, position: 'relative', p: { xs: 1, sm: 1.5 }, minHeight: 0, minWidth: 0 }}>
-          {pinnedScreenStream ? (
-            <Box sx={{ width: '100%', height: '100%', borderRadius: 3, overflow: 'hidden', bgcolor: '#000' }}>
-              <VideoTile
-                stream={pinnedScreenStream}
-                muted={!pinnedScreenSid}
-                name={isScreenSharing && !pinnedScreenSid ? 'Your screen' : `${pinnedScreenName}'s screen`}
-                videoOn
-                audioOn
-                objectFit="contain"
-              />
-            </Box>
-          ) : (
-            <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Typography color="text.disabled">No screen to display</Typography>
+        <Box
+          sx={{
+            flex: 1,
+            position: 'relative',
+            p: { xs: 1, sm: 1.5 },
+            minHeight: 0,
+            minWidth: 0,
+            // Reserve space for pinned control bar so screen isn't covered
+            pb: controlsPinned ? { xs: 1, sm: '100px' } : { xs: 1, sm: 1.5 },
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1,
+          }}
+        >
+          {/* Share switcher — shown when multiple people present */}
+          {showSwitcher && (
+            <Box sx={{ display: 'flex', gap: 1, flexShrink: 0 }}>
+              {shares.map((s) => (
+                <Box
+                  key={s.key}
+                  onClick={() => setPinnedShareKey(s.key)}
+                  sx={{
+                    cursor: 'pointer',
+                    px: 1.5, py: 0.5,
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    bgcolor: pinnedShare?.key === s.key ? 'primary.main' : 'control.surface',
+                    color: pinnedShare?.key === s.key ? 'primary.contrastText' : 'text.primary',
+                    backdropFilter: 'blur(8px)',
+                    border: '1px solid',
+                    borderColor: pinnedShare?.key === s.key ? 'primary.main' : 'glass.border',
+                    transition: 'all 0.15s',
+                    '&:hover': { bgcolor: pinnedShare?.key === s.key ? 'primary.main' : 'control.idleHover' },
+                  }}
+                >
+                  {s.isLocal ? 'Your screen' : `${s.name}'s screen`}
+                </Box>
+              ))}
             </Box>
           )}
+
+          <Box sx={{ flex: 1, borderRadius: 3, overflow: 'hidden', bgcolor: '#000', minHeight: 0, position: 'relative' }}>
+            {pinnedShare ? (
+              <>
+                {/* Local monitor share → show warning card until user opts in */}
+                {pinnedShare.isLocal && !showScreenAnyway ? (
+                  <Box
+                    sx={{
+                      width: '100%', height: '100%',
+                      display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', justifyContent: 'center',
+                      gap: 3, px: 3,
+                    }}
+                  >
+                    <Typography
+                      variant="h5"
+                      sx={{ fontWeight: 500, color: '#fff', fontFamily: '"Outfit", sans-serif', textAlign: 'center' }}
+                    >
+                      You are presenting
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: 'rgba(255,255,255,0.65)', textAlign: 'center', maxWidth: 460, lineHeight: 1.7 }}
+                    >
+                      To avoid an infinity mirror, don't share your entire screen or browser window.
+                      Share just a tab or a different window instead.
+                    </Typography>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => setShowScreenAnyway(true)}
+                        sx={{
+                          borderRadius: 999, px: 3, color: '#fff',
+                          borderColor: 'rgba(255,255,255,0.5)',
+                          '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.08)' },
+                        }}
+                      >
+                        Show my screen anyway
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        onClick={handleToggleShare}
+                        sx={{
+                          borderRadius: 999, px: 3, color: '#fff',
+                          borderColor: 'rgba(255,255,255,0.5)',
+                          '&:hover': { borderColor: '#fff', bgcolor: 'rgba(255,255,255,0.08)' },
+                        }}
+                      >
+                        Stop presenting
+                      </Button>
+                    </Stack>
+                  </Box>
+                ) : (
+                  <>
+                    <VideoTile
+                      stream={pinnedShare.stream}
+                      muted={pinnedShare.isLocal}
+                      name={pinnedShare.isLocal ? 'Your screen' : `${pinnedShare.name}'s screen`}
+                      videoOn
+                      audioOn
+                      objectFit="contain"
+                    />
+                    {pinnedShare.isLocal && (
+                      <Box
+                        component="button"
+                        onClick={handleToggleShare}
+                        sx={{
+                          position: 'absolute', bottom: 14, left: '50%',
+                          transform: 'translateX(-50%)',
+                          display: 'flex', alignItems: 'center', gap: 0.75,
+                          px: 2.5, py: 0.75, border: 'none', borderRadius: 999,
+                          bgcolor: 'rgba(0,0,0,0.65)', color: '#fff', cursor: 'pointer',
+                          fontSize: 13, fontWeight: 600,
+                          backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+                          zIndex: 2, transition: 'background 0.15s',
+                          '&:hover': { bgcolor: 'rgba(180,0,0,0.88)' },
+                        }}
+                      >
+                        <StopScreenShareIcon sx={{ fontSize: 16 }} />
+                        Stop presenting
+                      </Box>
+                    )}
+                  </>
+                )}
+              </>
+            ) : (
+              <Box sx={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography color="text.disabled">No screen to display</Typography>
+              </Box>
+            )}
+          </Box>
         </Box>
 
         {/* Camera rail — right column on desktop, top strip on mobile */}
@@ -336,10 +595,11 @@ export default function RoomPage() {
             flexDirection: { xs: 'row', sm: 'column' },
             overflowX: { xs: 'auto', sm: 'visible' },
             overflowY: { xs: 'visible', sm: 'auto' },
-            pb: { sm: 13 }, // clear the floating control bar on desktop
+            pt: { xs: 0, sm: 7 }, // clear the top overlay on desktop (M7.7)
+            pb: { sm: 13 },       // clear the floating control bar on desktop
           }}
         >
-          {tiles.map(({ key, ...t }) => (
+          {tiles.map(({ key, audioStream: tileAudioStream, ...t }) => (
             <Box
               key={key}
               sx={{
@@ -351,7 +611,7 @@ export default function RoomPage() {
                 overflow: 'hidden',
               }}
             >
-              <VideoTile {...t} />
+              <VideoTile {...t} audioStream={tileAudioStream} />
             </Box>
           ))}
         </Box>
@@ -366,6 +626,7 @@ export default function RoomPage() {
       <Box sx={{ position: 'absolute', inset: 0 }}>
         <VideoTile
           stream={stream}
+          audioStream={stream}
           muted
           name={ps?.name ?? 'Participant'}
           avatar={ps?.avatar}
@@ -393,6 +654,7 @@ export default function RoomPage() {
           >
             <VideoTile
               stream={localStream}
+              audioStream={localStream}
               muted
               name={`${user?.name ?? 'You'} (You)`}
               avatar={user?.avatar}
@@ -462,9 +724,9 @@ export default function RoomPage() {
                 },
               }}
             >
-              {tiles.map(({ key, ...t }) => (
+              {tiles.map(({ key, audioStream: tileAudioStream, ...t }) => (
                 <Box key={key} sx={{ aspectRatio: '16/9', borderRadius: 3, overflow: 'hidden' }}>
-                  <VideoTile {...t} />
+                  <VideoTile {...t} audioStream={tileAudioStream} />
                 </Box>
               ))}
             </Box>
@@ -487,7 +749,7 @@ export default function RoomPage() {
     >
       {/* Remote audio: dedicated hidden <audio> per peer, mounted once outside
           the tile layout so audio survives layout switches and late tracks. */}
-      <RemoteAudio streams={remoteStreams} />
+      <RemoteAudio streams={remoteStreams} volume={outputVolume} />
 
       {/* Dev-only WebRTC stats overlay (no-op in production builds). */}
       <RtcStatsOverlay stats={rtcStats} />
@@ -511,8 +773,14 @@ export default function RoomPage() {
       {/* Stage + chat */}
       <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
         {/* Stage (full-bleed) */}
-        <Box sx={{ flex: 1, position: 'relative', minWidth: 0 }}>
-          {hasScreen ? renderPresentationLayout() : isSoloCall ? renderSoloLayout() : renderGridLayout()}
+        <Box
+          sx={{ flex: 1, position: 'relative', minWidth: 0 }}
+          onMouseMove={handleStageMouseMove}
+        >
+          {hasScreen ? renderPresentationLayout() : isAlone ? renderAloneLayout() : isSoloCall ? renderSoloLayout() : renderGridLayout()}
+
+          {/* Bottom-left floating emoji stream (M7.5) */}
+          <ReactionsOverlay reactions={floatingReactions} />
 
           {/* Top overlay: meeting info (left) + participants (right) */}
           <Box
@@ -548,11 +816,16 @@ export default function RoomPage() {
               </Tooltip>
               {isScreenSharing && !isMobile && (
                 <Chip
-                  icon={<PresentIcon sx={{ fontSize: 16 }} />}
-                  label="Presenting"
+                  icon={<StopScreenShareIcon sx={{ fontSize: 14 }} />}
+                  label="Stop presenting"
                   size="small"
-                  color="primary"
-                  sx={{ height: 26 }}
+                  onClick={handleToggleShare}
+                  sx={{
+                    height: 26, cursor: 'pointer',
+                    bgcolor: 'error.main', color: '#fff', fontWeight: 600,
+                    '& .MuiChip-icon': { color: 'rgba(255,255,255,0.85)' },
+                    '&:hover': { bgcolor: 'error.dark' },
+                  }}
                 />
               )}
             </Stack>
@@ -585,14 +858,17 @@ export default function RoomPage() {
             </Stack>
           </Box>
 
-          {/* Floating control bar */}
+          {/* Floating control bar — auto-hides during screen share */}
           <Box
             sx={{
               position: 'absolute',
               bottom: { xs: 12, sm: 20 },
               left: '50%',
-              transform: 'translateX(-50%)',
+              transform: controlsShown ? 'translateX(-50%)' : 'translateX(-50%) translateY(12px)',
               zIndex: 3,
+              opacity: controlsShown ? 1 : 0,
+              pointerEvents: controlsShown ? 'auto' : 'none',
+              transition: 'opacity 0.25s ease, transform 0.25s ease',
             }}
           >
             <ControlBar
@@ -606,6 +882,9 @@ export default function RoomPage() {
               pipSupported={pipSupported} pipActive={pipActive} onTogglePip={handleTogglePip}
               onCopyLink={handleCopyLink}
               onLeave={handleLeave}
+              micGain={micGain} onMicGainChange={setMicGain}
+              outputVolume={outputVolume} onOutputVolumeChange={setOutputVolume}
+              showPinToggle={hasScreen} pinned={controlsPinned} onTogglePin={() => setControlsPinned((v) => !v)}
             />
           </Box>
 

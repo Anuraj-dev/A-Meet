@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Avatar, Box, Chip, Typography } from '@mui/material';
 import { MicOff as MicOffIcon } from '@mui/icons-material';
 import { getPeerColor } from '../utils/peer-color';
+import { useAudioLevel } from '../hooks/useAudioLevel';
 
 const CONNECTION_BADGE = {
   connecting: { label: 'Connecting…', color: 'warning' },
@@ -11,6 +12,7 @@ const CONNECTION_BADGE = {
 
 export default function VideoTile({
   stream,
+  audioStream,
   muted = false,
   name,
   avatar,
@@ -26,6 +28,7 @@ export default function VideoTile({
   const videoRef = useRef(null);
   const offColor = getPeerColor(name);
   const initial = name?.trim()?.[0]?.toUpperCase() ?? '?';
+  const levelRef = useAudioLevel(audioStream ?? stream, audioOn);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -56,6 +59,35 @@ export default function VideoTile({
         },
       }}
     >
+      {/* Level-reactive speaking rings — analyser-only, never wired to speakers */}
+      <Box
+        ref={levelRef}
+        aria-hidden
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 'inherit',
+          pointerEvents: 'none',
+          zIndex: 0,
+          '&::before, &::after': {
+            content: '""',
+            position: 'absolute',
+            inset: 0,
+            borderRadius: 'inherit',
+            border: '2px solid',
+            borderColor: 'primary.main',
+            opacity: 'calc(var(--lvl, 0) * 0.85)',
+            transform: 'scale(calc(1 + var(--lvl, 0) * 0.04))',
+            transition: 'opacity 0.05s, transform 0.05s',
+          },
+          '&::after': {
+            inset: '-4px',
+            opacity: 'calc(var(--lvl, 0) * 0.45)',
+            transform: 'scale(calc(1 + var(--lvl, 0) * 0.08))',
+          },
+        }}
+      />
+
       <video
         ref={videoRef}
         autoPlay

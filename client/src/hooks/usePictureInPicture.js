@@ -204,13 +204,17 @@ function drawComposite(canvas, tiles, sources) {
   });
 }
 
-export function usePictureInPicture(tiles) {
+export function usePictureInPicture(tiles, { auto = true } = {}) {
   const [supported] = useState(detectSupport);
   const [active, setActive] = useState(false);
 
   // Live ref so the imperative draw loop always sees the latest tiles.
   const tilesRef = useRef(tiles);
   useEffect(() => { tilesRef.current = tiles; }, [tiles]);
+
+  // Read `active` without making the auto-pip effect re-register on every change.
+  const activeRef = useRef(false);
+  useEffect(() => { activeRef.current = active; }, [active]);
 
   // The imperative controller lives in a mount-only effect and is reached
   // through this ref; everything dynamic is read via refs, so no stale state.
@@ -250,15 +254,19 @@ export function usePictureInPicture(tiles) {
       sources.clear();
     };
 
+    // Idempotent: starts the canvas draw loop and wires the capture stream into
+    // the hidden video so requestPictureInPicture() can fire without any async
+    // delays (the video must already be playing for Chrome to allow auto-pip
+    // from visibilitychange).
+    const warmUp = () => {
+      if (!loop) { tick(); loop = window.setInterval(tick, TICK_MS); }
+      if (!capture) { capture = canvas.captureStream(FPS); pipVideo.srcObject = capture; }
+      pipVideo.play().catch(() => {});
+    };
+
     const start = async () => {
+      warmUp(); // ensure loop + video are running before the PiP request
       try {
-        if (!loop) { tick(); loop = window.setInterval(tick, TICK_MS); }
-        if (!capture) { capture = canvas.captureStream(FPS); pipVideo.srcObject = capture; }
-        // Don't `await` play(): awaiting can spend the transient user-gesture
-        // activation that requestPictureInPicture() needs. Kick playback off,
-        // and only wait if the video has no metadata yet (captureStream usually
-        // resolves it within a frame, so the gesture is almost never lost).
-        pipVideo.play().catch(() => {});
         if (pipVideo.readyState < HTMLMediaElement.HAVE_METADATA) {
           await new Promise((resolve) => {
             pipVideo.addEventListener('loadedmetadata', resolve, { once: true });
@@ -267,22 +275,23 @@ export function usePictureInPicture(tiles) {
         await pipVideo.requestPictureInPicture();
         // `active` is flipped on by the enterpictureinpicture event.
       } catch (err) {
-        teardownLoop();
         setActive(false);
         throw err;
       }
     };
 
+    // stop() only exits PiP; teardownLoop() runs only on unmount.
+    // Keeping the canvas loop alive between PiP sessions means the video is
+    // always warm, so the next auto-pip visibilitychange triggers immediately.
     const stop = async () => {
       try {
         if (document.pictureInPictureElement === pipVideo) await document.exitPictureInPicture();
       } catch { /* ignore */ }
-      teardownLoop();
       setActive(false);
     };
 
     const onEnter = () => setActive(true);
-    const onLeave = () => { teardownLoop(); setActive(false); };
+    const onLeave = () => { setActive(false); };
     pipVideo.addEventListener('enterpictureinpicture', onEnter);
     pipVideo.addEventListener('leavepictureinpicture', onLeave);
 
@@ -299,6 +308,9 @@ export function usePictureInPicture(tiles) {
           busy = false;
         }
       },
+      enter: start,
+      exit: stop,
+      warmUp,
     };
 
     return () => {
@@ -312,6 +324,32 @@ export function usePictureInPicture(tiles) {
       ctrlRef.current = null;
     };
   }, [supported]);
+
+  // Pre-warm: start the canvas loop as soon as tiles exist so the video is
+  // already playing when visibilitychange fires — Chrome requires the element
+  // to be in a "used" playback state for auto-pip from visibilitychange.
+  useEffect(() => {
+    if (!supported) return;
+    ctrlRef.current?.warmUp?.();
+  }, [supported, tiles.length]);
+
+  // Auto-PiP: enter when tab goes hidden, exit when it returns.
+  // Uses activeRef (not `active`) so this effect doesn't re-register on every
+  // active-state change — the listener must stay stable across PiP sessions.
+  useEffect(() => {
+    if (!supported || !auto) return undefined;
+    const onVis = () => {
+      const ctrl = ctrlRef.current;
+      if (!ctrl) return;
+      if (document.hidden) {
+        if ((tilesRef.current?.length ?? 0) > 0) ctrl.enter?.().catch(() => {});
+      } else if (activeRef.current || document.pictureInPictureElement) {
+        ctrl.exit?.().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [supported, auto]);
 
   const togglePiP = useCallback(() => {
     const ctrl = ctrlRef.current;

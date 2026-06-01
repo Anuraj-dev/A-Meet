@@ -16,39 +16,41 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 | M3 | Auth hardening + meeting CRUD | ✅ Done |
 | M4 | mediasoup SFU migration | ✅ Done |
 | M5 | Screen share + reactions + raise hand + chat toggle | ✅ Done |
-| M6 | Huddle UI overhaul | 🔄 In Progress |
+| M6 | Aperture UI overhaul (landing + lobby) | ✅ Done — PR #5 |
+| M7 | Meeting-room fixes (in-call UX) | 🔄 In Progress |
 
 ---
 
-## M6 — Aperture UI Overhaul
+## M7 — Meeting-Room Fixes (in-call UX)
 
-> Deep-space / cosmic aesthetic: dark-void canvas, Three.js constellation,
-> glassmorphism panels, Outfit + DM Sans typography, gradient accents.
-> Branch: `feat/aperture-ui`
+> Branch: `feat/meeting-room-fixes`. Fixes the seven in-call issues Anuraj flagged,
+> plus layout polish and a level-reactive speaking indicator.
 
-### M6 tasks
-- [x] M6.1 Install `three` in `client/`; add Outfit + DM Sans + JetBrains Mono to `index.html`
-- [x] M6.2 Update `theme.js` with Aperture design tokens (palette, typography, component overrides)
-- [x] M6.3 Create `SpaceCanvas.jsx` — Three.js constellation (nodes, links, polyhedra, parallax)
-- [x] M6.4 Update `LandingPage.jsx` — Aperture landing (hero, feature cards, glass header)
-- [x] M6.5 Update `LobbyPage.jsx` — Aperture lobby (glass camera preview, join panel)
-- [x] M6.6 Update `BrandMark.jsx` — Aperture brand mark style
-- [x] M6.7 `npm run build` passes — zero errors ✅
-- [ ] M6.8 Manual verify (Anuraj) — visuals match Aperture spec, constellation runs, all flows work
-- [ ] M6.9 /journal M6
+### Issues → tasks
+- [x] M7.1 **Output volume** — master speaker-volume slider, applied to every `RemoteAudio` element.  *(issue 1)*
+- [x] M7.2 **Input volume** — mic input gain via a Web Audio GainNode; the raw track stays the default and is only swapped for a processed track when gain ≠ 1, so the live path is untouched otherwise.  *(issue 1)*
+- [x] M7.3 **Infinity-loop fix** — presenter no longer gets a hall-of-mirrors. Window/tab shares preview live; whole-monitor shares show a "You're presenting" card (the only way to fully kill the feedback when you capture the screen that shows the call).  *(issue 2)*
+- [x] M7.4 **Sharer visibility + multi-share** — the sharer's camera tile always stays in the rail; when several people present, a thumbnail switcher picks the stage; each share is name-attributed.  *(issue 5)*
+- [x] M7.5 **Reactions** — keep the per-tile avatar emoji popup AND add a Google-Meet bottom-left floating emoji stream.  *(issue 3)*
+- [x] M7.6 **Screen-share controls** — auto-hide during share, reveal on hover, an up-arrow to pin them up (stage reflows to sit above the bar so it isn't covered), and a down-arrow to drop them again.  *(issue 4)*
+- [x] M7.7 **Top-right overlap** — participant count / avatars no longer collide with the camera rail.  *(issue 6)*
+- [x] M7.8 **Stop-share propagation** — server `sfu-close-producer` closes the server Producer (cascades to consumers); the native browser "Stop sharing" also tears down. Remote screen disappears the instant the presenter stops.  *(issue 7)*
+- [x] M7.9 **Auto picture-in-picture** — mini player opens the moment the tab goes inactive and auto-closes on return.  *(issue 7)*
+- [x] M7.10 **Speaking indicator** — level-reactive pulsing rings from client-side AnalyserNode metering (analyser-only, never wired to the speakers).  *(extra)*
+- [x] M7.11 **Layout polish** — grid / presentation / rail / control-bar spacing and fidelity.  *(extra)*
+- [x] M7.12 `npm run build` passes — zero errors
+- [x] M7.15 **Alone layout** — when no remote peers, show local camera tile full-screen with invite overlay (was showing blank placeholder)
+- [x] M7.16 **Screen share self-view** — always show live screen feed for local sharer; replaced "You're presenting" card with VideoTile + floating stop button
+- [x] M7.17 **Auto-PiP reliability** — pre-warm canvas loop when tiles exist so `visibilitychange` can call `requestPictureInPicture()` without async delays; removed `active` from auto-pip effect deps
+- [x] M7.18 **"You are presenting" card** — local monitor shares show Google Meet-style card with "Show my screen anyway" / "Stop presenting"; `showScreenAnyway` state resets per share session; remote shares always show live feed
+- [x] M7.19 **Stop presenting header button** — replaced passive "Presenting" chip in top bar with clickable red "Stop presenting" chip (matches Google Meet top-bar button)
+- [ ] M7.13 Manual verify (Anuraj)
+- [ ] M7.14 /journal M7
 
-### Design tokens (Aperture)
-- Background void: `#060810`
-- Text: `#f2f4f9`, Muted: `#94a3b8`, Faint: `#475569`
-- Blue: `#5b8bff`, Blue-deep: `#1a73e8`, Violet: `#9334e6`, Violet-soft: `#a855f7`
-- Teal: `#00f5d4`, Green: `#34d399`, Amber: `#f5b542`
-- Fonts: Outfit (display), DM Sans (body), JetBrains Mono (mono)
-
-### Notes
-- Three.js constellation: 70 nodes + links (dist < 6.2) + 6 polyhedra + wireframe torus ring
-- Mouse parallax on camera with easing 0.04
-- Shimmer animation on Join button via `::before` pseudo-element
-- `body.frozen` guard not needed in React — animation state managed by CSS keyframes in theme
+### Implementation notes
+- **Parallel build-out:** logic (`useMediasoup`, `usePictureInPicture`, server `sfu-close-producer`) and presentational pieces (`VideoTile` rings, `RemoteAudio` volume, `ControlBar`, `ReactionsOverlay`, `useAudioLevel`) are built against fixed contracts; `RoomPage` integrates them.
+- **PipeWire safety:** all metering uses a single AnalyserNode-only AudioContext; mic gain routes through a `MediaStreamAudioDestinationNode` (separate sink). Nothing connects to `audioCtx.destination` — that crackles the live call on Linux.
+- **Screen-share self-view tradeoff:** see M7.3 — fully killing the loop for monitor captures means the presenter sees a card, not a live self-mirror, in that one case.
 
 ---
 

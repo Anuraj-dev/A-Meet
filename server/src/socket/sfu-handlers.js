@@ -231,6 +231,23 @@ export function registerSfuHandlers(io, socket) {
     }
   });
 
+  // 9) Close a producer outright (used for screen-share stop). Closing the
+  //    server-side Producer cascades `producerclose` to every consumer →
+  //    each client receives `sfu-consumer-closed` and drops the tile.
+  socket.on('sfu-close-producer', async ({ producerId } = {}, callback) => {
+    try {
+      const roomId = socketRoom.get(socket.id);
+      const peer = getPeer(roomId, socket.id);
+      const producer = peer?.producers.get(producerId);
+      if (!producer) throw new Error('producer not found');
+      producer.close();
+      peer.producers.delete(producerId);
+      callback?.({ closed: true });
+    } catch (err) {
+      callback?.({ error: err.message });
+    }
+  });
+
   // 10) Raise hand: toggle for this peer; broadcast state to the room.
   socket.on('sfu-raise-hand', ({ raised } = {}, callback) => {
     const roomId = socketRoom.get(socket.id);
