@@ -22,9 +22,16 @@ export function AuthProvider({ children }) {
 
   useEffect(() => { refresh(); }, []);
 
-  function login() {
+  function login(returnTo) {
     const base = import.meta.env.VITE_SERVER_URL ?? '';
-    window.location.href = `${base}/api/auth/google`;
+    // Send the post-login destination along so the server can land us back on
+    // the meeting invite link. Falls back to a deep link a ProtectedRoute
+    // stashed before bouncing here; cleared once consumed so a later plain
+    // sign-in doesn't reuse a stale target.
+    const target = returnTo ?? sessionStorage.getItem('ameet:returnTo') ?? '';
+    sessionStorage.removeItem('ameet:returnTo');
+    const qs = target ? `?returnTo=${encodeURIComponent(target)}` : '';
+    window.location.href = `${base}/api/auth/google${qs}`;
   }
 
   async function logout() {

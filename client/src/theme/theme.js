@@ -134,6 +134,12 @@ const theme = createTheme({
           '0%, 100%': { transform: 'rotate(-8deg)' },
           '50%': { transform: 'rotate(10deg)' },
         },
+        // Active-speaker tile ring — gently breathes the green inset glow.
+        // Inset (not outer) so the grid wrapper's overflow:hidden never clips it.
+        '@keyframes ameet-speaker-pulse': {
+          '0%, 100%': { boxShadow: 'inset 0 0 0 3px #34d399, inset 0 0 10px rgba(52,211,153,0.30)' },
+          '50%': { boxShadow: 'inset 0 0 0 3px #34d399, inset 0 0 20px rgba(52,211,153,0.65)' },
+        },
         '@media (prefers-reduced-motion: reduce)': {
           '*': { animationDuration: '0.01ms !important', transitionDuration: '0.01ms !important' },
         },

@@ -9,7 +9,10 @@
     "dev:client": "npm --prefix client run dev",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "test": "npm run test:server && npm run test:client",
+    "test:server": "npm --prefix server test",
+    "test:client": "npm --prefix client test"
   },
   "devDependencies": {
     "concurrently": "^10.0.0"
