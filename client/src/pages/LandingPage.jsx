@@ -211,15 +211,15 @@ export default function LandingPage() {
             Sign in
           </Button>
         ) : (
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', justifyContent: 'center' }}>
             <Avatar src={user.avatar} alt={user.name} sx={{ width: 36, height: 36 }} />
-            <Typography sx={{ color: DK.dim, display: { xs: 'none', sm: 'block' }, fontSize: 14, fontFamily: DK.font, fontWeight: 500 }}>
+            <Typography sx={{ color: DK.dim, display: { xs: 'none', sm: 'block' }, fontSize: 14, fontFamily: DK.font, fontWeight: 500, lineHeight: 1 }}>
               {user.name}
             </Typography>
             <Button
               size="small"
               onClick={logout}
-              sx={{ color: DK.faint, fontFamily: DK.font, fontSize: 13, '&:hover': { color: DK.dim } }}
+              sx={{ color: DK.faint, fontFamily: DK.font, fontSize: 13, py: 0, lineHeight: 1, '&:hover': { color: DK.dim } }}
             >
               Sign out
             </Button>
