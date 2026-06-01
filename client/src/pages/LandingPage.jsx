@@ -212,10 +212,10 @@ export default function LandingPage() {
           </Button>
         ) : (
           <Stack direction="row" spacing={1.5} alignItems="center">
+            <Avatar src={user.avatar} alt={user.name} sx={{ width: 36, height: 36 }} />
             <Typography sx={{ color: DK.dim, display: { xs: 'none', sm: 'block' }, fontSize: 14, fontFamily: DK.font, fontWeight: 500 }}>
               {user.name}
             </Typography>
-            <Avatar src={user.avatar} alt={user.name} sx={{ width: 32, height: 32 }} />
             <Button
               size="small"
               onClick={logout}

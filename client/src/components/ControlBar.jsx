@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import {
   Badge, Box, Divider, IconButton, ListItemIcon, ListItemText,
-  Menu, MenuItem, Tooltip, useMediaQuery,
+  Menu, MenuItem, Popover as MuiPopover, Slider, Stack, Tooltip, Typography,
+  useMediaQuery,
 } from '@mui/material';
 import {
   CallEnd as CallEndIcon,
@@ -9,13 +10,16 @@ import {
   ChatOutlined as ChatOutlineIcon,
   ContentCopy as ContentCopyIcon,
   EmojiEmotions as EmojiEmotionsIcon,
-  MoreVert as MoreVertIcon,
+  KeyboardArrowDown as KeyboardArrowDownIcon,
+  KeyboardArrowUp as KeyboardArrowUpIcon,
   Mic as MicIcon,
   MicOff as MicOffIcon,
+  MoreVert as MoreVertIcon,
   PanTool as PanToolIcon,
   PictureInPictureAlt as PipIcon,
   PresentToAll as PresentIcon,
   CancelPresentation as StopPresentIcon,
+  Tune as TuneIcon,
   Videocam as VideocamIcon,
   VideocamOff as VideocamOffIcon,
   VolumeUp as VolumeUpIcon,
@@ -66,10 +70,15 @@ export default function ControlBar({
   pipSupported, pipActive, onTogglePip,
   onCopyLink,
   onLeave,
+  micGain = 1, onMicGainChange,
+  outputVolume = 1, onOutputVolumeChange,
+  showPinToggle = false, pinned = false, onTogglePin,
 }) {
   const isMobile = useMediaQuery((t) => t.breakpoints.down('sm'));
   const [moreAnchor, setMoreAnchor] = useState(null);
+  const [audioAnchor, setAudioAnchor] = useState(null);
   const moreRef = useRef(null);
+  const audioRef = useRef(null);
   const closeMore = () => setMoreAnchor(null);
 
   return (
@@ -142,6 +151,28 @@ export default function ControlBar({
         {showChat ? <ChatIcon /> : <ChatOutlineIcon />}
       </CircleButton>
 
+      {/* Audio settings (mic gain + speaker volume) */}
+      <Box ref={audioRef} sx={{ display: 'inline-flex' }}>
+        <CircleButton
+          title="Audio settings"
+          onClick={() => setAudioAnchor(audioAnchor ? null : audioRef.current)}
+          variant={audioAnchor ? 'active' : 'idle'}
+        >
+          <TuneIcon />
+        </CircleButton>
+      </Box>
+
+      {/* Pin controls toggle (only during screen share) */}
+      {showPinToggle && (
+        <CircleButton
+          title={pinned ? 'Auto-hide controls' : 'Keep controls visible'}
+          onClick={onTogglePin}
+          variant={pinned ? 'active' : 'idle'}
+        >
+          {pinned ? <KeyboardArrowDownIcon /> : <KeyboardArrowUpIcon />}
+        </CircleButton>
+      )}
+
       <Box ref={moreRef} sx={{ display: 'inline-flex' }}>
         <CircleButton title="More options" onClick={() => setMoreAnchor(moreRef.current)} variant="idle">
           <MoreVertIcon />
@@ -166,6 +197,55 @@ export default function ControlBar({
           <CallEndIcon />
         </IconButton>
       </Tooltip>
+
+      {/* Audio settings popover */}
+      <MuiPopover
+        open={Boolean(audioAnchor)}
+        anchorEl={audioAnchor}
+        onClose={() => setAudioAnchor(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        slotProps={{ paper: { sx: { mb: 1.5, p: 2.5, borderRadius: 3, minWidth: 240, bgcolor: 'control.surface', backdropFilter: 'blur(12px)' } } }}
+      >
+        <Stack spacing={2.5}>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
+              Microphone volume
+            </Typography>
+            <Stack direction="row" alignItems="center" spacing={1.5}>
+              <MicIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+              <Slider
+                size="small"
+                min={0} max={2} step={0.05}
+                value={micGain}
+                onChange={(_, v) => onMicGainChange?.(v)}
+                sx={{ color: 'primary.main' }}
+              />
+              <Typography variant="caption" sx={{ minWidth: 30, textAlign: 'right', color: 'text.secondary' }}>
+                {Math.round(micGain * 100)}%
+              </Typography>
+            </Stack>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
+              Speaker volume
+            </Typography>
+            <Stack direction="row" alignItems="center" spacing={1.5}>
+              <VolumeUpIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+              <Slider
+                size="small"
+                min={0} max={1} step={0.05}
+                value={outputVolume}
+                onChange={(_, v) => onOutputVolumeChange?.(v)}
+                sx={{ color: 'primary.main' }}
+              />
+              <Typography variant="caption" sx={{ minWidth: 30, textAlign: 'right', color: 'text.secondary' }}>
+                {Math.round(outputVolume * 100)}%
+              </Typography>
+            </Stack>
+          </Box>
+        </Stack>
+      </MuiPopover>
 
       <Menu
         anchorEl={moreAnchor}

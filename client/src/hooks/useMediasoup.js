@@ -16,6 +16,8 @@ export function useMediasoup(roomId, devices = {}) {
   const [hasMic, setHasMic] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [localScreenStream, setLocalScreenStream] = useState(null);
+  const [localScreenSurface, setLocalScreenSurface] = useState(null);
+  const [micGain, setMicGainState] = useState(1);
   const [handRaised, setHandRaised] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
@@ -34,6 +36,11 @@ export function useMediasoup(roomId, devices = {}) {
   const screenProducerRef = useRef(null);
   const localScreenStreamRef = useRef(null);
   const handRaisedRef = useRef(false);
+  const audioCtxRef = useRef(null);
+  const gainNodeRef = useRef(null);
+  const gainSrcRef = useRef(null);
+  const gainDestRef = useRef(null);
+  const gainEngagedRef = useRef(false);
   const devicesRef = useRef(devices);
   const initializedRef = useRef(false);
   useEffect(() => { devicesRef.current = devices; }, [devices]);
@@ -98,12 +105,15 @@ export function useMediasoup(roomId, devices = {}) {
   const stopScreenShare = useCallback(() => {
     const producer = screenProducerRef.current;
     if (!producer) return;
+    const producerId = producer.id;
     try { producer.close(); } catch { /* gone */ }
     screenProducerRef.current = null;
+    request('sfu-close-producer', { producerId }).catch(() => {});
     const stream = localScreenStreamRef.current;
     if (stream) stream.getTracks().forEach((t) => t.stop());
     localScreenStreamRef.current = null;
     setLocalScreenStream(null);
+    setLocalScreenSurface(null);
     setIsScreenSharing(false);
   }, []);
 
@@ -119,6 +129,7 @@ export function useMediasoup(roomId, devices = {}) {
       screenProducerRef.current = producer;
       localScreenStreamRef.current = stream;
       setLocalScreenStream(stream);
+      setLocalScreenSurface(track.getSettings().displaySurface ?? null);
       setIsScreenSharing(true);
       track.addEventListener('ended', stopScreenShare, { once: true });
       producer.on('transportclose', stopScreenShare);
@@ -128,6 +139,41 @@ export function useMediasoup(roomId, devices = {}) {
       }
     }
   }, [stopScreenShare]);
+
+  const setMicGain = useCallback(async (value) => {
+    const clamped = Math.max(0, Math.min(2, value));
+    const producer = producersRef.current.get('audio');
+    const rawTrack = localStreamRef.current?.getAudioTracks()[0];
+    if (!producer || !rawTrack) { setMicGainState(clamped); return; }
+
+    const EPS = 0.02;
+    if (Math.abs(clamped - 1) < EPS && gainEngagedRef.current) {
+      // Back to unity — bypass the gain graph, restore raw track
+      try { await producer.replaceTrack({ track: rawTrack }); } catch { /* ignore */ }
+      try { gainSrcRef.current?.disconnect(); } catch { /* ignore */ }
+      try { gainNodeRef.current?.disconnect(); } catch { /* ignore */ }
+      try { gainDestRef.current?.disconnect(); } catch { /* ignore */ }
+      gainSrcRef.current = null; gainNodeRef.current = null; gainDestRef.current = null;
+      gainEngagedRef.current = false;
+    } else if (Math.abs(clamped - 1) >= EPS) {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      if (!gainEngagedRef.current) {
+        gainSrcRef.current = ctx.createMediaStreamSource(new MediaStream([rawTrack]));
+        gainNodeRef.current = ctx.createGain();
+        gainDestRef.current = ctx.createMediaStreamDestination();
+        gainSrcRef.current.connect(gainNodeRef.current);
+        gainNodeRef.current.connect(gainDestRef.current);
+        try { await producer.replaceTrack({ track: gainDestRef.current.stream.getAudioTracks()[0] }); } catch { /* ignore */ }
+        gainEngagedRef.current = true;
+      }
+      gainNodeRef.current.gain.value = clamped;
+    }
+    setMicGainState(clamped);
+  }, []);
 
   const toggleHand = useCallback(() => {
     const raised = !handRaisedRef.current;
@@ -523,6 +569,15 @@ export function useMediasoup(roomId, devices = {}) {
       localScreenStreamRef.current?.getTracks().forEach((t) => t.stop());
       localScreenStreamRef.current = null;
 
+      // Tear down mic gain graph if engaged
+      try { gainSrcRef.current?.disconnect(); } catch { /* ignore */ }
+      try { gainNodeRef.current?.disconnect(); } catch { /* ignore */ }
+      try { gainDestRef.current?.disconnect(); } catch { /* ignore */ }
+      gainSrcRef.current = null; gainNodeRef.current = null; gainDestRef.current = null;
+      gainEngagedRef.current = false;
+      audioCtxRef.current?.close().catch(() => {});
+      audioCtxRef.current = null;
+
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
 
@@ -587,8 +642,11 @@ export function useMediasoup(roomId, devices = {}) {
     toggleAudio,
     isScreenSharing,
     localScreenStream,
+    localScreenSurface,
     shareScreen,
     stopScreenShare,
+    micGain,
+    setMicGain,
     handRaised,
     toggleHand,
     activeSpeaker,
