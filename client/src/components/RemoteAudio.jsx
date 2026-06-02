@@ -4,7 +4,8 @@ import { appLogger } from '../utils/logger';
 // Plays a single remote peer's audio through a Web Audio GainNode routed to
 // ctx.destination. Using GainNode instead of el.volume because HTMLMediaElement
 // .volume is unreliable for WebRTC streams on Linux/PipeWire — the same reason
-// the mic uses a GainNode on the send side.
+// the mic uses a GainNode on the send side. `volume` is the already-resolved
+// per-peer level (master × peer override); see RemoteAudio below.
 function PeerAudio({ socketId, stream, volume = 1 }) {
   const ctxRef = useRef(null);
   const gainRef = useRef(null);
@@ -48,12 +49,19 @@ function PeerAudio({ socketId, stream, volume = 1 }) {
 
 // Renders one GainNode audio graph per remote peer. Mount this ONCE in RoomPage,
 // outside the tile layout, so the graphs persist for the whole call.
-export default function RemoteAudio({ streams, volume = 1 }) {
+// masterVolume: global speaker slider (0–1).
+// peerVolumes: per-peer overrides keyed by socketId (0–1, default 1).
+// Final per-peer gain = clamp(masterVolume × peerVolume, 0, 1).
+export default function RemoteAudio({ streams, masterVolume = 1, peerVolumes = {} }) {
   return (
     <>
-      {Object.entries(streams).map(([socketId, stream]) => (
-        <PeerAudio key={socketId} socketId={socketId} stream={stream} volume={volume} />
-      ))}
+      {Object.entries(streams).map(([socketId, stream]) => {
+        const pv = peerVolumes[socketId] ?? 1;
+        const finalVol = Math.max(0, Math.min(1, masterVolume * pv));
+        return (
+          <PeerAudio key={socketId} socketId={socketId} stream={stream} volume={finalVol} />
+        );
+      })}
     </>
   );
 }

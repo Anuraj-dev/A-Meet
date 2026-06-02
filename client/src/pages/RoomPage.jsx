@@ -24,6 +24,7 @@ import CallNotifications from '../components/CallNotifications';
 import ReactionsOverlay from '../components/ReactionsOverlay';
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
 import { copyMeetingScreenshot, downloadMeetingScreenshot } from '../utils/capture-screenshot';
+import { appLogger } from '../utils/logger';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '👏', '🎉'];
 
@@ -60,6 +61,7 @@ export default function RoomPage() {
   const floatIdRef = useRef(0);
   const [reactionAnchor, setReactionAnchor] = useState(null);
   const [outputVolume, setOutputVolume] = useState(1);
+  const [peerVolumes, setPeerVolumes] = useState({});
   const [controlsPinned, setControlsPinned] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimer = useRef(null);
@@ -297,6 +299,11 @@ export default function RoomPage() {
     setReactionAnchor(null);
   }
 
+  const handlePeerVolumeChange = useCallback((peerId, name, volume) => {
+    setPeerVolumes((prev) => ({ ...prev, [peerId]: volume }));
+    appLogger.info('peer-volume-changed', { peerId, name, pct: Math.round(volume * 100) });
+  }, []);
+
   // --- Local-action wrappers that add sound feedback ---
   const handleToggleAudio = () => { playSound(localAudioOn ? 'toggleOff' : 'toggleOn'); toggleAudio(); };
   const handleToggleVideo = () => { playSound(localVideoOn ? 'toggleOff' : 'toggleOn'); toggleVideo(); };
@@ -388,6 +395,9 @@ export default function RoomPage() {
           handRaised: ps?.handRaised ?? false,
           activeReaction: activeReactions[peerId],
           activeSpeaker: activeSpeaker === peerId,
+          showVolumeControl: true,
+          peerVolume: peerVolumes[peerId] ?? 1,
+          onPeerVolumeChange: (v) => handlePeerVolumeChange(peerId, ps?.name ?? 'Participant', v),
         };
       }),
     ].filter(Boolean);
@@ -669,6 +679,9 @@ export default function RoomPage() {
           activeReaction={activeReactions[peerId]}
           activeSpeaker={activeSpeaker === peerId}
           objectFit="cover"
+          showVolumeControl
+          peerVolume={peerVolumes[peerId] ?? 1}
+          onPeerVolumeChange={(v) => handlePeerVolumeChange(peerId, ps?.name ?? 'Participant', v)}
         />
         {localStream && (
           <Box
@@ -782,7 +795,7 @@ export default function RoomPage() {
     >
       {/* Remote audio: dedicated hidden <audio> per peer, mounted once outside
           the tile layout so audio survives layout switches and late tracks. */}
-      <RemoteAudio streams={remoteStreams} volume={outputVolume} />
+      <RemoteAudio streams={remoteStreams} masterVolume={outputVolume} peerVolumes={peerVolumes} />
 
       {/* Dev-only WebRTC stats overlay (no-op in production builds). */}
       <RtcStatsOverlay stats={rtcStats} />
