@@ -1,6 +1,7 @@
 import { Component } from 'react';
 import { Box, Button, Paper, Typography } from '@mui/material';
 import { Error as ErrorOutlineIcon } from '@mui/icons-material';
+import { appLogger } from '../utils/logger';
 
 export default class ErrorBoundary extends Component {
   constructor(props) {
@@ -10,6 +11,14 @@ export default class ErrorBoundary extends Component {
 
   static getDerivedStateFromError() {
     return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    appLogger.error('React render error', {
+      error: error.message,
+      stack: error.stack?.slice(0, 800),
+      componentStack: info.componentStack?.slice(0, 400),
+    });
   }
 
   render() {

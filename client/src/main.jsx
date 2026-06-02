@@ -5,6 +5,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import theme from './theme/theme';
 import { AuthProvider } from './context/AuthContext';
 import App from './App.jsx';
+import './utils/logger'; // registers window.onerror + sendBeacon flush
 
 createRoot(document.getElementById('root')).render(
   <BrowserRouter>

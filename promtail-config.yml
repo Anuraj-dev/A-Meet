@@ -1,0 +1,28 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: a-meet-server
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: a-meet
+          service: server
+          __path__: /logs/server.log
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            msg: msg
+            event: event
+      - labels:
+          level:
+          event:

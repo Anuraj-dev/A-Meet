@@ -5,6 +5,7 @@
 import os from 'os';
 import * as mediasoup from 'mediasoup';
 import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
 import { workerSettings } from './config.js';
 
 const workers = [];
@@ -19,13 +20,16 @@ export async function createWorkers() {
     // A dead Worker is unrecoverable — every Router/transport on it is gone.
     // Crash loudly so a process manager restarts us clean.
     worker.on('died', () => {
-      console.error(`[sfu] worker ${worker.pid} died — exiting in 2s`);
+      logger.fatal({ pid: worker.pid }, 'mediasoup worker died — exiting in 2s');
       setTimeout(() => process.exit(1), 2000);
     });
 
     workers.push(worker);
   }
-  console.log(`[sfu] ${workers.length} mediasoup worker(s) ready (ports ${workerSettings.rtcMinPort}-${workerSettings.rtcMaxPort})`);
+  logger.info(
+    { count: workers.length, minPort: workerSettings.rtcMinPort, maxPort: workerSettings.rtcMaxPort },
+    'mediasoup workers ready',
+  );
 }
 
 // Round-robin so consecutive rooms land on different Workers/cores.
