@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useContext, useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Avatar, Box, Button, FormControl,
@@ -17,9 +17,11 @@ import {
 import * as THREE from 'three';
 import { useAuth } from '../context/AuthContext';
 import { useLobbyMedia } from '../hooks/useLobbyMedia';
+import { RoomMetaContext } from '../components/RoomGuard';
 import VideoTile from '../components/VideoTile';
 import BrandMark from '../components/BrandMark';
 import { playSound } from '../services/sounds';
+import { formatMeetingTime } from '../utils/format-time';
 
 const DK = {
   bg:        '#0c0b12',
@@ -165,6 +167,9 @@ export default function LobbyPage() {
   const { user }   = useAuth();
   const previewRef = useRef(null);
   const [mounted, setMounted] = useState(false);
+
+  const roomMeta = useContext(RoomMetaContext);
+  const isScheduled = Boolean(roomMeta?.scheduledFor) && Boolean(roomMeta?.title);
 
   const {
     previewStream, videoDevices, audioDevices,
@@ -481,8 +486,25 @@ export default function LobbyPage() {
             </Typography>
           </Box>
 
+          {/* Scheduled meeting info */}
+          {isScheduled && (
+            <Box sx={{ ...panelSlide(130), mb: 2 }}>
+              <Typography sx={{
+                fontFamily: DK.display, fontWeight: 700, fontSize: 18,
+                color: DK.ink, lineHeight: 1.2, mb: 0.25,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                maxWidth: 340,
+              }}>
+                {roomMeta.title}
+              </Typography>
+              <Typography sx={{ fontFamily: DK.font, fontSize: 13, color: DK.dim }}>
+                {formatMeetingTime(roomMeta.scheduledFor)}
+              </Typography>
+            </Box>
+          )}
+
           {/* Room code */}
-          <Box sx={{ ...panelSlide(160), mb: 3.5 }}>
+          <Box sx={{ ...panelSlide(isScheduled ? 195 : 160), mb: 3.5 }}>
             <Stack direction="row" alignItems="center" spacing={0.75}>
               <LockIcon sx={{ fontSize: 14, color: DK.teal }} />
               <Typography sx={{
@@ -496,7 +518,7 @@ export default function LobbyPage() {
           </Box>
 
           {/* Join button */}
-          <Box sx={{ ...panelSlide(240), position: 'relative', zIndex: 2 }}>
+          <Box sx={{ ...panelSlide(isScheduled ? 275 : 240), position: 'relative', zIndex: 2 }}>
             <Button
               variant="contained"
               size="large"
