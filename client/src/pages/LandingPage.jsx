@@ -220,7 +220,7 @@ export default function LandingPage() {
 
         {!user ? (
           <Button
-            onClick={login}
+            onClick={() => login()}
             startIcon={<GoogleIcon />}
             sx={{
               borderRadius: '999px', px: 2.5, py: 1,
@@ -312,7 +312,7 @@ export default function LandingPage() {
                     variant="contained"
                     size="large"
                     startIcon={<GoogleIcon />}
-                    onClick={login}
+                    onClick={() => login()}
                     sx={{
                       bgcolor: DK.coral, color: '#fff',
                       borderRadius: '999px', px: 3.5, py: 1.75, fontSize: 15.5, fontWeight: 700,
