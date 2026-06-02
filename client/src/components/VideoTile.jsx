@@ -1,6 +1,11 @@
-import { useEffect, useRef } from 'react';
-import { Avatar, Box, Chip, Typography } from '@mui/material';
-import { MicOff as MicOffIcon } from '@mui/icons-material';
+import { useEffect, useRef, useState } from 'react';
+import { Avatar, Box, Chip, IconButton, Popover, Slider, Stack, Tooltip, Typography } from '@mui/material';
+import {
+  MicOff as MicOffIcon,
+  MoreVert as MoreVertIcon,
+  VolumeOff as VolumeOffIcon,
+  VolumeUp as VolumeUpIcon,
+} from '@mui/icons-material';
 import { getPeerColor } from '../utils/peer-color';
 import { useAudioLevel } from '../hooks/useAudioLevel';
 
@@ -24,11 +29,17 @@ export default function VideoTile({
   activeSpeaker = false,
   objectFit = 'cover',
   mirror = false,
+  showVolumeControl = false,
+  peerVolume = 1,
+  onPeerVolumeChange,
 }) {
   const videoRef = useRef(null);
+  const volBtnRef = useRef(null);
   const offColor = getPeerColor(name);
   const initial = name?.trim()?.[0]?.toUpperCase() ?? '?';
   const levelRef = useAudioLevel(audioStream ?? stream, audioOn);
+  const [hovered, setHovered] = useState(false);
+  const [volAnchor, setVolAnchor] = useState(null);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -36,10 +47,13 @@ export default function VideoTile({
   }, [stream]);
 
   return (
+    <>
     <Box
       // `levelRef` lives on the root so the analyser's `--lvl` (0..1) cascades
       // to every child — the avatar ring and the tile-edge mic meter both read it.
       ref={levelRef}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       sx={{
         position: 'relative',
         width: '100%',
@@ -330,6 +344,86 @@ export default function VideoTile({
           }}
         />
       )}
+
+      {/* Hover-reveal 3-dot button — remote tiles only; anchors the per-peer
+          volume popover so the viewer can adjust this person's output level. */}
+      {showVolumeControl && (
+        <Box
+          ref={volBtnRef}
+          sx={{
+            position: 'absolute',
+            bottom: 'clamp(10px, 3.5cqmin, 16px)',
+            right: 'clamp(10px, 3.5cqmin, 16px)',
+            opacity: hovered || Boolean(volAnchor) ? 1 : 0,
+            transition: 'opacity 0.15s',
+            zIndex: 2,
+          }}
+        >
+          <Tooltip title="Participant options">
+            <IconButton
+              size="small"
+              onClick={() => setVolAnchor(volAnchor ? null : volBtnRef.current)}
+              sx={{
+                width: 'clamp(24px, 7.5cqmin, 30px)',
+                height: 'clamp(24px, 7.5cqmin, 30px)',
+                bgcolor: 'rgba(0,0,0,0.55)',
+                backdropFilter: 'blur(4px)',
+                WebkitBackdropFilter: 'blur(4px)',
+                color: '#fff',
+                '&:hover': { bgcolor: 'rgba(0,0,0,0.75)' },
+              }}
+            >
+              <MoreVertIcon sx={{ fontSize: 'clamp(13px, 4.4cqmin, 16px)' }} />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      )}
     </Box>
+
+    {/* Volume popover — MUI Portal renders outside overflow:hidden; safe to
+        nest here. One per tile, only mounted for remote participants. */}
+    {showVolumeControl && (
+      <Popover
+        open={Boolean(volAnchor)}
+        anchorEl={volAnchor}
+        onClose={() => setVolAnchor(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        slotProps={{
+          paper: {
+            sx: {
+              mb: 1, p: 2, borderRadius: 2.5, minWidth: 220,
+              bgcolor: 'control.surface',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              boxShadow: '0 6px 24px rgba(0,0,0,0.45)',
+            },
+          },
+        }}
+      >
+        <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary', display: 'block', mb: 1.5 }}>
+          {name}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
+          Output volume
+        </Typography>
+        <Stack direction="row" alignItems="center" spacing={1.5}>
+          {peerVolume === 0
+            ? <VolumeOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+            : <VolumeUpIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />}
+          <Slider
+            size="small"
+            min={0} max={1} step={0.05}
+            value={peerVolume}
+            onChange={(_, v) => onPeerVolumeChange?.(v)}
+            sx={{ color: 'primary.main' }}
+          />
+          <Typography variant="caption" sx={{ minWidth: 34, textAlign: 'right', color: 'text.secondary' }}>
+            {Math.round(peerVolume * 100)}%
+          </Typography>
+        </Stack>
+      </Popover>
+    )}
+    </>
   );
 }

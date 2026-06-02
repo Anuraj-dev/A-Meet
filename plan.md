@@ -17,7 +17,7 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 | M4 | mediasoup SFU migration | ✅ Done |
 | M5 | Screen share + reactions + raise hand + chat toggle | ✅ Done |
 | M6 | Aperture UI overhaul (landing + lobby) | ✅ Done — PR #5 |
-| M7 | Meeting-room fixes (in-call UX) | 🔄 In Progress |
+| M7 | Meeting-room fixes (in-call UX) | ✅ Done |
 
 ---
 
@@ -50,13 +50,29 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 - [x] M7.23 **Scheduled-meeting context** — `RoomGuard` saves the room-metadata response and exposes it via `RoomMetaContext`; `LobbyPage` shows meeting title + scheduled time; `RoomPage` header shows the title when present.
 - [x] M7.24 **Audio gain rearchitected (GMeet/Discord model)** — GainNode is now always in the signal chain, built eagerly in `setupSfu` before `produce()`. AudioContext `sampleRate` matches the captured track to prevent PipeWire resampling. `setMicGain` is now fully synchronous (only updates `gain.value`) — no `replaceTrack`, no async, no race. Fixes broken gain above 100%, broken gain below 100%, and the unity (100%) transition bug caused by racing async `replaceTrack` calls.
 - [x] M7.25 **Schedule button on landing page** — `ScheduleMeetingDialog` was imported and state-managed but never rendered; added the render with the correct `open`, `onClose`, `existing`, `onSaved` props.
-- [ ] M7.13 Manual verify (Anuraj)
-- [ ] M7.14 /journal M7
+- [x] M7.13 Manual verify (Anuraj)
+- [x] M7.14 /journal M7
 
 ### Implementation notes
 - **Parallel build-out:** logic (`useMediasoup`, `usePictureInPicture`, server `sfu-close-producer`) and presentational pieces (`VideoTile` rings, `RemoteAudio` volume, `ControlBar`, `ReactionsOverlay`, `useAudioLevel`) are built against fixed contracts; `RoomPage` integrates them.
 - **PipeWire safety:** all metering uses a single AnalyserNode-only AudioContext; mic gain routes through a `MediaStreamAudioDestinationNode` (separate sink). Nothing connects to `audioCtx.destination` — that crackles the live call on Linux.
 - **Screen-share self-view tradeoff:** see M7.3 — fully killing the loop for monitor captures means the presenter sees a card, not a live self-mirror, in that one case.
+
+---
+
+## M8 — Individual participant output volume control (Discord-style)
+
+> Branch: `feat/individual-output-volume`. Per-participant volume slider revealed by
+> hovering a remote tile then clicking ⋮ — mirrors how Discord lets you control each
+> person's output level independently. Master output volume still applies globally.
+> Volumes are per-session (no persistence needed — socketIds change each call).
+
+### Tasks
+- [x] M8.1 **Per-peer volume state** — `peerVolumes` map keyed by socketId in `RoomPage`; `handlePeerVolumeChange` updates it and logs via `appLogger`.
+- [x] M8.2 **RemoteAudio refactor** — rename `volume` → `masterVolume`, add `peerVolumes` map prop; each `PeerAudio` receives `finalVol = clamp(masterVolume × peerVolume, 0, 1)` and logs the applied value.
+- [x] M8.3 **VideoTile 3-dot menu** — hover-reveal `MoreVert` button (bottom-right, remote tiles only); click opens a `Popover` with per-person volume slider (0–100%).
+- [x] M8.4 **Wire in RoomPage** — pass `showVolumeControl`, `peerVolume`, `onPeerVolumeChange` to all remote tile entries (grid, solo layout, presentation rail).
+- [ ] M8.5 Manual verify (Anuraj) + `/journal M8`
 
 ---
 
