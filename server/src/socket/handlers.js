@@ -3,15 +3,19 @@ import { registerWebrtcHandlers } from './webrtc.js';
 import { registerSfuHandlers } from './sfu-handlers.js';
 import { logger } from '../config/logger.js';
 
-// A dropped connection (network blip, server restart) makes Socket.IO reconnect
-// with a brand-new socket: the old socket fires `disconnect` (→ user-left) and a
-// moment later the new one fires `join-room` (→ user-joined). Emitting both would
-// spam every peer's chat log + join chime on a transient blip. So we DEFER the
-// leave by a short grace window keyed by roomId+userId; if the same user rejoins
-// within it we cancel the leave and suppress the paired join, so peers see
-// nothing. A real departure just waits out the window (a few seconds' lag before
-// peers see "left", same as Meet). Multi-tab overlap is handled separately by
-// isUserInRoom — only the user's last socket ever schedules a leave.
+// A dropped connection (network blip, reload, server restart) makes Socket.IO
+// reconnect with a brand-new socket: the old socket fires `disconnect` (→
+// user-left) and a moment later the new one fires `join-room` (→ user-joined).
+// Emitting both would spam every peer's chat log + join chime on a transient blip.
+// So an *unexpected* disconnect DEFERS the leave by a short grace window keyed by
+// roomId+userId; if the same user rejoins within it we cancel the leave and
+// suppress the paired join, so peers see nothing.
+//
+// An *intentional* leave (the "Leave call" button) is different: the client emits
+// `leave-room` first, so we remove them and notify peers immediately — no lag. The
+// grace window is purely the fallback for drops the client couldn't announce
+// (reload, tab close, crash, network loss). Multi-tab overlap is handled
+// separately by isUserInRoom — only the user's last socket ever leaves.
 const LEAVE_GRACE_MS = 4000;
 const pendingLeaves = new Map(); // `${roomId}::${userId}` → timeout handle
 const leaveKey = (roomId, userId) => `${roomId}::${userId}`;
@@ -46,6 +50,23 @@ export function registerHandlers(io) {
       socket.emit('room-users', getRoomUsers(roomId));
       if (!alreadyPresent && !rejoinedInGrace) {
         socket.to(roomId).emit('user-joined', socket.user);
+      }
+    });
+
+    socket.on('leave-room', () => {
+      // Intentional leave: the "Leave call" button emits this just before
+      // disconnecting, so we drop the socket and tell peers right away — no grace
+      // window. The `disconnect` that follows no-ops (already removed).
+      const result = removeUser(socket.id);
+      if (!result) return;
+      const { roomId, user } = result;
+      const key = leaveKey(roomId, user.id);
+      clearTimeout(pendingLeaves.get(key));
+      pendingLeaves.delete(key);
+      socket.leave(roomId);
+      logger.info({ event: 'room.left', roomId, socketId: socket.id, userId: user?.id }, 'user left room');
+      if (!isUserInRoom(roomId, user.id)) {
+        socket.to(roomId).emit('user-left', user);
       }
     });
 

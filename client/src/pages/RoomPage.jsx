@@ -286,6 +286,12 @@ export default function RoomPage() {
       socket.off('sfu-meeting-ended');
       socket.off('sfu-reaction');
       socket.off('sfu-hand-raise-update', onPeerHandRaise);
+      // Announce an intentional leave so peers see it instantly (this cleanup
+      // runs on in-app navigation away — the "Leave call" button — not on a
+      // reconnect blip, where the page stays mounted). A reload/tab-close skips
+      // this and falls back to the server's leave grace window. Best-effort: if
+      // the packet doesn't flush before disconnect, the grace window still covers it.
+      socket.emit('leave-room', roomId);
       socket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -91,10 +91,11 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
   ever becomes visible. `.env.example` documented.
 - [x] M9.2 **Presence survives reconnect** — `join-room` is re-emitted on every socket
   `connect` (not just mount), so a network blip / server restart no longer silently
-  drops a participant from everyone's list. The server defers `user-left` by a short
-  grace window and suppresses the paired `user-joined` on a quick rejoin, so peers don't
-  get leave→join churn (chat spam + join chime) on a blip. Raise-hand state is
-  re-asserted after SFU reconnect too.
+  drops a participant from everyone's list. Unexpected drops defer `user-left` by a
+  short grace window and suppress the paired `user-joined` on a quick rejoin, so peers
+  don't get leave→join churn (chat spam + join chime) on a blip/reload. An intentional
+  leave ("Leave call") emits `leave-room` first, so peers see it instantly — no lag.
+  Raise-hand state is re-asserted after SFU reconnect too.
 - [x] M9.3 **Raise-hand visible locally in all layouts** — alone + solo self-tiles now
   receive `handRaised` (previously only grid/rail did), so raising your hand while
   alone actually shows the indicator.
