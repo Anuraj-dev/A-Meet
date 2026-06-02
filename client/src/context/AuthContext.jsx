@@ -27,8 +27,11 @@ export function AuthProvider({ children }) {
     // Send the post-login destination along so the server can land us back on
     // the meeting invite link. Falls back to a deep link a ProtectedRoute
     // stashed before bouncing here; cleared once consumed so a later plain
-    // sign-in doesn't reuse a stale target.
-    const target = returnTo ?? sessionStorage.getItem('ameet:returnTo') ?? '';
+    // sign-in doesn't reuse a stale target. Guard against `login` being wired
+    // straight to onClick — React would pass a SyntheticEvent as `returnTo`,
+    // which would shadow the stashed deep link and strand the user on `/`.
+    const explicit = typeof returnTo === 'string' ? returnTo : '';
+    const target = explicit || sessionStorage.getItem('ameet:returnTo') || '';
     sessionStorage.removeItem('ameet:returnTo');
     const qs = target ? `?returnTo=${encodeURIComponent(target)}` : '';
     window.location.href = `${base}/api/auth/google${qs}`;
