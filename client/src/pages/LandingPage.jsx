@@ -282,13 +282,13 @@ export default function LandingPage() {
 
             {/* Headline */}
             <Box sx={fadeUp(130)}>
-              <Typography sx={{ fontSize: { xs: 52, sm: 66, md: 80 }, lineHeight: 0.97, fontFamily: DK.display, fontWeight: 800, letterSpacing: '-0.04em', color: DK.ink, mb: 0.5 }}>
+              <Typography sx={{ fontSize: { xs: 38, sm: 66, md: 80 }, lineHeight: 0.97, fontFamily: DK.display, fontWeight: 800, letterSpacing: '-0.04em', color: DK.ink, mb: 0.5 }}>
                 Video calls for
               </Typography>
             </Box>
             <Box sx={fadeUp(190)}>
               <Typography sx={{
-                fontSize: { xs: 52, sm: 66, md: 80 }, lineHeight: 0.97, mb: 3.5,
+                fontSize: { xs: 38, sm: 66, md: 80 }, lineHeight: 0.97, mb: 3.5,
                 fontFamily: DK.display, fontWeight: 800, letterSpacing: '-0.04em',
                 color: DK.coral,
                 textShadow: '0 0 40px rgba(255,107,74,0.40)',
@@ -341,7 +341,11 @@ export default function LandingPage() {
               <Stack spacing={2} sx={{ mb: 4 }}>
                 {/* Two pill buttons */}
                 <Box sx={fadeUp(310)}>
-                  <Stack direction="row" spacing={1.5} flexWrap="wrap">
+                  <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={1.5}
+                    sx={{ alignItems: { xs: 'stretch', sm: 'center' } }}
+                  >
                     <Button
                       variant="contained"
                       size="large"
@@ -416,7 +420,7 @@ export default function LandingPage() {
                   opacity:   joinOpen ? 1 : 0,
                   transition: `max-height 0.45s ${EASE}, opacity 0.35s ${EASE}`,
                 }}>
-                  <Box component="form" onSubmit={handleJoin} sx={{ display: 'flex', gap: 1, maxWidth: 420, pt: 0.5 }}>
+                  <Box component="form" onSubmit={handleJoin} sx={{ display: 'flex', gap: 1, maxWidth: 420, width: '100%', pt: 0.5 }}>
                     <TextField
                       fullWidth autoFocus
                       placeholder="Enter a code or link"

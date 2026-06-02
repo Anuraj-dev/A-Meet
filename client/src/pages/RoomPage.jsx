@@ -844,8 +844,8 @@ export default function RoomPage() {
                   </Typography>
                 </>
               )}
-              <Box sx={{ width: '1px', height: 16, bgcolor: 'divider', flexShrink: 0 }} />
-              <Typography variant="body2" color="text.secondary" noWrap sx={{ fontFamily: 'monospace' }}>
+              <Box sx={{ width: '1px', height: 16, bgcolor: 'divider', flexShrink: 0, display: { xs: 'none', sm: 'block' } }} />
+              <Typography variant="body2" color="text.secondary" noWrap sx={{ fontFamily: 'monospace', display: { xs: 'none', sm: 'block' } }}>
                 {roomId}
               </Typography>
               <Tooltip title="Copy joining link">
@@ -908,6 +908,8 @@ export default function RoomPage() {
               opacity: controlsShown ? 1 : 0,
               pointerEvents: controlsShown ? 'auto' : 'none',
               transition: 'opacity 0.25s ease, transform 0.25s ease',
+              maxWidth: 'calc(100vw - 16px)',
+              px: { xs: 0.5, sm: 0 },
             }}
           >
             <ControlBar

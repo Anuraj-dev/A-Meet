@@ -8,8 +8,8 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// In-call chat. Desktop: a floating rounded side panel in the layout flow.
-// Mobile: a full-screen sheet overlaying the call (own close button + input).
+// In-call chat. Desktop: a 372px wide in-flow side column.
+// Mobile: a bottom sheet (62vh, slides up over the video, with backdrop).
 export default function ChatPanel({ messages, input, setInput, onSend, currentUserId, onClose }) {
   const bottomRef = useRef(null);
 
@@ -18,25 +18,53 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
   }, [messages]);
 
   return (
-    <Box
-      sx={{
-        // Mobile: fixed full-screen overlay. Desktop: in-flow side column.
-        position: { xs: 'fixed', sm: 'relative' },
-        inset: { xs: 0, sm: 'auto' },
-        zIndex: { xs: 1300, sm: 'auto' },
-        width: { xs: '100%', sm: 372 },
-        flexShrink: 0,
-        m: { xs: 0, sm: 1 },
-        ml: { sm: 0 },
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: 0,
-        bgcolor: 'background.paper',
-        borderRadius: { xs: 0, sm: 3 },
-        border: { sm: '1px solid rgba(255,255,255,0.06)' },
-        animation: 'ameet-fade-in 0.22s ease-out',
-      }}
-    >
+    <>
+      {/* Mobile backdrop */}
+      <Box
+        onClick={onClose}
+        sx={{
+          display: { xs: 'block', sm: 'none' },
+          position: 'fixed',
+          inset: 0,
+          zIndex: 1299,
+          bgcolor: 'rgba(0,0,0,0.55)',
+        }}
+      />
+      <Box
+        sx={{
+          // Mobile: bottom sheet. Desktop: in-flow side column.
+          position: { xs: 'fixed', sm: 'relative' },
+          bottom: { xs: 0, sm: 'auto' },
+          left: { xs: 0, sm: 'auto' },
+          right: { xs: 0, sm: 'auto' },
+          zIndex: { xs: 1300, sm: 'auto' },
+          width: { xs: '100%', sm: 372 },
+          height: { xs: '62vh', sm: 'auto' },
+          flexShrink: 0,
+          m: { xs: 0, sm: 1 },
+          ml: { sm: 0 },
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          bgcolor: { xs: 'rgba(10,12,22,0.97)', sm: 'background.paper' },
+          borderRadius: { xs: '20px 20px 0 0', sm: 3 },
+          border: { sm: '1px solid rgba(255,255,255,0.06)' },
+          boxShadow: { xs: '0 -8px 40px rgba(0,0,0,0.6)', sm: 'none' },
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          animation: 'ameet-fade-in 0.22s ease-out',
+        }}
+      >
+        {/* Drag handle — mobile only */}
+        <Box sx={{
+          display: { xs: 'flex', sm: 'none' },
+          justifyContent: 'center',
+          pt: 1.25,
+          pb: 0.5,
+          flexShrink: 0,
+        }}>
+          <Box sx={{ width: 40, height: 4, borderRadius: 99, bgcolor: 'rgba(255,255,255,0.2)' }} />
+        </Box>
       {/* Header */}
       <Box
         sx={{
@@ -152,5 +180,6 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
         />
       </Box>
     </Box>
+    </>
   );
 }
