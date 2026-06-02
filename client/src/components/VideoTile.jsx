@@ -145,9 +145,12 @@ export default function VideoTile({
               width: 'min(40cqmin, 132px)',
               height: 'min(40cqmin, 132px)',
               fontSize: 'min(18cqmin, 52px)',
-              fontWeight: 600,
+              fontWeight: 700,
               color: '#fff',
-              bgcolor: 'rgba(0,0,0,0.35)',
+              // Use the same deterministic peer color as the tile bg so the
+              // circle seamlessly matches — this is how Google Meet renders
+              // camera-off initials (no dark overlay, just the person's color).
+              bgcolor: offColor,
               boxShadow: '0 2px 18px rgba(0,0,0,0.45)',
             }}
           >

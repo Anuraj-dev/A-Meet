@@ -119,12 +119,9 @@ export function drawCell(ctx, t, video, x, y, w, h, { objectFit = 'cover', radiu
     ctx.fillRect(0, 0, w, h);
     const initial = (t.name?.trim()?.[0] || '?').toUpperCase();
     const d = Math.min(w, h) * 0.32;
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.beginPath();
-    ctx.arc(w / 2, h / 2, d, 0, Math.PI * 2);
-    ctx.fill();
+    // No separate dark circle — initial floats on the peer color (Google Meet style).
     ctx.fillStyle = '#fff';
-    ctx.font = `600 ${Math.round(d)}px Roboto, Arial, sans-serif`;
+    ctx.font = `700 ${Math.round(d)}px Roboto, Arial, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(initial, w / 2, h / 2 + 1);
