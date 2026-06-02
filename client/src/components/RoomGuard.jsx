@@ -1,8 +1,13 @@
-import { useEffect, useState } from 'react';
+import { createContext, useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 import api from '../api/axios';
 import CheckMeetingCode from '../pages/CheckMeetingCode';
+
+// Room metadata (title, scheduledFor, …) fetched by RoomGuard and made available
+// to child pages so lobby and room can show scheduled-meeting info without a
+// second API call.
+export const RoomMetaContext = createContext(null);
 
 // Validates the :roomId in the URL against the server before rendering the
 // Lobby/Room. A non-existent code renders the "Check your meeting code" screen;
@@ -14,6 +19,7 @@ export default function RoomGuard({ children }) {
   // Result is tagged with the code it belongs to, so a stale result for a
   // previous code never shows for the current one (status derives to 'loading').
   const [result, setResult] = useState(null); // { code, status: 'valid'|'invalid'|'ended' }
+  const [roomMeta, setRoomMeta] = useState(null);
 
   // Canonical code is lowercase, no stray whitespace. If the URL isn't canonical
   // (uppercase from autocapitalize, a pasted space), redirect BEFORE anything
@@ -33,7 +39,11 @@ export default function RoomGuard({ children }) {
     let active = true;
     api
       .get(`/rooms/${encodeURIComponent(canonical)}`)
-      .then(() => active && setResult({ code: canonical, status: 'valid' }))
+      .then((res) => {
+        if (!active) return;
+        setResult({ code: canonical, status: 'valid' });
+        setRoomMeta(res.data ?? null);
+      })
       .catch((err) => {
         if (!active) return;
         // 410 Gone = the meeting existed but the host ended it.
@@ -65,5 +75,9 @@ export default function RoomGuard({ children }) {
   if (status === 'invalid') return <CheckMeetingCode />;
   if (status === 'ended') return <CheckMeetingCode ended />;
 
-  return children;
+  return (
+    <RoomMetaContext.Provider value={roomMeta}>
+      {children}
+    </RoomMetaContext.Provider>
+  );
 }

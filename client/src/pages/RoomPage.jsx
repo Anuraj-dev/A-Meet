@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Alert, Avatar, AvatarGroup, Box, Button, Chip, Dialog, DialogActions,
@@ -11,6 +11,7 @@ import {
   StopScreenShare as StopScreenShareIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import { RoomMetaContext } from '../components/RoomGuard';
 import socket from '../services/socket';
 import { useMediasoup } from '../hooks/useMediasoup';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
@@ -46,6 +47,8 @@ export default function RoomPage() {
   const { state: locationState } = useLocation();
   const { user } = useAuth();
   const isMobile = useMediaQuery((t) => t.breakpoints.down('sm'));
+  const roomMeta = useContext(RoomMetaContext);
+  const meetingTitle = roomMeta?.title || null;
 
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
@@ -833,7 +836,15 @@ export default function RoomPage() {
               }}
             >
               <LiveClock variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }} />
-              <Box sx={{ width: '1px', height: 16, bgcolor: 'divider' }} />
+              {meetingTitle && (
+                <>
+                  <Box sx={{ width: '1px', height: 16, bgcolor: 'divider', flexShrink: 0 }} />
+                  <Typography variant="body2" noWrap sx={{ fontWeight: 600, maxWidth: { xs: 100, sm: 200 } }}>
+                    {meetingTitle}
+                  </Typography>
+                </>
+              )}
+              <Box sx={{ width: '1px', height: 16, bgcolor: 'divider', flexShrink: 0 }} />
               <Typography variant="body2" color="text.secondary" noWrap sx={{ fontFamily: 'monospace' }}>
                 {roomId}
               </Typography>

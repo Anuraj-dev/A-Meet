@@ -46,6 +46,8 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 - [x] M7.19 **Stop presenting header button** — replaced passive "Presenting" chip in top bar with clickable red "Stop presenting" chip (matches Google Meet top-bar button)
 - [x] M7.20 **Audio survives bandwidth drops** — root cause: camera was a single VP8 encoding, so when a viewer's downlink dipped the SFU couldn't degrade it and the saturated transport broke the audio sharing the path. Fix: camera simulcast (3 spatial layers × L1T3 temporal) so the SFU sheds video layers per-receiver, plus `consumer.setPriority(255)` on audio so the SFU reserves voice bitrate before video. Audio Opus FEC/NACK/DTX was already in place.
 - [x] M7.21 **Screenshot to clipboard** — "Take screenshot" in the More menu composites the current camera tiles (+ on-stage share) to a 1280×720 PNG and copies it to the clipboard (`ClipboardItem`), with a file-download fallback for browsers without image clipboard write. Canvas compositing extracted to shared `utils/video-composite.js` (reused by PiP + screenshot).
+- [x] M7.22 **Audio input onChange fix** — `setAudioDevice` in `useLobbyMedia` now calls `setPreviewStream` after device swap (matches `setVideoDevice`); fixes stale preview stream and broken speaking-level indicator after mic change.
+- [x] M7.23 **Scheduled-meeting context** — `RoomGuard` saves the room-metadata response and exposes it via `RoomMetaContext`; `LobbyPage` shows meeting title + scheduled time; `RoomPage` header shows the title when present.
 - [ ] M7.13 Manual verify (Anuraj)
 - [ ] M7.14 /journal M7
 
