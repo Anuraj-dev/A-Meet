@@ -99,6 +99,7 @@ export function useLobbyMedia() {
     } catch {
       setAudioOn(false);
     }
+    if (streamRef.current) setPreviewStream(new MediaStream(streamRef.current.getTracks()));
   }, []);
 
   const toggleVideo = useCallback(() => {
