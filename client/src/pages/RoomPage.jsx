@@ -207,8 +207,18 @@ export default function RoomPage() {
   }, [hasScreen]);
 
   useEffect(() => {
+    // Presence membership must be (re)claimed on EVERY connect, not just once.
+    // After a dropped connection (network blip, server restart) Socket.IO
+    // reconnects with a fresh socket; the server dropped us from the room on the
+    // old socket's disconnect, so without re-emitting join-room we'd silently
+    // vanish from everyone's participant list (and never receive theirs) — the
+    // SFU media path rejoins on reconnect but plain presence did not. The server
+    // bridges brief blips with a leave grace window, so a quick reconnect stays
+    // seamless for peers. Emitting on `connect` covers the first join too.
+    const joinRoom = () => socket.emit('join-room', roomId);
+    socket.on('connect', joinRoom);
+    if (socket.connected) joinRoom();
     socket.connect();
-    socket.emit('join-room', roomId);
 
     socket.on('room-users', (list) => setUsers(list));
     socket.on('user-joined', (u) => {
@@ -268,6 +278,7 @@ export default function RoomPage() {
     socket.on('sfu-hand-raise-update', onPeerHandRaise);
 
     return () => {
+      socket.off('connect', joinRoom);
       socket.off('room-users');
       socket.off('user-joined');
       socket.off('user-left');
@@ -275,6 +286,12 @@ export default function RoomPage() {
       socket.off('sfu-meeting-ended');
       socket.off('sfu-reaction');
       socket.off('sfu-hand-raise-update', onPeerHandRaise);
+      // Announce an intentional leave so peers see it instantly (this cleanup
+      // runs on in-app navigation away — the "Leave call" button — not on a
+      // reconnect blip, where the page stays mounted). A reload/tab-close skips
+      // this and falls back to the server's leave grace window. Best-effort: if
+      // the packet doesn't flush before disconnect, the grace window still covers it.
+      socket.emit('leave-room', roomId);
       socket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -421,6 +438,7 @@ export default function RoomPage() {
             avatar={user?.avatar}
             videoOn={localVideoOn}
             audioOn={localAudioOn}
+            handRaised={handRaised}
             activeReaction={activeReactions[socket.id]}
             activeSpeaker={activeSpeaker === socket.id}
             mirror
@@ -705,6 +723,7 @@ export default function RoomPage() {
               avatar={user?.avatar}
               videoOn={localVideoOn}
               audioOn={localAudioOn}
+              handRaised={handRaised}
               activeReaction={activeReactions[socket.id]}
               activeSpeaker={activeSpeaker === socket.id}
               mirror

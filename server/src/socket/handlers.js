@@ -3,6 +3,23 @@ import { registerWebrtcHandlers } from './webrtc.js';
 import { registerSfuHandlers } from './sfu-handlers.js';
 import { logger } from '../config/logger.js';
 
+// A dropped connection (network blip, reload, server restart) makes Socket.IO
+// reconnect with a brand-new socket: the old socket fires `disconnect` (→
+// user-left) and a moment later the new one fires `join-room` (→ user-joined).
+// Emitting both would spam every peer's chat log + join chime on a transient blip.
+// So an *unexpected* disconnect DEFERS the leave by a short grace window keyed by
+// roomId+userId; if the same user rejoins within it we cancel the leave and
+// suppress the paired join, so peers see nothing.
+//
+// An *intentional* leave (the "Leave call" button) is different: the client emits
+// `leave-room` first, so we remove them and notify peers immediately — no lag. The
+// grace window is purely the fallback for drops the client couldn't announce
+// (reload, tab close, crash, network loss). Multi-tab overlap is handled
+// separately by isUserInRoom — only the user's last socket ever leaves.
+const LEAVE_GRACE_MS = 4000;
+const pendingLeaves = new Map(); // `${roomId}::${userId}` → timeout handle
+const leaveKey = (roomId, userId) => `${roomId}::${userId}`;
+
 export function registerHandlers(io) {
   io.on('connection', (socket) => {
     logger.debug({ event: 'socket.connected', socketId: socket.id, userId: socket.user?.id }, 'socket connected');
@@ -15,6 +32,15 @@ export function registerHandlers(io) {
     socket.on('join-room', (roomId) => {
       if (!roomId || typeof roomId !== 'string') return;
 
+      // Cancel any pending leave for this user — a reconnect within the grace
+      // window means they never really left, so neither leave nor join is sent.
+      const key = leaveKey(roomId, socket.user.id);
+      const rejoinedInGrace = pendingLeaves.has(key);
+      if (rejoinedInGrace) {
+        clearTimeout(pendingLeaves.get(key));
+        pendingLeaves.delete(key);
+      }
+
       const alreadyPresent = isUserInRoom(roomId, socket.user.id);
       socket.join(roomId);
       addUser(roomId, socket.id, socket.user);
@@ -22,8 +48,25 @@ export function registerHandlers(io) {
       logger.info({ event: 'room.joined', roomId, socketId: socket.id, userId: socket.user?.id }, 'user joined room');
 
       socket.emit('room-users', getRoomUsers(roomId));
-      if (!alreadyPresent) {
+      if (!alreadyPresent && !rejoinedInGrace) {
         socket.to(roomId).emit('user-joined', socket.user);
+      }
+    });
+
+    socket.on('leave-room', () => {
+      // Intentional leave: the "Leave call" button emits this just before
+      // disconnecting, so we drop the socket and tell peers right away — no grace
+      // window. The `disconnect` that follows no-ops (already removed).
+      const result = removeUser(socket.id);
+      if (!result) return;
+      const { roomId, user } = result;
+      const key = leaveKey(roomId, user.id);
+      clearTimeout(pendingLeaves.get(key));
+      pendingLeaves.delete(key);
+      socket.leave(roomId);
+      logger.info({ event: 'room.left', roomId, socketId: socket.id, userId: user?.id }, 'user left room');
+      if (!isUserInRoom(roomId, user.id)) {
+        socket.to(roomId).emit('user-left', user);
       }
     });
 
@@ -42,12 +85,23 @@ export function registerHandlers(io) {
     socket.on('disconnect', () => {
       logger.debug({ event: 'socket.disconnected', socketId: socket.id, userId: socket.user?.id }, 'socket disconnected');
       const result = removeUser(socket.id);
-      if (result) {
-        const { roomId, user } = result;
+      if (!result) return;
+      const { roomId, user } = result;
+      // Another socket for the same user (a second tab) is still here — nothing left.
+      if (isUserInRoom(roomId, user.id)) return;
+
+      // Defer the leave: if the user reconnects within the grace window, join-room
+      // cancels this timer. Re-check presence when it fires (they may be back on a
+      // socket that, defensively, didn't clear the timer). io.to() rather than
+      // socket.to() since this socket is already gone.
+      const key = leaveKey(roomId, user.id);
+      clearTimeout(pendingLeaves.get(key));
+      pendingLeaves.set(key, setTimeout(() => {
+        pendingLeaves.delete(key);
         if (!isUserInRoom(roomId, user.id)) {
-          socket.to(roomId).emit('user-left', user);
+          io.to(roomId).emit('user-left', user);
         }
-      }
+      }, LEAVE_GRACE_MS));
     });
   });
 }

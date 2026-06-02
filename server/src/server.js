@@ -7,11 +7,16 @@ import { initSocket } from './socket/io.js';
 import { socketAuth } from './middleware/socket-auth.js';
 import { registerHandlers } from './socket/handlers.js';
 import { createWorkers } from './sfu/workers.js';
+import { resolveAnnouncedIp } from './sfu/config.js';
 
 async function start() {
   try {
     await connectDB();
     await createWorkers();
+    // Resolve the IP mediasoup advertises to browsers before serving traffic —
+    // on a private/loopback value this auto-detects the EC2 public IPv4, else
+    // warns loudly (a wrong announced IP = peers can never connect media).
+    await resolveAnnouncedIp();
     const app = createApp();
     const httpServer = http.createServer(app);
     const io = initSocket(httpServer);
