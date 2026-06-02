@@ -1,5 +1,6 @@
 import http from 'http';
 import { env } from './config/env.js';
+import { logger } from './config/logger.js';
 import { connectDB } from './config/db.js';
 import { createApp } from './app.js';
 import { initSocket } from './socket/io.js';
@@ -19,10 +20,10 @@ async function start() {
     registerHandlers(io);
 
     httpServer.listen(env.port, () => {
-      console.log(`[server] A-Meet API listening on ${env.serverUrl} (${env.nodeEnv})`);
+      logger.info({ port: env.port, env: env.nodeEnv }, 'A-Meet API listening');
     });
   } catch (err) {
-    console.error('[server] Failed to start:', err.message);
+    logger.fatal({ err }, 'Failed to start server');
     process.exit(1);
   }
 }

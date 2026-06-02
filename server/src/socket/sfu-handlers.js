@@ -12,6 +12,7 @@ import {
   listOtherProducers, removePeer, closeRoomIfEmpty,
 } from '../sfu/sfu-rooms.js';
 import { Room } from '../models/Room.js';
+import { logger } from '../config/logger.js';
 
 // socketId → roomId, established on get-rtp-capabilities. SFU-scoped (independent
 // of M1's room-manager) and set before any transport work, so it never races
@@ -29,6 +30,7 @@ export function registerSfuHandlers(io, socket) {
       addPeer(roomId, socket.id, socket.user);
       socketRoom.set(socket.id, roomId);
       socket.join(roomId); // idempotent with chat's join; makes SFU self-sufficient
+      logger.info({ event: 'peer.joined', roomId, socketId: socket.id, userId: socket.user?.id }, 'peer joined SFU room');
 
       // Set up AudioLevelObserver once per room (fires max 1 volume entry = loudest speaker).
       if (!room.audioLevelObserver) {
@@ -49,6 +51,7 @@ export function registerSfuHandlers(io, socket) {
 
       callback({ rtpCapabilities: room.router.rtpCapabilities });
     } catch (err) {
+      logger.warn({ event: 'peer.joinFailed', socketId: socket.id, err: err.message }, 'peer join failed');
       callback({ error: err.message });
     }
   });
@@ -72,20 +75,29 @@ export function registerSfuHandlers(io, socket) {
       // Diagnostics: the selected ICE tuple reveals the negotiated media path
       // (direct UDP / TCP / relay) — the key signal when peers can't see or hear
       // each other across networks. We also surface ICE/DTLS failures.
+      logger.debug(
+        { event: 'transport.created', direction, transportId: transport.id, socketId: socket.id },
+        'WebRTC transport created',
+      );
+
       transport.on('iceselectedtuplechange', (tuple) => {
-        const proto = tuple?.protocol ?? '?';
-        const remote = `${tuple?.remoteIp ?? '?'}:${tuple?.remotePort ?? '?'}`;
-        console.log(`[sfu] ${direction} ${socket.id} ICE selected ${proto} <- ${remote}`);
+        logger.info({
+          event: 'ice.tupleSelected',
+          direction,
+          socketId: socket.id,
+          protocol: tuple?.protocol,
+          remoteIp: tuple?.remoteIp,
+          remotePort: tuple?.remotePort,
+        }, 'ICE tuple selected');
       });
       transport.on('icestatechange', (iceState) => {
-        if (iceState === 'disconnected' || iceState === 'failed') {
-          console.warn(`[sfu] ${direction} ${socket.id} ICE ${iceState}`);
-        }
+        const level = (iceState === 'disconnected' || iceState === 'failed') ? 'warn' : 'debug';
+        logger[level]({ event: 'ice.stateChange', direction, socketId: socket.id, iceState }, `ICE ${iceState}`);
       });
       transport.on('dtlsstatechange', (dtlsState) => {
-        if (dtlsState === 'failed' || dtlsState === 'closed') {
-          console.warn(`[sfu] ${direction} ${socket.id} DTLS ${dtlsState}`);
-        }
+        // 'closed' is normal teardown on disconnect — only 'failed' is a real problem
+        const level = dtlsState === 'failed' ? 'warn' : 'debug';
+        logger[level]({ event: 'dtls.stateChange', direction, socketId: socket.id, dtlsState }, `DTLS ${dtlsState}`);
       });
 
       callback({
@@ -95,6 +107,7 @@ export function registerSfuHandlers(io, socket) {
         dtlsParameters: transport.dtlsParameters,
       });
     } catch (err) {
+      logger.warn({ event: 'transport.createFailed', socketId: socket.id, err: err.message }, 'transport create failed');
       callback({ error: err.message });
     }
   });
@@ -126,6 +139,10 @@ export function registerSfuHandlers(io, socket) {
       const producer = await transport.produce({ kind, rtpParameters, appData });
       peer.producers.set(producer.id, producer);
       producer.on('transportclose', () => peer.producers.delete(producer.id));
+      logger.info(
+        { event: 'producer.created', kind, producerId: producer.id, source: appData?.source, socketId: socket.id, roomId },
+        `${kind} producer created`,
+      );
 
       // Register audio producers with the level observer (screen-share audio excluded).
       if (kind === 'audio' && appData?.source !== 'screen' && room?.audioLevelObserver) {
@@ -221,6 +238,7 @@ export function registerSfuHandlers(io, socket) {
       if (!producer) throw new Error('producer not found');
       await producer.pause();
       socket.to(roomId).emit('sfu-producer-paused', { producerId, socketId: socket.id });
+      logger.debug({ event: 'producer.paused', producerId, kind: producer.kind, socketId: socket.id }, 'producer paused');
       callback?.({ paused: true });
     } catch (err) {
       callback?.({ error: err.message });
@@ -234,6 +252,7 @@ export function registerSfuHandlers(io, socket) {
       if (!producer) throw new Error('producer not found');
       await producer.resume();
       socket.to(roomId).emit('sfu-producer-resumed', { producerId, socketId: socket.id });
+      logger.debug({ event: 'producer.resumed', producerId, kind: producer.kind, socketId: socket.id }, 'producer resumed');
       callback?.({ resumed: true });
     } catch (err) {
       callback?.({ error: err.message });
@@ -297,5 +316,6 @@ export function registerSfuHandlers(io, socket) {
     socketRoom.delete(socket.id);
     socket.to(roomId).emit('sfu-peer-left', { socketId: socket.id });
     closeRoomIfEmpty(roomId);
+    logger.info({ event: 'peer.left', roomId, socketId: socket.id }, 'peer left SFU room');
   });
 }

@@ -3,6 +3,7 @@ import { Device } from 'mediasoup-client';
 import socket from '../services/socket';
 import { request } from '../services/mediasoup-signal';
 import { ICE_SERVERS, ICE_TRANSPORT_POLICY } from '../services/ice-config';
+import { appLogger } from '../utils/logger';
 
 // Camera simulcast (3 spatial layers, each with L1T3 temporal layers). Single-
 // encoding video can't degrade per-receiver: when a viewer's downlink drops the
@@ -166,11 +167,16 @@ export function useMediasoup(roomId, devices = {}) {
     const clamped = Math.max(0, Math.min(2, value));
     micGainRef.current = clamped;
     setMicGainState(clamped);
+    const ctxState = audioCtxRef.current?.state ?? 'none';
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.value = clamped;
+      appLogger.debug('mic gain applied', { gain: clamped, ctxState });
+    } else {
+      appLogger.warn('mic gain set but gainNode not ready — value deferred', { gain: clamped, ctxState });
     }
     // Resume AudioContext if the browser suspended it (e.g. tab was backgrounded).
     if (audioCtxRef.current?.state === 'suspended') {
+      appLogger.info('audioCtx suspended — triggering resume', { gain: clamped });
       audioCtxRef.current.resume().catch(() => {});
     }
   }, []);
@@ -425,9 +431,17 @@ export function useMediasoup(roomId, devices = {}) {
             sampleRate: trackSampleRate,
             latencyHint: 'interactive',
           });
+          appLogger.info('audioCtx created', { sampleRate: trackSampleRate, state: audioCtxRef.current.state });
         }
         const ctx = audioCtxRef.current;
-        if (ctx.state !== 'running') { try { await ctx.resume(); } catch { /* ignore */ } }
+        if (ctx.state !== 'running') {
+          try {
+            await ctx.resume();
+            appLogger.info('audioCtx resumed', { state: ctx.state });
+          } catch (e) {
+            appLogger.warn('audioCtx resume failed', { err: e.message, state: ctx.state });
+          }
+        }
         const src = ctx.createMediaStreamSource(new MediaStream([audioTrack]));
         const gain = ctx.createGain();
         const dest = ctx.createMediaStreamDestination();
@@ -437,6 +451,7 @@ export function useMediasoup(roomId, devices = {}) {
         gainSrcRef.current = src;
         gainNodeRef.current = gain;
         gainDestRef.current = dest;
+        appLogger.info('gain graph built', { initialGain: micGainRef.current, ctxState: ctx.state, sampleRate: ctx.sampleRate });
 
         const p = await sendTransport.produce({
           track: dest.stream.getAudioTracks()[0],
@@ -453,6 +468,7 @@ export function useMediasoup(roomId, devices = {}) {
         p.on('transportclose', () => producers.delete('audio'));
         if (!startAudioOn) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
         setLocalAudioOn(!!startAudioOn);
+        appLogger.info('audio producer created', { producerId: p.id, startAudioOn: !!startAudioOn });
       }
       const videoTrack = stream?.getVideoTracks()[0];
       if (videoTrack && device.canProduce('video')) {
@@ -509,6 +525,7 @@ export function useMediasoup(roomId, devices = {}) {
 
       const hasMicTrack = stream.getAudioTracks().length > 0;
       const hasCamTrack = stream.getVideoTracks().length > 0;
+      appLogger.info('media acquired', { hasMic: hasMicTrack, hasCamera: hasCamTrack, permissionDenied: deniedCount === 2 });
       localStreamRef.current = stream;
       setLocalStream(stream);
       setHasMic(hasMicTrack);
@@ -527,7 +544,9 @@ export function useMediasoup(roomId, devices = {}) {
       try {
         await setupSfu(stream);
         initializedRef.current = true;
+        appLogger.info('SFU init complete');
       } catch (err) {
+        appLogger.error('SFU init failed', { err: err.message });
         if (!cancelled && import.meta.env.DEV) console.error('[sfu] init failed:', err.message);
       }
     }
@@ -549,6 +568,7 @@ export function useMediasoup(roomId, devices = {}) {
 
       // The gain graph feeds the old producer which is now dead. Tear it down;
       // setupSfu will rebuild it against the fresh producer using micGainRef.current.
+      appLogger.info('socket reconnect — tearing down gain graph', { savedGain: micGainRef.current });
       try { gainSrcRef.current?.disconnect(); } catch { /* ignore */ }
       try { gainNodeRef.current?.disconnect(); } catch { /* ignore */ }
       try { gainDestRef.current?.disconnect(); } catch { /* ignore */ }
@@ -557,6 +577,7 @@ export function useMediasoup(roomId, devices = {}) {
       try {
         await setupSfu(localStreamRef.current);
       } catch (err) {
+        appLogger.error('SFU reconnect failed', { err: err.message });
         if (!cancelled && import.meta.env.DEV) console.error('[sfu] reconnect failed:', err.message);
       }
     };
