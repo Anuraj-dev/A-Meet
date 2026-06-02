@@ -1,7 +1,7 @@
 import { createTheme } from '@mui/material/styles';
 
-const BRAND_GRADIENT = 'linear-gradient(120deg, #1a73e8, #9334e6)';
-const GRAD_TEXT = 'linear-gradient(110deg, #5b8bff, #a855f7 60%, #00f5d4)';
+const BRAND_GRADIENT = 'linear-gradient(120deg, #1a73e8, #7c5cbf)';
+const GRAD_TEXT = 'linear-gradient(110deg, #4a7bd4, #8b6cbf 60%, #2ab4a0)';
 
 const theme = createTheme({
   palette: {
@@ -11,13 +11,13 @@ const theme = createTheme({
       paper: 'rgba(255,255,255,0.045)',
     },
     primary: {
-      main: '#5b8bff',
+      main: '#4a7bd4',
       dark: '#1a73e8',
       contrastText: '#fff',
     },
     secondary: {
-      main: '#9334e6',
-      light: '#a855f7',
+      main: '#7c5cbf',
+      light: '#8b6cbf',
     },
     error: {
       main: '#ef4444',
@@ -29,10 +29,10 @@ const theme = createTheme({
       contrastText: '#060810',
     },
     success: {
-      main: '#34d399',
+      main: '#3db389',
     },
     info: {
-      main: '#00f5d4',
+      main: '#2ab4a0',
     },
     divider: 'rgba(255,255,255,0.10)',
     text: {
@@ -110,9 +110,9 @@ const theme = createTheme({
           '55%, 100%': { transform: 'translateX(100%)' },
         },
         '@keyframes speakPulse': {
-          '0%': { boxShadow: '0 0 0 1px #5b8bff, 0 0 0 0 rgba(91,139,255,0.5)' },
-          '70%': { boxShadow: '0 0 0 2px #5b8bff, 0 0 0 14px rgba(91,139,255,0)' },
-          '100%': { boxShadow: '0 0 0 1px #5b8bff, 0 0 0 0 rgba(91,139,255,0)' },
+          '0%': { boxShadow: '0 0 0 1px #4a7bd4, 0 0 0 0 rgba(74,123,212,0.5)' },
+          '70%': { boxShadow: '0 0 0 2px #4a7bd4, 0 0 0 14px rgba(74,123,212,0)' },
+          '100%': { boxShadow: '0 0 0 1px #4a7bd4, 0 0 0 0 rgba(74,123,212,0)' },
         },
         '@keyframes blink': {
           '0%, 100%': { opacity: 1 },
@@ -137,8 +137,8 @@ const theme = createTheme({
         // Active-speaker tile ring — gently breathes the green inset glow.
         // Inset (not outer) so the grid wrapper's overflow:hidden never clips it.
         '@keyframes ameet-speaker-pulse': {
-          '0%, 100%': { boxShadow: 'inset 0 0 0 3px #34d399, inset 0 0 10px rgba(52,211,153,0.30)' },
-          '50%': { boxShadow: 'inset 0 0 0 3px #34d399, inset 0 0 20px rgba(52,211,153,0.65)' },
+          '0%, 100%': { boxShadow: 'inset 0 0 0 3px #3db389, inset 0 0 10px rgba(61,179,137,0.30)' },
+          '50%': { boxShadow: 'inset 0 0 0 3px #3db389, inset 0 0 20px rgba(61,179,137,0.55)' },
         },
         '@media (prefers-reduced-motion: reduce)': {
           '*': { animationDuration: '0.01ms !important', transitionDuration: '0.01ms !important' },
@@ -210,7 +210,7 @@ const theme = createTheme({
           '& .MuiOutlinedInput-root': {
             '& fieldset': { borderColor: 'rgba(255,255,255,0.10)' },
             '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.20)' },
-            '&.Mui-focused fieldset': { borderColor: '#5b8bff' },
+            '&.Mui-focused fieldset': { borderColor: '#4a7bd4' },
           },
         },
       },
