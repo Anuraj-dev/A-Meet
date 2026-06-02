@@ -356,7 +356,7 @@ export default function RoomPage() {
 
   // --- Camera tiles (shared by presentation rail) ---
   function cameraTiles() {
-    return [
+    const all = [
       localStream && {
         key: 'local',
         stream: localStream,
@@ -366,7 +366,7 @@ export default function RoomPage() {
         avatar: user?.avatar,
         videoOn: localVideoOn,
         audioOn: localAudioOn,
-        handRaised: false,
+        handRaised: handRaised,
         activeReaction: activeReactions[socket.id],
         activeSpeaker: activeSpeaker === socket.id,
         mirror: true,
@@ -391,6 +391,8 @@ export default function RoomPage() {
         };
       }),
     ].filter(Boolean);
+    // Raised-hand participants pin to the top of the sidebar/grid (stable sort).
+    return all.sort((a, b) => (b.handRaised ? 1 : 0) - (a.handRaised ? 1 : 0));
   }
 
   // --- Layouts ---
