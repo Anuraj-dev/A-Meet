@@ -76,6 +76,40 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 
 ---
 
+## M9 — Connection stability + in-call UX fixes
+
+> Branch: `fix/m8-connection-and-ui-stability`. Fixes the prod report: two people on
+> the same link both saw "You're the only one here", raise-hand looked broken, and the
+> per-peer volume 3-dot was undiscoverable.
+
+### Tasks
+- [x] M9.1 **mediasoup announced-IP resolution** — `resolveAnnouncedIp()` runs at
+  startup: keeps a usable public env value, else auto-detects the EC2 public IPv4 via
+  IMDSv2 (tight timeout, fail-fast off-EC2), else logs a loud actionable error. Root
+  cause of "can't see each other": a private/loopback announced IP means remote
+  browsers can't reach the media ports, so `produce()` never completes and no peer
+  ever becomes visible. `.env.example` documented.
+- [x] M9.2 **Presence survives reconnect** — `join-room` is re-emitted on every socket
+  `connect` (not just mount), so a network blip / server restart no longer silently
+  drops a participant from everyone's list. The server defers `user-left` by a short
+  grace window and suppresses the paired `user-joined` on a quick rejoin, so peers don't
+  get leave→join churn (chat spam + join chime) on a blip. Raise-hand state is
+  re-asserted after SFU reconnect too.
+- [x] M9.3 **Raise-hand visible locally in all layouts** — alone + solo self-tiles now
+  receive `handRaised` (previously only grid/rail did), so raising your hand while
+  alone actually shows the indicator.
+- [x] M9.4 **Per-peer volume discoverability** — the remote-tile volume button is now
+  persistently visible (subtle when idle, full on hover/open), larger touch target,
+  and shows a muted icon at 0% — was hover-only and invisible on touch.
+- [x] M9.5 **ControlBar declutter** — Audio settings moves into the More menu on mobile
+  (with a group divider) so the bar isn't overcrowded on small screens.
+- [x] M9.6 `npm run build` passes; lint introduces zero new issues; `resolveAnnouncedIp`
+  runtime-tested off-EC2.
+- [ ] M9.7 Manual verify in prod (Anuraj): set/confirm `MEDIASOUP_ANNOUNCED_IP` =
+  EC2 public IP (or rely on auto-detect), redeploy, test with two devices.
+
+---
+
 ## Conventions (quick ref)
 - Files: `kebab-case`; Components: `PascalCase.jsx`; Models: `PascalCase` singular
 - Ports: server `5000` · client `5173` · MongoDB `27017` · mongo-express `8081`

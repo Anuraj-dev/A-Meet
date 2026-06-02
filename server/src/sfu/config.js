@@ -2,7 +2,9 @@
 // Worker tuning, and the WebRtcTransport options. Kept in one place so the
 // Router (sfu-rooms.js) and the transports (sfu-handlers.js) agree.
 
+import http from 'http';
 import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
 
 // The codecs every Router advertises (its rtpCapabilities). We keep it lean:
 //   - Opus for audio (the universal WebRTC audio codec).
@@ -51,3 +53,91 @@ export const webRtcTransportOptions = {
   preferUdp: true,
   initialAvailableOutgoingBitrate: 1_000_000,
 };
+
+// ── Announced-IP resolution (the #1 cause of "can't see each other" on a cloud
+//    host) ────────────────────────────────────────────────────────────────────
+// mediasoup binds 0.0.0.0 but ADVERTISES `announcedAddress` to browsers — that's
+// the address they actually send media to. On EC2 the NIC only carries the
+// PRIVATE IP (e.g. 172.31.x.x); the public IP is NAT-mapped and never appears on
+// the box. So if MEDIASOUP_ANNOUNCED_IP is unset / loopback / private, remote
+// browsers get a private candidate they can't route to → ICE never completes →
+// no producer is ever created → everyone is stuck on "You're the only one here".
+//
+// `resolveAnnouncedIp()` runs once at startup: if the env value is already a
+// usable public address we keep it; otherwise we try the EC2 metadata service
+// (IMDSv2) to auto-fill the public IPv4, and fail loudly if we still can't.
+
+function isUnroutableForPeers(ip) {
+  if (!ip) return true;
+  if (ip === '127.0.0.1' || ip === '0.0.0.0' || ip === 'localhost') return true;
+  if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
+  // 172.16.0.0 – 172.31.255.255 (the EC2 default VPC range)
+  const m = /^172\.(\d+)\./.exec(ip);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  return false;
+}
+
+// IMDSv2 requires a short-lived token (PUT) before reading metadata (GET).
+// We keep both calls on a tight timeout so a non-EC2 host (where 169.254.169.254
+// is unreachable) doesn't stall startup.
+function imdsRequest({ method, path, headers = {}, timeout = 1200 }) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: '169.254.169.254', method, path, headers, timeout },
+      (res) => {
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`IMDS ${res.statusCode}`)); }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { body += c; });
+        res.on('end', () => resolve(body.trim()));
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error('IMDS timeout')));
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function fetchEc2PublicIp() {
+  try {
+    const token = await imdsRequest({
+      method: 'PUT',
+      path: '/latest/api/token',
+      headers: { 'X-aws-ec2-metadata-token-ttl-seconds': '60' },
+    });
+    const ip = await imdsRequest({
+      method: 'GET',
+      path: '/latest/meta-data/public-ipv4',
+      headers: { 'X-aws-ec2-metadata-token': token },
+    });
+    return /^\d+\.\d+\.\d+\.\d+$/.test(ip) ? ip : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveAnnouncedIp() {
+  const configured = env.mediasoup.announcedIp;
+
+  if (!isUnroutableForPeers(configured)) {
+    logger.info({ announcedIp: configured, source: 'env' }, 'mediasoup announced IP resolved');
+    return configured;
+  }
+
+  const publicIp = await fetchEc2PublicIp();
+  if (publicIp) {
+    for (const li of webRtcTransportOptions.listenInfos) li.announcedAddress = publicIp;
+    logger.warn(
+      { announcedIp: publicIp, configured, source: 'ec2-imds' },
+      'MEDIASOUP_ANNOUNCED_IP was loopback/private — auto-detected EC2 public IPv4. Set it explicitly in .env to avoid this lookup.',
+    );
+    return publicIp;
+  }
+
+  const msg = 'MEDIASOUP_ANNOUNCED_IP is loopback/private and EC2 auto-detect failed. '
+    + 'Remote browsers will NOT be able to connect media (everyone sees "You\'re the only one here"). '
+    + 'Set MEDIASOUP_ANNOUNCED_IP to this host\'s PUBLIC IP and restart.';
+  if (env.isProd) logger.error({ configured }, msg);
+  else logger.warn({ configured }, `${msg} (ok for same-machine local dev)`);
+  return configured;
+}

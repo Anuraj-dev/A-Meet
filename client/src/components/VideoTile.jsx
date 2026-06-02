@@ -345,8 +345,11 @@ export default function VideoTile({
         />
       )}
 
-      {/* Hover-reveal 3-dot button — remote tiles only; anchors the per-peer
-          volume popover so the viewer can adjust this person's output level. */}
+      {/* Per-peer volume button — remote tiles only; anchors the volume popover
+          so the viewer can adjust this person's output level. Kept persistently
+          visible (subtle when idle, full on hover/open) rather than hover-only:
+          a hover-only control is invisible on touch devices and easy to miss —
+          which made the feature seem broken. */}
       {showVolumeControl && (
         <Box
           ref={volBtnRef}
@@ -354,26 +357,30 @@ export default function VideoTile({
             position: 'absolute',
             bottom: 'clamp(10px, 3.5cqmin, 16px)',
             right: 'clamp(10px, 3.5cqmin, 16px)',
-            opacity: hovered || Boolean(volAnchor) ? 1 : 0,
-            transition: 'opacity 0.15s',
+            opacity: hovered || Boolean(volAnchor) ? 1 : 0.65,
+            transition: 'opacity 0.15s, transform 0.15s',
+            transform: hovered || Boolean(volAnchor) ? 'scale(1.05)' : 'scale(1)',
             zIndex: 2,
           }}
         >
-          <Tooltip title="Participant options">
+          <Tooltip title={peerVolume === 0 ? `${name ?? 'Participant'} muted for you` : 'Adjust volume for you'}>
             <IconButton
               size="small"
               onClick={() => setVolAnchor(volAnchor ? null : volBtnRef.current)}
               sx={{
-                width: 'clamp(24px, 7.5cqmin, 30px)',
-                height: 'clamp(24px, 7.5cqmin, 30px)',
-                bgcolor: 'rgba(0,0,0,0.55)',
+                width: 'clamp(28px, 8.5cqmin, 34px)',
+                height: 'clamp(28px, 8.5cqmin, 34px)',
+                bgcolor: volAnchor ? 'primary.main' : 'rgba(0,0,0,0.6)',
                 backdropFilter: 'blur(4px)',
                 WebkitBackdropFilter: 'blur(4px)',
                 color: '#fff',
-                '&:hover': { bgcolor: 'rgba(0,0,0,0.75)' },
+                boxShadow: '0 1px 6px rgba(0,0,0,0.45)',
+                '&:hover': { bgcolor: volAnchor ? 'primary.main' : 'rgba(0,0,0,0.8)' },
               }}
             >
-              <MoreVertIcon sx={{ fontSize: 'clamp(13px, 4.4cqmin, 16px)' }} />
+              {peerVolume === 0
+                ? <VolumeOffIcon sx={{ fontSize: 'clamp(14px, 5cqmin, 18px)' }} />
+                : <MoreVertIcon sx={{ fontSize: 'clamp(14px, 5cqmin, 18px)' }} />}
             </IconButton>
           </Tooltip>
         </Box>

@@ -207,8 +207,18 @@ export default function RoomPage() {
   }, [hasScreen]);
 
   useEffect(() => {
+    // Presence membership must be (re)claimed on EVERY connect, not just once.
+    // After a dropped connection (network blip, server restart) Socket.IO
+    // reconnects with a fresh socket; the server dropped us from the room on the
+    // old socket's disconnect, so without re-emitting join-room we'd silently
+    // vanish from everyone's participant list (and never receive theirs) — the
+    // SFU media path rejoins on reconnect but plain presence did not. The server
+    // bridges brief blips with a leave grace window, so a quick reconnect stays
+    // seamless for peers. Emitting on `connect` covers the first join too.
+    const joinRoom = () => socket.emit('join-room', roomId);
+    socket.on('connect', joinRoom);
+    if (socket.connected) joinRoom();
     socket.connect();
-    socket.emit('join-room', roomId);
 
     socket.on('room-users', (list) => setUsers(list));
     socket.on('user-joined', (u) => {
@@ -268,6 +278,7 @@ export default function RoomPage() {
     socket.on('sfu-hand-raise-update', onPeerHandRaise);
 
     return () => {
+      socket.off('connect', joinRoom);
       socket.off('room-users');
       socket.off('user-joined');
       socket.off('user-left');
@@ -421,6 +432,7 @@ export default function RoomPage() {
             avatar={user?.avatar}
             videoOn={localVideoOn}
             audioOn={localAudioOn}
+            handRaised={handRaised}
             activeReaction={activeReactions[socket.id]}
             activeSpeaker={activeSpeaker === socket.id}
             mirror
@@ -705,6 +717,7 @@ export default function RoomPage() {
               avatar={user?.avatar}
               videoOn={localVideoOn}
               audioOn={localAudioOn}
+              handRaised={handRaised}
               activeReaction={activeReactions[socket.id]}
               activeSpeaker={activeSpeaker === socket.id}
               mirror

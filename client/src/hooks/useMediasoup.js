@@ -488,6 +488,11 @@ export function useMediasoup(roomId, devices = {}) {
       const existing = await request('sfu-get-producers');
       if (cancelled) return;
       for (const prod of existing) await consumeProducer(prod);
+
+      // Re-assert raise-hand after a reconnect: the server creates a fresh peer
+      // (handRaised=false) on rejoin, so without this the indicator others saw
+      // would silently clear. handRaisedRef persists across reconnects.
+      if (handRaisedRef.current) socket.emit('sfu-raise-hand', { raised: true });
     }
 
     async function init() {

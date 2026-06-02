@@ -153,8 +153,11 @@ export default function ControlBar({
         {showChat ? <ChatIcon /> : <ChatOutlineIcon />}
       </CircleButton>
 
-      {/* Audio settings (mic gain + speaker volume) */}
-      <Box ref={audioRef} sx={{ display: 'inline-flex' }}>
+      {/* Audio settings (mic gain + speaker volume) — desktop inline; hidden on
+          mobile, where it lives in the More menu instead so the bar stays
+          uncluttered. On mobile the popover anchors to the More button (this box
+          has no layout box while display:none) — see the More menu item below. */}
+      <Box ref={audioRef} sx={{ display: isMobile ? 'none' : 'inline-flex' }}>
         <CircleButton
           title="Audio settings"
           onClick={() => setAudioAnchor(audioAnchor ? null : audioRef.current)}
@@ -263,6 +266,13 @@ export default function ControlBar({
             <ListItemText>Send a reaction</ListItemText>
           </MenuItem>
         )}
+        {isMobile && (
+          <MenuItem onClick={() => { closeMore(); setAudioAnchor(moreRef.current); }}>
+            <ListItemIcon><TuneIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Audio settings</ListItemText>
+          </MenuItem>
+        )}
+        {isMobile && <Divider />}
         <MenuItem onClick={() => { closeMore(); onCopyLink(); }}>
           <ListItemIcon><ContentCopyIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Copy joining link</ListItemText>
