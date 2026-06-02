@@ -561,6 +561,14 @@ export default function LandingPage() {
           </Typography>
         </Box>
       </Box>
+
+      {/* Schedule meeting dialog — rendered here so state in LandingPage controls it */}
+      <ScheduleMeetingDialog
+        open={scheduleOpen}
+        onClose={handleScheduleClose}
+        existing={editingMeeting}
+        onSaved={handleMeetingSaved}
+      />
     </Box>
   );
 }

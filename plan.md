@@ -48,6 +48,8 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 - [x] M7.21 **Screenshot to clipboard** — "Take screenshot" in the More menu composites the current camera tiles (+ on-stage share) to a 1280×720 PNG and copies it to the clipboard (`ClipboardItem`), with a file-download fallback for browsers without image clipboard write. Canvas compositing extracted to shared `utils/video-composite.js` (reused by PiP + screenshot).
 - [x] M7.22 **Audio input onChange fix** — `setAudioDevice` in `useLobbyMedia` now calls `setPreviewStream` after device swap (matches `setVideoDevice`); fixes stale preview stream and broken speaking-level indicator after mic change.
 - [x] M7.23 **Scheduled-meeting context** — `RoomGuard` saves the room-metadata response and exposes it via `RoomMetaContext`; `LobbyPage` shows meeting title + scheduled time; `RoomPage` header shows the title when present.
+- [x] M7.24 **Audio gain rearchitected (GMeet/Discord model)** — GainNode is now always in the signal chain, built eagerly in `setupSfu` before `produce()`. AudioContext `sampleRate` matches the captured track to prevent PipeWire resampling. `setMicGain` is now fully synchronous (only updates `gain.value`) — no `replaceTrack`, no async, no race. Fixes broken gain above 100%, broken gain below 100%, and the unity (100%) transition bug caused by racing async `replaceTrack` calls.
+- [x] M7.25 **Schedule button on landing page** — `ScheduleMeetingDialog` was imported and state-managed but never rendered; added the render with the correct `open`, `onClose`, `existing`, `onSaved` props.
 - [ ] M7.13 Manual verify (Anuraj)
 - [ ] M7.14 /journal M7
 
