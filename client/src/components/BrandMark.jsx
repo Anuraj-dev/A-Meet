@@ -1,25 +1,27 @@
 import { Box, Typography } from '@mui/material';
+import VideocamRoundedIcon from '@mui/icons-material/VideocamRounded';
 
 const EASE = 'cubic-bezier(0.23,1,0.32,1)';
 
 export default function BrandMark({ size = 'md' }) {
   const s = size === 'lg'
-    ? { icon: 42, text: 22, radius: 13 }
-    : { icon: 34, text: 20, radius: 11 };
+    ? { box: 42, icon: 26, radius: 13, text: 22 }
+    : { box: 34, icon: 21, radius: 11, text: 20 };
 
   return (
     <Box sx={{
-      display: 'inline-flex', alignItems: 'center', gap: 1.25, userSelect: 'none',
-      cursor: 'default',
-      '&:hover .bm-square': {
+      display: 'inline-flex', alignItems: 'center', gap: 1.25,
+      userSelect: 'none', cursor: 'default',
+      '&:hover .bm-icon': {
         transform: 'rotate(50deg) scale(1.1)',
         boxShadow: '0 4px 20px rgba(255,107,74,0.60)',
       },
     }}>
       <Box
-        className="bm-square"
+        className="bm-icon"
+        aria-label="A-Meet"
         sx={{
-          width: s.icon, height: s.icon, borderRadius: `${s.radius}px`,
+          width: s.box, height: s.box, borderRadius: `${s.radius}px`,
           background: '#ff6b4a',
           display: 'grid', placeItems: 'center',
           transform: 'rotate(-6deg)',
@@ -28,10 +30,7 @@ export default function BrandMark({ size = 'md' }) {
           transition: `transform 0.45s ${EASE}, box-shadow 0.45s ${EASE}`,
         }}
       >
-        <Box sx={{
-          width: s.icon * 0.38, height: s.icon * 0.38,
-          borderRadius: '50%', bgcolor: '#fff',
-        }} />
+        <VideocamRoundedIcon sx={{ fontSize: s.icon, color: '#fff' }} />
       </Box>
       <Typography
         component="span"
