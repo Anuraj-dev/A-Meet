@@ -10,7 +10,7 @@ describe('<BrandMark />', () => {
     expect(screen.getByText('A-Meet')).toBeInTheDocument();
   });
 
-  it('still renders the wordmark at the large size', () => {
+  it('renders the wordmark at the large size', () => {
     render(<BrandMark size="lg" />);
     expect(screen.getByText('A-Meet')).toBeInTheDocument();
   });

@@ -1,0 +1,244 @@
+# A-Meet
+
+> A full-stack video conferencing platform built from scratch — not a tutorial, not a template.
+
+A-Meet is a production-grade Google Meet alternative engineered with a real SFU (Selective Forwarding Unit), end-to-end auth, scheduled meetings, and a handcrafted UI. Built as a deep-dive learning project to understand exactly how platforms like Google Meet, Whereby, and Daily.co work under the hood — and then build one.
+
+---
+
+## Why A-Meet instead of just... using Google Meet?
+
+Google Meet is a product. A-Meet is an understanding.
+
+Most "video calling" tutorials stop at a 2-person WebRTC peer connection. A-Meet goes further:
+
+| What Google Meet hides | What A-Meet exposes |
+|---|---|
+| The SFU routing every stream | mediasoup running in your own process — you can read every line |
+| Simulcast + layer switching | Three spatial layers × L3 temporal per camera, SFU sheds layers per-viewer's downlink |
+| Audio priority over video | `consumer.setPriority(255)` on every audio consumer — voice survives bandwidth drops |
+| Presence & reconnect handling | `join-room` re-emitted on every socket reconnect; grace-window debounce kills churn noise |
+| Per-person volume | Discord-style per-tile volume slider — independent of master volume |
+| Mic gain | GainNode always in the signal chain (Google Meet / Discord model) — fully synchronous, no `replaceTrack` races |
+| Auto Picture-in-Picture | Canvas composites all tiles; `requestPictureInPicture` on tab hide, auto-close on return |
+| Observability | Grafana + Loki + Promtail wired to structured server logs — watch SFU events in real time |
+
+You can self-host it, read every line, break it, and understand why it broke. That's the point.
+
+---
+
+## Feature Set
+
+### Core call
+- **Google OAuth → JWT** auth (httpOnly cookie, zero client-side token storage)
+- **mediasoup SFU** — scales beyond 2 peers; the same architecture used by production conferencing platforms
+- **Simulcast** (3 spatial layers × L1T3 temporal) — video degrades gracefully on bad connections; audio stays
+- **Screen sharing** with multi-share support, name attribution, and presentation layout
+- **Auto Picture-in-Picture** — tab switch opens a mini player; returning closes it
+
+### Audio / Video controls
+- Master output volume (all remote peers)
+- Per-participant output volume (Discord-style hover slider)
+- Mic input gain via GainNode (no `replaceTrack`, no races)
+- Camera + mic device switching mid-call
+- Speaking indicator — level-reactive pulsing ring via `AnalyserNode` (no audio feedback)
+
+### In-call UX
+- Emoji reactions — per-tile popup + Google Meet-style floating emoji stream
+- Raise hand with visual indicator across all layouts
+- Chat panel with unread badge
+- Screenshot to clipboard (canvas composite of all visible tiles, with download fallback)
+- "Stop presenting" header chip (matches Google Meet top-bar behaviour)
+- Auto-hide control bar during screen share; hover to reveal; pin/unpin toggle
+- RTC stats overlay for debugging
+
+### Meetings
+- Schedule future meetings with title, date/time, and shareable invite link
+- Upcoming meetings list on landing page
+- Lobby shows meeting title and scheduled time when joining a scheduled meeting
+- Post-login redirect — invited users land back on the meeting after signing in
+
+### Infrastructure
+- **Docker Compose** — MongoDB, Promtail, Loki, Grafana all in one command
+- **TURN server** support (coturn config included)
+- **EC2-aware announced IP** — auto-detects public IPv4 via IMDSv2 on deploy; actionable error off-EC2
+- **Structured logging** — Winston JSON logs → Promtail → Loki → Grafana dashboard
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React (Vite) + Material UI + Socket.io-client |
+| Backend | Node.js + Express + Socket.io |
+| Database | MongoDB + Mongoose |
+| Media | mediasoup (SFU) |
+| Auth | Passport `google-oauth20` → JWT (httpOnly cookie) |
+| Validation | Joi (API) + Mongoose (schema) |
+| Observability | Grafana + Loki + Promtail |
+| Infra | Docker Compose + coturn |
+
+---
+
+## Getting Started
+
+### Prerequisites
+- Node.js 20+
+- Docker + Docker Compose
+- A Google OAuth app (Client ID + Secret)
+
+### 1. Clone and install
+```bash
+git clone https://github.com/Anuraj-dev/A-Meet.git
+cd A-Meet
+npm install
+npm --prefix client install
+npm --prefix server install
+```
+
+### 2. Configure environment
+```bash
+cp server/.env.example server/.env
+```
+
+Open `server/.env` and fill in:
+
+```env
+# MongoDB
+MONGO_URI=mongodb://root:root@localhost:27017/ameet?authSource=admin
+MONGO_ROOT_USERNAME=root
+MONGO_ROOT_PASSWORD=root
+
+# Auth
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+JWT_SECRET=a_long_random_string
+CLIENT_URL=http://localhost:5173
+SERVER_URL=http://localhost:5000
+
+# mediasoup
+MEDIASOUP_ANNOUNCED_IP=   # leave blank on localhost; set to EC2 public IP on deploy
+
+# Session
+SESSION_SECRET=another_long_random_string
+```
+
+To get a Google OAuth client:
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a project → APIs & Services → Credentials → Create OAuth 2.0 Client ID
+3. Authorized redirect URI: `http://localhost:5000/auth/google/callback`
+
+### 3. Start infrastructure
+```bash
+npm run docker:up
+```
+
+This starts MongoDB (27017), mongo-express (8081), Loki (3100), Promtail, and Grafana (3000).
+
+### 4. Run the app
+```bash
+npm run dev
+```
+
+- **Client:** http://localhost:5173
+- **Server:** http://localhost:5000
+- **Grafana (logs):** http://localhost:3000
+- **mongo-express:** http://localhost:8081
+
+### 5. Create a meeting
+1. Sign in with Google
+2. Click **New meeting** on the landing page
+3. Share the link with anyone — they sign in and land directly in the meeting
+
+---
+
+## Project Structure
+
+```
+A-Meet/
+├── client/                  # React (Vite) frontend
+│   └── src/
+│       ├── pages/           # LandingPage, LobbyPage, RoomPage
+│       ├── components/      # VideoTile, ControlBar, ChatPanel, …
+│       ├── hooks/           # useMediasoup, usePictureInPicture, useAudioLevel, …
+│       ├── context/         # AuthContext, RoomMetaContext
+│       └── utils/           # video-composite, logger
+├── server/                  # Express + Socket.io + mediasoup
+│   └── src/
+│       ├── routes/          # auth, meetings, rooms
+│       ├── socket/          # room events, SFU signalling
+│       ├── models/          # User, Meeting
+│       └── middleware/      # JWT cookie auth
+├── docker-compose.yml       # MongoDB + observability stack
+├── docker-compose.coturn.yml
+└── plan.md                  # milestone roadmap (source of truth)
+```
+
+---
+
+## Architecture — How the SFU works
+
+```
+Browser A                mediasoup Router              Browser B
+    │                          │                           │
+    │── produce (camera) ──▶   │                           │
+    │                          │◀── consume (B's recv) ──  │
+    │                          │── stream A's layers ──▶   │
+    │                          │   (layer switch per B's   │
+    │                          │    available bandwidth)   │
+```
+
+Every participant **produces** one video track (simulcast: 3 quality layers) and one audio track. Every other participant **consumes** those tracks via the router. The SFU forwards only the right layer — no mixing, no re-encoding, low latency. Audio consumers get `priority(255)` so the SFU always reserves voice bitrate before dropping video layers.
+
+---
+
+## Observability
+
+Logs flow: **Winston (server)** → JSON files → **Promtail** → **Loki** → **Grafana**.
+
+Open Grafana at `http://localhost:3000`, go to Explore → Loki, and query:
+```
+{job="a-meet-server"}
+```
+
+You can watch SFU `produce` / `consume` / `close-producer` events in real time while a call is live.
+
+---
+
+## Deployment (EC2 quick-start)
+
+```bash
+# On the server
+git clone ... && cd A-Meet
+# Set MEDIASOUP_ANNOUNCED_IP to your EC2 public IP in server/.env
+# Open UDP ports 10000–59999 in your security group (mediasoup RTP range)
+npm run docker:up
+NODE_ENV=production node server/src/index.js
+```
+
+For HTTPS (required for camera/mic on non-localhost), put Nginx in front with a Let's Encrypt cert and proxy to `localhost:5000`.
+
+---
+
+
+## Milestones
+
+| # | Focus | Status |
+|---|-------|--------|
+| M0 | Repo scaffold, Docker, DB | ✅ |
+| M1 | Google OAuth → JWT cookie | ✅ |
+| M2 | Socket rooms + WebRTC mesh | ✅ |
+| M3 | Auth hardening + meeting CRUD | ✅ |
+| M4 | mediasoup SFU migration | ✅ |
+| M5 | Screen share + reactions + raise hand + chat | ✅ |
+| M6 | Landing page + lobby UI overhaul | ✅ |
+| M7 | In-call UX (PiP, simulcast, gain, screenshot…) | ✅ |
+| M8 | Per-participant volume control | ✅ |
+| M9 | Connection stability + announced IP + UX fixes | ✅ |
+
+---
+
+## License
+
+MIT
