@@ -1,8 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { Avatar, Box, Chip, IconButton, Popover, Slider, Stack, Tooltip, Typography } from '@mui/material';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Avatar, Box, Chip, Divider, IconButton, ListItemIcon, ListItemText,
+  MenuItem, Popover, Slider, Stack, Tooltip, Typography,
+} from '@mui/material';
+import {
+  Fullscreen as FullscreenIcon,
   MicOff as MicOffIcon,
   MoreVert as MoreVertIcon,
+  PushPin as PinIcon,
+  PushPinOutlined as PinOutlineIcon,
+  Stars as SpotlightIcon,
   VolumeOff as VolumeOffIcon,
   VolumeUp as VolumeUpIcon,
 } from '@mui/icons-material';
@@ -32,8 +39,14 @@ export default function VideoTile({
   showVolumeControl = false,
   peerVolume = 1,
   onPeerVolumeChange,
+  pinned = false,
+  onPin,
+  spotlighted = false,
+  canSpotlight = false,
+  onSpotlight,
 }) {
   const videoRef = useRef(null);
+  const rootRef = useRef(null);
   const volBtnRef = useRef(null);
   const offColor = getPeerColor(name);
   const initial = name?.trim()?.[0]?.toUpperCase() ?? '?';
@@ -46,12 +59,31 @@ export default function VideoTile({
     if (el && stream) el.srcObject = stream;
   }, [stream]);
 
+  // Root needs two refs: the analyser's `levelRef` (cascades `--lvl`) and our own
+  // `rootRef` (the fullscreen target). Merge them in one stable callback so the
+  // metering isn't torn down each render. `levelRef` from the hook is stable.
+  const setRootRef = useCallback((node) => {
+    rootRef.current = node;
+    if (levelRef) levelRef.current = node;
+  }, [levelRef]);
+
+  const enterFullscreen = () => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else el.requestFullscreen?.();
+  };
+
+  // The bottom-right control button shows whenever any action is available.
+  const hasMenu = showVolumeControl || Boolean(onPin) || (canSpotlight && Boolean(onSpotlight));
+
   return (
     <>
     <Box
       // `levelRef` lives on the root so the analyser's `--lvl` (0..1) cascades
       // to every child — the avatar ring and the tile-edge mic meter both read it.
-      ref={levelRef}
+      // `rootRef` (merged in) is the fullscreen target.
+      ref={setRootRef}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       sx={{
@@ -345,12 +377,31 @@ export default function VideoTile({
         />
       )}
 
-      {/* Per-peer volume button — remote tiles only; anchors the volume popover
-          so the viewer can adjust this person's output level. Kept persistently
-          visible (subtle when idle, full on hover/open) rather than hover-only:
-          a hover-only control is invisible on touch devices and easy to miss —
-          which made the feature seem broken. */}
-      {showVolumeControl && (
+      {/* Pinned indicator (top-right area, left of the mute badge) */}
+      {pinned && (
+        <Box
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            top: 'clamp(10px, 3.5cqmin, 16px)',
+            right: !audioOn ? 'clamp(46px, 13cqmin, 56px)' : 'clamp(10px, 3.5cqmin, 16px)',
+            width: 'clamp(24px, 7.5cqmin, 32px)',
+            height: 'clamp(24px, 7.5cqmin, 32px)',
+            borderRadius: '50%',
+            bgcolor: 'rgba(0,0,0,0.55)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 1px 5px rgba(0,0,0,0.45)',
+          }}
+        >
+          <PinIcon sx={{ fontSize: 'clamp(12px, 4cqmin, 16px)', color: 'primary.main' }} />
+        </Box>
+      )}
+
+      {/* Tile options button — pin / spotlight / fullscreen (+ per-peer volume on
+          remote tiles). Persistently visible (subtle when idle) rather than
+          hover-only, so it's reachable on touch. */}
+      {hasMenu && (
         <Box
           ref={volBtnRef}
           sx={{
@@ -363,7 +414,7 @@ export default function VideoTile({
             zIndex: 2,
           }}
         >
-          <Tooltip title={peerVolume === 0 ? `${name ?? 'Participant'} muted for you` : 'Adjust volume for you'}>
+          <Tooltip title={peerVolume === 0 && showVolumeControl ? `${name ?? 'Participant'} muted for you` : 'Tile options'}>
             <IconButton
               size="small"
               onClick={() => setVolAnchor(volAnchor ? null : volBtnRef.current)}
@@ -378,7 +429,7 @@ export default function VideoTile({
                 '&:hover': { bgcolor: volAnchor ? 'primary.main' : 'rgba(0,0,0,0.8)' },
               }}
             >
-              {peerVolume === 0
+              {showVolumeControl && peerVolume === 0
                 ? <VolumeOffIcon sx={{ fontSize: 'clamp(14px, 5cqmin, 18px)' }} />
                 : <MoreVertIcon sx={{ fontSize: 'clamp(14px, 5cqmin, 18px)' }} />}
             </IconButton>
@@ -387,9 +438,9 @@ export default function VideoTile({
       )}
     </Box>
 
-    {/* Volume popover — MUI Portal renders outside overflow:hidden; safe to
-        nest here. One per tile, only mounted for remote participants. */}
-    {showVolumeControl && (
+    {/* Tile options popover — MUI Portal renders outside overflow:hidden, safe
+        to nest. Pin/spotlight/fullscreen rows, then the per-peer volume slider. */}
+    {hasMenu && (
       <Popover
         open={Boolean(volAnchor)}
         anchorEl={volAnchor}
@@ -399,7 +450,7 @@ export default function VideoTile({
         slotProps={{
           paper: {
             sx: {
-              mb: 1, p: 2, borderRadius: 2.5, minWidth: 220,
+              mb: 1, borderRadius: 2.5, minWidth: 220, py: 0.5,
               bgcolor: 'control.surface',
               backdropFilter: 'blur(12px)',
               WebkitBackdropFilter: 'blur(12px)',
@@ -408,27 +459,50 @@ export default function VideoTile({
           },
         }}
       >
-        <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary', display: 'block', mb: 1.5 }}>
+        <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.primary', display: 'block', px: 2, pt: 1, pb: 0.5 }}>
           {name}
         </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
-          Output volume
-        </Typography>
-        <Stack direction="row" alignItems="center" spacing={1.5}>
-          {peerVolume === 0
-            ? <VolumeOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
-            : <VolumeUpIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />}
-          <Slider
-            size="small"
-            min={0} max={1} step={0.05}
-            value={peerVolume}
-            onChange={(_, v) => onPeerVolumeChange?.(v)}
-            sx={{ color: 'primary.main' }}
-          />
-          <Typography variant="caption" sx={{ minWidth: 34, textAlign: 'right', color: 'text.secondary' }}>
-            {Math.round(peerVolume * 100)}%
-          </Typography>
-        </Stack>
+
+        {onPin && (
+          <MenuItem onClick={() => { onPin(); setVolAnchor(null); }}>
+            <ListItemIcon>{pinned ? <PinIcon fontSize="small" /> : <PinOutlineIcon fontSize="small" />}</ListItemIcon>
+            <ListItemText primaryTypographyProps={{ variant: 'body2' }}>{pinned ? 'Unpin for me' : 'Pin for me'}</ListItemText>
+          </MenuItem>
+        )}
+        {canSpotlight && onSpotlight && (
+          <MenuItem onClick={() => { onSpotlight(); setVolAnchor(null); }}>
+            <ListItemIcon><SpotlightIcon fontSize="small" sx={{ color: spotlighted ? 'primary.main' : undefined }} /></ListItemIcon>
+            <ListItemText primaryTypographyProps={{ variant: 'body2' }}>{spotlighted ? 'Remove spotlight' : 'Spotlight for everyone'}</ListItemText>
+          </MenuItem>
+        )}
+        <MenuItem onClick={() => { enterFullscreen(); setVolAnchor(null); }}>
+          <ListItemIcon><FullscreenIcon fontSize="small" /></ListItemIcon>
+          <ListItemText primaryTypographyProps={{ variant: 'body2' }}>Fullscreen</ListItemText>
+        </MenuItem>
+
+        {showVolumeControl && (
+          <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
+            <Divider sx={{ mb: 1.5 }} />
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
+              Output volume
+            </Typography>
+            <Stack direction="row" alignItems="center" spacing={1.5}>
+              {peerVolume === 0
+                ? <VolumeOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
+                : <VolumeUpIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />}
+              <Slider
+                size="small"
+                min={0} max={1} step={0.05}
+                value={peerVolume}
+                onChange={(_, v) => onPeerVolumeChange?.(v)}
+                sx={{ color: 'primary.main' }}
+              />
+              <Typography variant="caption" sx={{ minWidth: 34, textAlign: 'right', color: 'text.secondary' }}>
+                {Math.round(peerVolume * 100)}%
+              </Typography>
+            </Stack>
+          </Box>
+        )}
       </Popover>
     )}
     </>
