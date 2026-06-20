@@ -8,6 +8,8 @@ import {
   CallEnd as CallEndIcon,
   Chat as ChatIcon,
   ChatOutlined as ChatOutlineIcon,
+  ClosedCaption as CaptionIcon,
+  ClosedCaptionOff as CaptionOffIcon,
   ContentCopy as ContentCopyIcon,
   EmojiEmotions as EmojiEmotionsIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
@@ -67,6 +69,7 @@ export default function ControlBar({
   handRaised, onToggleHand,
   onReact,
   showChat, unreadCount, onToggleChat,
+  transcriptActive, transcriptAvailable, showTranscript, transcriptDisabled, onToggleTranscript,
   soundEnabled, onToggleSound,
   pipSupported, pipActive, onTogglePip,
   onCopyLink,
@@ -109,6 +112,17 @@ export default function ControlBar({
       >
         {localAudioOn ? <MicIcon /> : <MicOffIcon />}
       </CircleButton>
+
+      {!isMobile && (
+        <CircleButton
+          title={transcriptDisabled ? 'The host starts the shared transcript' : transcriptAvailable ? (showTranscript ? 'Hide transcript' : 'Show transcript') : 'Start shared transcript'}
+          onClick={onToggleTranscript}
+          disabled={transcriptDisabled}
+          variant={transcriptActive ? 'active' : 'idle'}
+        >
+          {transcriptActive ? <CaptionIcon /> : <CaptionOffIcon />}
+        </CircleButton>
+      )}
 
       <CircleButton
         title={localVideoOn ? 'Turn off camera' : 'Turn on camera'}
@@ -270,6 +284,12 @@ export default function ControlBar({
           <MenuItem onClick={() => { closeMore(); setAudioAnchor(moreRef.current); }}>
             <ListItemIcon><TuneIcon fontSize="small" /></ListItemIcon>
             <ListItemText>Audio settings</ListItemText>
+          </MenuItem>
+        )}
+        {isMobile && (
+          <MenuItem disabled={transcriptDisabled} onClick={() => { closeMore(); onToggleTranscript(); }}>
+            <ListItemIcon>{transcriptActive ? <CaptionIcon fontSize="small" /> : <CaptionOffIcon fontSize="small" />}</ListItemIcon>
+            <ListItemText>{transcriptAvailable ? 'Meeting transcript' : 'Start shared transcript'}</ListItemText>
           </MenuItem>
         )}
         {isMobile && <Divider />}
