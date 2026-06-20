@@ -128,6 +128,9 @@ export default function LobbyPage() {
     stop();
     navigate(`/room/${roomId}`, {
       state: {
+        // Marks this as a deliberate Join from the preview so RoomGuard lets it
+        // through to /room instead of bouncing it back to the lobby.
+        fromLobby: true,
         videoDeviceId: selectedVideoId,
         audioDeviceId: selectedAudioId,
         startVideoOn: videoOn,

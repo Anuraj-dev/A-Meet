@@ -160,11 +160,18 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
   each field; ember focus ring, graphite menu panel, ember hover, checkmark on the active device.
 - [ ] M10.12 `npm run build` passes; lint introduces zero new issues; Anuraj manual verify.
 
-### Lobby — backend (LATER, separate chat — do NOT implement now)
-- [ ] M10.13 **Owner instant-join (Google-Meet behaviour)** — the user who *creates* a meeting skips
-  the lobby/preview and joins instantly; only *invitees arriving via the meeting link* see the
-  lobby/preview screen. This is gated on backend ownership/role data (who created the room) and
-  will be implemented in a follow-up. Frontend will branch on that signal once it exists.
+### Lobby — instant-join gate
+- [x] M10.13 **Instant-join (Google-Meet behaviour)** — the *act of creating* an instant meeting
+  drops the creator straight into the room; everyone else opening the meeting link sees the
+  lobby/preview first, then joins. Implemented as a **one-shot navigation marker, not identity**:
+  "New meeting" navigates to `/room/:id` with `state:{ fromCreate:true }`, the lobby's Join
+  navigates with `state:{ fromLobby:true, …devicePrefs }`, and `RoomGuard` bounces any `/room/:id`
+  arrival lacking one of those markers to `/lobby/:id` (cold link open, refresh, **or the same
+  account opening the link in another browser** — the bug an identity/`isHost` approach caused).
+  `RoomPage` already defaults cam/mic on with default devices when there's no lobby nav state, so
+  the drop-in works cleanly. Decision logic extracted to `utils/room-entry.js`
+  (`shouldRedirectToLobby`); covered by `room-entry.test.js` (7) + `RoomGuard.test.jsx` (4, render
+  + router + mocked API). Backend needs no change — the original `isHost` field was reverted.
 
 ---
 

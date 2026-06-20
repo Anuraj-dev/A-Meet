@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 import api from '../api/axios';
 import CheckMeetingCode from '../pages/CheckMeetingCode';
+import { shouldRedirectToLobby } from '../utils/room-entry';
 
 // Room metadata (title, scheduledFor, …) fetched by RoomGuard and made available
 // to child pages so lobby and room can show scheduled-meeting info without a
@@ -56,7 +57,21 @@ export default function RoomGuard({ children }) {
 
   const status = !needsCanonical && result?.code === canonical ? result.status : 'loading';
 
-  if (status === 'loading') {
+  // Lobby/preview gate (Google-Meet behaviour). Instant-join is a one-shot tied
+  // to ENTERING a meeting, not to identity: only the creator's instant meeting
+  // (`fromCreate`) and a deliberate Join from the preview (`fromLobby`) may land
+  // straight on /room. Any other arrival at /room/:id — a cold link open, a
+  // refresh, the same account opening the link in another browser — is bounced
+  // to /lobby so it sees the preview first. Replace so Back doesn't re-trigger.
+  const needsLobbyRedirect =
+    status === 'valid' && shouldRedirectToLobby(location.pathname, location.state);
+
+  useEffect(() => {
+    if (!needsLobbyRedirect) return;
+    navigate(`/lobby/${encodeURIComponent(canonical)}`, { replace: true });
+  }, [needsLobbyRedirect, canonical, navigate]);
+
+  if (status === 'loading' || needsLobbyRedirect) {
     return (
       <Box
         sx={{
