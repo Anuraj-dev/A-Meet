@@ -18,6 +18,9 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 | M5 | Screen share + reactions + raise hand + chat toggle | ✅ Done |
 | M6 | Aperture UI overhaul (landing + lobby) | ✅ Done — PR #5 |
 | M7 | Meeting-room fixes (in-call UX) | ✅ Done |
+| M8 | Per-participant output volume (Discord-style) | ✅ Done |
+| M9 | Connection stability + in-call UX fixes | 🚧 Code done; prod verify pending |
+| M10 | Landing 3D + Lobby redesign (ember/smoke system) | 🚧 In progress |
 
 ---
 
@@ -108,6 +111,60 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
   runtime-tested off-EC2.
 - [ ] M9.7 Manual verify in prod (Anuraj): set/confirm `MEDIASOUP_ANNOUNCED_IP` =
   EC2 public IP (or rely on auto-detect), redeploy, test with two devices.
+
+---
+
+## M10 — Landing 3D + Lobby redesign (ember/smoke design system)
+
+> Branch: `redesign/landing-3d-meeting`. Unifies the product on ONE design language.
+> The landing was reworked around a cinematic 3D meeting visual + a slow `EtherealShadow`
+> smoke backdrop ("smoke, not glow"). The lobby still wore the OLD skin (cold purple bg,
+> bright coral + neon teal, Three.js orb, glow blobs, shimmer + pulse) and is being brought
+> onto the same system. Design decisions below were settled with Anuraj via a grilling pass.
+
+### Design tokens (lobby adopts the landing's `DK`)
+- bg `#0c0b12 → #140f0c` (warm graphite) · ink `#f4efe9` · dim `#a89f97` · faint `#6f675f`
+- accent: coral `#ff6b4a` → **ember** `#e8623d` (+ `emberDark #d4502c` for hover/active)
+- support: teal `#1fa98f` → **sage** `#7d9183`
+- lines `0.09 / 0.16` · fonts unchanged (Bricolage Grotesque display, Plus Jakarta Sans body)
+
+### Landing (done in this branch)
+- [x] M10.1 Landing redesigned: 3D meeting hero + `EtherealShadow` smoke backdrop; `framer-motion`
+  added; committed + pushed.
+
+### Lobby redesign — frontend (this pass)
+- [x] M10.2 **Avatar bug fix** — Google `lh3.googleusercontent.com` photo 429/403s when a
+  `Referer` header is sent → MUI falls back to the "A" initial. Add `<meta name="referrer"
+  content="no-referrer">` to `client/index.html` (covers both the header `<Avatar>` and
+  `VideoTile`'s CSS `background-image`), plus `imgProps={{ referrerPolicy: 'no-referrer' }}`
+  on the header Avatar as belt-and-suspenders.
+- [x] M10.3 **Palette swap** — replace lobby `DK` with the landing's ember/sage/graphite tokens.
+- [x] M10.4 **Remove the old skin** — delete `LobbyOrb` (Three.js) + `three` import, the two glow
+  blobs, and the `shimmer` / `coralGlowPulse` / `controlsFloat` / `blobDrift1/2` keyframes.
+- [x] M10.5 **Subdued backdrop** — shared `EtherealShadow` at ~55% opacity, edge-weighted, with a
+  center scrim so the preview card + dropdowns stay crisp (preview keeps focus).
+- [x] M10.6 **Motion** — replace custom `panelSlide`/CSS entrances with the landing's `framer-motion`
+  `container`/`item` staggered rise (both pages animate identically). Keep the preview mouse-tilt.
+- [x] M10.7 **Header identity** — avatar-only with a thin ember ring; name in a `Tooltip` on hover
+  (removes the weak inline name + the duplication with the preview pill). Keep `BrandMark`.
+- [x] M10.8 **Eyebrow** — replace the "ALMOST THERE" pill with the landing-style eyebrow (ember rule
+  + sage uppercase). Copy follows Google Meet wording (e.g. "Your meeting's ready" / "Ready to
+  join?"), no fake presence text (lobby has no participant data yet).
+- [x] M10.9 **Join panel** — `Ready to join?` heading kept; room code + lock recolored sage/ember
+  (drop teal glow); **Join now** = landing's flat ember `primaryBtn` (no pulse/shimmer/lift,
+  hover → emberDark); Leave button retuned to the ember line.
+- [x] M10.10 **Preview card** — top-left pill becomes a clean `● {name}  You` with an ember dot
+  (drop "looking good"); card border/shadow retuned graphite + faint ember; control buttons
+  (`PreviewToggle` + settings) recolored to the ember on/off states. No brand watermark.
+- [x] M10.11 **Device dropdowns** — keep both under the preview; add a leading Videocam/Mic icon in
+  each field; ember focus ring, graphite menu panel, ember hover, checkmark on the active device.
+- [ ] M10.12 `npm run build` passes; lint introduces zero new issues; Anuraj manual verify.
+
+### Lobby — backend (LATER, separate chat — do NOT implement now)
+- [ ] M10.13 **Owner instant-join (Google-Meet behaviour)** — the user who *creates* a meeting skips
+  the lobby/preview and joins instantly; only *invitees arriving via the meeting link* see the
+  lobby/preview screen. This is gated on backend ownership/role data (who created the room) and
+  will be implemented in a follow-up. Frontend will branch on that signal once it exists.
 
 ---
 
