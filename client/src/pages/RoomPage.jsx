@@ -85,6 +85,10 @@ export default function RoomPage() {
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
   const peerStatesRef = useRef({});
+  // Plays the join chime once for THIS user on their own entry. Guarded so the
+  // re-`room-users` we receive on every reconnect (network blip) doesn't replay
+  // it — Meet only chimes when you actually arrive, not on each reconnect.
+  const selfJoinChimeRef = useRef(false);
 
   // Determine whether the current user created (and therefore hosts) this room
   // so we can offer "End for everyone" vs "Leave call" on the leave button.
@@ -220,7 +224,15 @@ export default function RoomPage() {
     if (socket.connected) joinRoom();
     socket.connect();
 
-    socket.on('room-users', (list) => setUsers(list));
+    socket.on('room-users', (list) => {
+      setUsers(list);
+      // Chime for our own arrival (Meet plays the join sound when YOU enter too).
+      // Only the joiner receives room-users, and we fire just once per visit.
+      if (!selfJoinChimeRef.current) {
+        selfJoinChimeRef.current = true;
+        playSound('join');
+      }
+    });
     socket.on('user-joined', (u) => {
       setUsers((prev) => (prev.some((x) => x.id === u.id) ? prev : [...prev, u]));
       setMessages((prev) => [...prev, { type: 'event', text: `${u.name} joined`, ts: Date.now() }]);
