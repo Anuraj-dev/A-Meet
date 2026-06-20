@@ -120,10 +120,13 @@ const N = {
 
 // Each recipe schedules a short sequence of voices.
 const RECIPES = {
-  // Warm two-note rise — someone joined.
+  // Warm ascending chime — someone joined (Meet-like). A clean rising fifth
+  // (C5 → G5) with a faint octave shimmer (C6, triangle) layered on the upper
+  // note so it reads as a soft bell rather than a plain beep.
   join: (c) => {
-    voice(c, { freq: N.C5, type: 'sine', duration: 0.16, peak: 0.13 });
-    voice(c, { freq: N.G5, type: 'sine', start: 0.13, duration: 0.26, peak: 0.13 });
+    voice(c, { freq: N.C5, type: 'sine', duration: 0.15, peak: 0.12, attack: 0.006 });
+    voice(c, { freq: N.G5, type: 'sine', start: 0.12, duration: 0.3, peak: 0.13, attack: 0.006 });
+    voice(c, { freq: N.C6, type: 'triangle', start: 0.12, duration: 0.22, peak: 0.03, attack: 0.006 });
   },
   // Two-note fall — someone left.
   leave: (c) => {

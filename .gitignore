@@ -36,3 +36,5 @@ Thumbs.db
 coverage/
 .nyc_output/
 project_files/
+# Local agent state
+.claude/
