@@ -11,23 +11,37 @@ import {
   ClosedCaption as CaptionIcon,
   ClosedCaptionOff as CaptionOffIcon,
   ContentCopy as ContentCopyIcon,
+  AutoAwesomeMosaic as AutoLayoutIcon,
+  Check as CheckIcon,
   EmojiEmotions as EmojiEmotionsIcon,
+  GridView as TiledIcon,
   KeyboardArrowDown as KeyboardArrowDownIcon,
   KeyboardArrowUp as KeyboardArrowUpIcon,
   Mic as MicIcon,
   MicOff as MicOffIcon,
   MoreVert as MoreVertIcon,
   PanTool as PanToolIcon,
+  PeopleAlt as PeopleAltIcon,
   PhotoCamera as PhotoCameraIcon,
   PictureInPictureAlt as PipIcon,
   PresentToAll as PresentIcon,
   CancelPresentation as StopPresentIcon,
+  Crop75 as SpotlightLayoutIcon,
   Tune as TuneIcon,
   Videocam as VideocamIcon,
   VideocamOff as VideocamOffIcon,
+  ViewSidebar as SidebarLayoutIcon,
+  ViewModule as LayoutIcon,
   VolumeUp as VolumeUpIcon,
   VolumeOff as VolumeOffIcon,
 } from '@mui/icons-material';
+
+const LAYOUTS = [
+  { key: 'auto', label: 'Auto', Icon: AutoLayoutIcon },
+  { key: 'tiled', label: 'Tiled', Icon: TiledIcon },
+  { key: 'spotlight', label: 'Spotlight', Icon: SpotlightLayoutIcon },
+  { key: 'sidebar', label: 'Sidebar', Icon: SidebarLayoutIcon },
+];
 
 // One round control button. `variant` drives the Meet-style color states.
 function CircleButton({ title, onClick, disabled, variant = 'idle', badge = 0, children }) {
@@ -70,6 +84,8 @@ export default function ControlBar({
   onReact,
   showChat, unreadCount, onToggleChat,
   transcriptActive, transcriptAvailable, showTranscript, transcriptDisabled, onToggleTranscript,
+  showPeople, peopleCount = 0, onTogglePeople,
+  layoutMode = 'auto', onLayoutChange,
   soundEnabled, onToggleSound,
   pipSupported, pipActive, onTogglePip,
   onCopyLink,
@@ -82,8 +98,10 @@ export default function ControlBar({
   const isMobile = useMediaQuery((t) => t.breakpoints.down('sm'));
   const [moreAnchor, setMoreAnchor] = useState(null);
   const [audioAnchor, setAudioAnchor] = useState(null);
+  const [layoutAnchor, setLayoutAnchor] = useState(null);
   const moreRef = useRef(null);
   const audioRef = useRef(null);
+  const layoutRef = useRef(null);
   const closeMore = () => setMoreAnchor(null);
 
   return (
@@ -166,6 +184,31 @@ export default function ControlBar({
       >
         {showChat ? <ChatIcon /> : <ChatOutlineIcon />}
       </CircleButton>
+
+      {/* People panel toggle */}
+      {onTogglePeople && (
+        <CircleButton
+          title={showPeople ? 'Hide people' : 'Show people'}
+          onClick={onTogglePeople}
+          variant={showPeople ? 'active' : 'idle'}
+          badge={peopleCount > 1 ? peopleCount : 0}
+        >
+          <PeopleAltIcon />
+        </CircleButton>
+      )}
+
+      {/* Layout chooser — desktop only (irrelevant on a phone-sized stage) */}
+      {!isMobile && onLayoutChange && (
+        <Box ref={layoutRef} sx={{ display: 'inline-flex' }}>
+          <CircleButton
+            title="Change layout"
+            onClick={() => setLayoutAnchor(layoutAnchor ? null : layoutRef.current)}
+            variant={layoutAnchor ? 'active' : 'idle'}
+          >
+            <LayoutIcon />
+          </CircleButton>
+        </Box>
+      )}
 
       {/* Audio settings (mic gain + speaker volume) — desktop inline; hidden on
           mobile, where it lives in the More menu instead so the bar stays
@@ -265,6 +308,28 @@ export default function ControlBar({
           </Box>
         </Stack>
       </MuiPopover>
+
+      {/* Layout chooser menu */}
+      <Menu
+        anchorEl={layoutAnchor}
+        open={Boolean(layoutAnchor)}
+        onClose={() => setLayoutAnchor(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        slotProps={{ paper: { sx: { mb: 1, minWidth: 200 } } }}
+      >
+        {LAYOUTS.map(({ key, label, Icon }) => (
+          <MenuItem
+            key={key}
+            selected={layoutMode === key}
+            onClick={() => { onLayoutChange?.(key); setLayoutAnchor(null); }}
+          >
+            <ListItemIcon><Icon fontSize="small" /></ListItemIcon>
+            <ListItemText>{label}</ListItemText>
+            {layoutMode === key && <CheckIcon fontSize="small" sx={{ ml: 2, color: 'primary.main' }} />}
+          </MenuItem>
+        ))}
+      </Menu>
 
       <Menu
         anchorEl={moreAnchor}

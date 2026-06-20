@@ -307,6 +307,105 @@ export function registerSfuHandlers(io, socket) {
     } catch { /* ignore */ }
   });
 
+  // --- Host moderation (M12) -------------------------------------------------
+  // All actions are gated on the caller being the room's DB host (same check as
+  // `sfu-end-meeting`). Mute is ENFORCED: the server pauses the target's audio
+  // producer, so it works even if the target ignores it. Unmute is never forced
+  // — muting keeps the mic track live, so server-resuming it would re-open a
+  // live mic without consent; instead the host can only *request* an unmute,
+  // which the target accepts with one tap (Google-Meet behaviour).
+
+  // Resolve+verify the caller as host once per action (small DB read).
+  async function callerIsHost() {
+    const roomId = socketRoom.get(socket.id);
+    if (!roomId) return null;
+    try {
+      const room = await Room.findOne({ roomId });
+      if (!room || room.host.toString() !== socket.user?.id) return null;
+      return roomId;
+    } catch { return null; }
+  }
+
+  // The peer's primary (camera/mic) audio producer — screen-share audio excluded.
+  function micProducer(roomId, targetSocketId) {
+    const peer = getPeer(roomId, targetSocketId);
+    if (!peer) return null;
+    for (const producer of peer.producers.values()) {
+      if (producer.kind === 'audio' && producer.appData?.source !== 'screen') return producer;
+    }
+    return null;
+  }
+
+  async function pauseMic(roomId, targetSocketId) {
+    const producer = micProducer(roomId, targetSocketId);
+    if (!producer || producer.paused) return false;
+    await producer.pause();
+    // Reuse the existing mute broadcast so every peer's tile shows muted…
+    io.to(roomId).emit('sfu-producer-paused', { producerId: producer.id, socketId: targetSocketId });
+    // …and tell the target to sync its own local mic UI to off.
+    io.to(targetSocketId).emit('sfu-force-muted');
+    return true;
+  }
+
+  // 14) Host mutes one participant (enforced).
+  socket.on('sfu-host-mute', async ({ socketId: targetSocketId } = {}) => {
+    const roomId = await callerIsHost();
+    if (!roomId || !targetSocketId || targetSocketId === socket.id) return;
+    try {
+      const muted = await pauseMic(roomId, targetSocketId);
+      if (muted) logger.info({ event: 'host.mute', roomId, by: socket.id, target: targetSocketId }, 'host muted peer');
+    } catch (err) { logger.warn({ event: 'host.muteFailed', err: err.message }); }
+  });
+
+  // 15) Host mutes everyone but themselves (enforced).
+  socket.on('sfu-mute-all', async () => {
+    const roomId = await callerIsHost();
+    if (!roomId) return;
+    const room = getRoom(roomId);
+    if (!room) return;
+    for (const targetSocketId of room.peers.keys()) {
+      if (targetSocketId === socket.id) continue;
+      try { await pauseMic(roomId, targetSocketId); } catch { /* skip */ }
+    }
+    logger.info({ event: 'host.muteAll', roomId, by: socket.id }, 'host muted all');
+  });
+
+  // 16) Host asks one participant to unmute (a prompt; never forced).
+  socket.on('sfu-request-unmute', async ({ socketId: targetSocketId } = {}) => {
+    const roomId = await callerIsHost();
+    if (!roomId || !targetSocketId) return;
+    io.to(targetSocketId).emit('sfu-unmute-request', { by: socket.user?.name ?? 'The host' });
+  });
+
+  // 17) Host asks everyone (currently muted) to unmute (prompts only).
+  socket.on('sfu-request-unmute-all', async () => {
+    const roomId = await callerIsHost();
+    if (!roomId) return;
+    socket.to(roomId).emit('sfu-unmute-request', { by: socket.user?.name ?? 'The host' });
+  });
+
+  // 18) Host removes a participant from the call. Notify them, then disconnect
+  //     their socket — the `disconnect` handler below broadcasts the leave and
+  //     frees the room if it empties.
+  socket.on('sfu-host-remove', async ({ socketId: targetSocketId } = {}) => {
+    const roomId = await callerIsHost();
+    if (!roomId || !targetSocketId || targetSocketId === socket.id) return;
+    io.to(targetSocketId).emit('sfu-removed');
+    const target = io.sockets.sockets.get(targetSocketId);
+    if (target) setTimeout(() => { try { target.disconnect(true); } catch { /* gone */ } }, 250);
+    logger.info({ event: 'host.remove', roomId, by: socket.id, target: targetSocketId }, 'host removed peer');
+  });
+
+  // 19) Host spotlights a participant for EVERYONE (pure layout relay, no media
+  //     change). `socketId: null` clears the spotlight. Distinct from a local
+  //     pin, which is client-only and never hits the server.
+  socket.on('sfu-spotlight', async ({ socketId: targetSocketId = null } = {}) => {
+    const roomId = await callerIsHost();
+    if (!roomId) return;
+    io.to(roomId).emit('sfu-spotlight', { socketId: targetSocketId });
+    logger.debug({ event: 'host.spotlight', roomId, target: targetSocketId }, 'host spotlight');
+  });
+
   // 12) Teardown: closing the peer's transports cascades to its producers and
   //    consumers; tell others to drop this peer's tiles; free the room if empty.
   socket.on('disconnect', () => {

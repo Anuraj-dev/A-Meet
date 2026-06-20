@@ -7,6 +7,8 @@ import {
 } from '@mui/material';
 import {
   ContentCopy as ContentCopyIcon,
+  NavigateBefore as NavigateBeforeIcon,
+  NavigateNext as NavigateNextIcon,
   PeopleAlt as PeopleAltIcon,
   StopScreenShare as StopScreenShareIcon,
 } from '@mui/icons-material';
@@ -21,6 +23,7 @@ import RemoteAudio from '../components/RemoteAudio';
 import RtcStatsOverlay from '../components/RtcStatsOverlay';
 import ControlBar from '../components/ControlBar';
 import ChatPanel from '../components/ChatPanel';
+import PeoplePanel from '../components/PeoplePanel';
 import TranscriptPanel from '../components/TranscriptPanel';
 import LiveCaptions from '../components/LiveCaptions';
 import CallNotifications from '../components/CallNotifications';
@@ -64,8 +67,11 @@ export default function RoomPage() {
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
   const [input, setInput] = useState('');
-  const [showChat, setShowChat] = useState(false);
-  const [showTranscript, setShowTranscript] = useState(false);
+  // Single right rail: only one of Chat / People / Transcript is open at a time (Meet-style).
+  const [activePanel, setActivePanel] = useState(null); // 'chat' | 'people' | 'transcript' | null
+  const showChat = activePanel === 'chat';
+  const showPeople = activePanel === 'people';
+  const showTranscript = activePanel === 'transcript';
   const [transcriptState, setTranscriptState] = useState({
     active: false, startedAt: null, startedBy: null, stoppedAt: null,
   });
@@ -79,6 +85,15 @@ export default function RoomPage() {
   const [latestCaption, setLatestCaption] = useState(null);
   const captionTimerRef = useRef(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  // Focus model: a LOCAL pin (just for me, any participant) and a host SPOTLIGHT
+  // (server-relayed, applies to everyone). Spotlight wins when both are set.
+  const [pinnedKey, setPinnedKey] = useState(null);
+  const [spotlightKey, setSpotlightKey] = useState(null);
+  // Layout chooser: 'auto' keeps the smart alone/solo/grid behaviour.
+  const [layoutMode, setLayoutMode] = useState('auto'); // auto | tiled | spotlight | sidebar
+  const [gridPage, setGridPage] = useState(0); // grid pagination for large calls
+  // Host asked us to unmute — surfaced as a one-tap prompt (never forced).
+  const [unmuteRequestFrom, setUnmuteRequestFrom] = useState(null);
   const [activeReactions, setActiveReactions] = useState({});
   const [floatingReactions, setFloatingReactions] = useState([]);
   const floatIdRef = useRef(0);
@@ -334,8 +349,7 @@ export default function RoomPage() {
       setTranscriptState(state);
       setTranscriptInterims({});
       if (state.active) {
-        setShowChat(false);
-        setShowTranscript(true);
+        setActivePanel('transcript');
         if (!hasTranscriptConsent()
             && isPcmCaptureSupported()) {
           setTranscriptConsentOpen(true);
@@ -417,12 +431,43 @@ export default function RoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
+  // Host-moderation + spotlight listeners (M12). Separate from the mount-only
+  // socket effect so they can close over fresh `localAudioOn` / `toggleAudio`.
+  useEffect(() => {
+    const onForceMuted = () => {
+      if (localAudioOn) { playSound('toggleOff'); toggleAudio(); }
+      pushNote({ kind: 'event', variant: 'info', text: 'You were muted by the host' });
+    };
+    const onUnmuteRequest = ({ by } = {}) => setUnmuteRequestFrom(by ?? 'The host');
+    const onRemoved = () => {
+      playSound('callEnd');
+      setMeetingEndedSnack(false);
+      navigate('/', { state: { removed: true } });
+    };
+    const onSpotlight = ({ socketId } = {}) => setSpotlightKey(socketId ?? null);
+    socket.on('sfu-force-muted', onForceMuted);
+    socket.on('sfu-unmute-request', onUnmuteRequest);
+    socket.on('sfu-removed', onRemoved);
+    socket.on('sfu-spotlight', onSpotlight);
+    return () => {
+      socket.off('sfu-force-muted', onForceMuted);
+      socket.off('sfu-unmute-request', onUnmuteRequest);
+      socket.off('sfu-removed', onRemoved);
+      socket.off('sfu-spotlight', onSpotlight);
+    };
+  }, [localAudioOn, toggleAudio, navigate, pushNote]);
+
   const handleToggleChat = () => {
-    const next = !showChat;
-    setShowChat(next);
-    if (next) setShowTranscript(false);
-    if (next) setUnreadCount(0); // clear unread when opening
+    setActivePanel((p) => {
+      const next = p === 'chat' ? null : 'chat';
+      if (next === 'chat') setUnreadCount(0); // clear unread when opening
+      return next;
+    });
   };
+  const handleTogglePeople = () => {
+    setActivePanel((p) => (p === 'people' ? null : 'people'));
+  };
+  const openChat = () => { setActivePanel('chat'); setUnreadCount(0); };
 
   function sendMessage(e) {
     e.preventDefault();
@@ -443,15 +488,13 @@ export default function RoomPage() {
         pushNote({ kind: 'event', variant: 'info', text: response.error });
         return;
       }
-      setShowChat(false);
-      setShowTranscript(true);
+      setActivePanel('transcript');
     });
   }
 
   function handleToggleTranscript() {
     if (transcriptState.active || transcriptEntries.length > 0) {
-      setShowTranscript((open) => !open);
-      setShowChat(false);
+      setActivePanel((p) => (p === 'transcript' ? null : 'transcript'));
       if (!transcriptConsent && pcmCapture.supported) setTranscriptConsentOpen(true);
       return;
     }
@@ -574,6 +617,11 @@ export default function RoomPage() {
         activeReaction: activeReactions[socket.id],
         activeSpeaker: activeSpeaker === socket.id,
         mirror: true,
+        pinned: pinnedKey === socket.id,
+        onPin: () => handlePin({ id: socket.id }),
+        spotlighted: spotlightKey === socket.id,
+        canSpotlight: isHost,
+        onSpotlight: () => handleSpotlight({ id: socket.id }),
       },
       ...remoteEntries.map(([peerId, stream]) => {
         const ps = peerStates[peerId];
@@ -595,6 +643,11 @@ export default function RoomPage() {
           showVolumeControl: true,
           peerVolume: peerVolumes[peerId] ?? 1,
           onPeerVolumeChange: (v) => handlePeerVolumeChange(peerId, ps?.name ?? 'Participant', v),
+          pinned: pinnedKey === peerId,
+          onPin: () => handlePin({ id: peerId }),
+          spotlighted: spotlightKey === peerId,
+          canSpotlight: isHost,
+          onSpotlight: () => handleSpotlight({ id: peerId }),
         };
       }),
     ].filter(Boolean);
@@ -915,7 +968,14 @@ export default function RoomPage() {
   }
 
   function renderGridLayout() {
-    const tiles = cameraTiles();
+    const allTiles = cameraTiles();
+    // Pagination — cap visible tiles per page so a big call doesn't shrink to
+    // postage stamps; page through the rest (Meet-style). Grid still fits without
+    // scrolling at any page size.
+    const PAGE_SIZE = isMobile ? 6 : 9;
+    const pageCount = Math.ceil(allTiles.length / PAGE_SIZE) || 1;
+    const page = Math.min(gridPage, pageCount - 1);
+    const tiles = pageCount > 1 ? allTiles.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE) : allTiles;
     const count = tiles.length;
     // Cap column count so a few people don't get tiny tiles.
     const maxCols = count <= 1 ? 1 : count <= 4 ? 2 : 3;
@@ -930,6 +990,42 @@ export default function RoomPage() {
           pb: { xs: 12, sm: 13 },
         }}
       >
+        {/* Pagination arrows + indicator (only when there's more than one page) */}
+        {pageCount > 1 && (
+          <>
+            <IconButton
+              onClick={() => setGridPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              sx={{
+                position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 4,
+                bgcolor: 'control.surface', backdropFilter: 'blur(12px)', color: 'text.primary',
+                '&:hover': { bgcolor: 'control.idleHover' }, '&.Mui-disabled': { opacity: 0.3 },
+              }}
+            >
+              <NavigateBeforeIcon />
+            </IconButton>
+            <IconButton
+              onClick={() => setGridPage((p) => Math.min(pageCount - 1, p + 1))}
+              disabled={page >= pageCount - 1}
+              sx={{
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 4,
+                bgcolor: 'control.surface', backdropFilter: 'blur(12px)', color: 'text.primary',
+                '&:hover': { bgcolor: 'control.idleHover' }, '&.Mui-disabled': { opacity: 0.3 },
+              }}
+            >
+              <NavigateNextIcon />
+            </IconButton>
+            <Box
+              sx={{
+                position: 'absolute', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 4,
+                px: 1.5, py: 0.25, borderRadius: 999, fontSize: 12, fontWeight: 600,
+                bgcolor: 'control.surface', backdropFilter: 'blur(12px)', color: 'text.secondary',
+              }}
+            >
+              {page + 1} / {pageCount}
+            </Box>
+          </>
+        )}
         {/* minHeight:100% centers when content fits, but lets it scroll (no clipping) when it overflows */}
         <Box sx={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {remoteEntries.length === 0 && !isScreenSharing ? (
@@ -981,6 +1077,111 @@ export default function RoomPage() {
     );
   }
 
+  // Focused layout (pin / spotlight / sidebar): one big tile + the rest in a rail
+  // (right column on desktop, top strip on mobile — same shape as presentation).
+  function renderFocusLayout(key, { showRail = true } = {}) {
+    const tiles = cameraTiles();
+    const isFocus = (t) => t.key === key || (t.key === 'local' && key === socket.id);
+    const focus = tiles.find(isFocus);
+    if (!focus) return renderGridLayout();
+    const rest = tiles.filter((t) => !isFocus(t));
+    // Strip `key` so it isn't forwarded as a prop to the single focus tile.
+    const focusProps = { ...focus };
+    delete focusProps.key;
+    return (
+      <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: { xs: 'column', sm: 'row' } }}>
+        <Box sx={{ flex: 1, p: { xs: 1, sm: 1.5 }, minWidth: 0, minHeight: 0, pt: { xs: 8, sm: 9 }, pb: { sm: 13 } }}>
+          <Box sx={{ width: '100%', height: '100%', borderRadius: 3, overflow: 'hidden' }}>
+            <VideoTile {...focusProps} objectFit="cover" />
+          </Box>
+        </Box>
+        {showRail && rest.length > 0 && (
+          <Box
+            sx={{
+              display: 'flex', gap: 1, p: 1, flexShrink: 0,
+              order: { xs: -1, sm: 0 },
+              width: { xs: '100%', sm: 184 },
+              height: { xs: 92, sm: 'auto' },
+              flexDirection: { xs: 'row', sm: 'column' },
+              overflowX: { xs: 'auto', sm: 'visible' },
+              overflowY: { xs: 'visible', sm: 'auto' },
+              pt: { xs: 0, sm: 7 }, pb: { sm: 13 },
+            }}
+          >
+            {rest.map(({ key: rk, audioStream: rAudio, ...t }) => (
+              <Box
+                key={rk}
+                sx={{
+                  flexShrink: 0,
+                  width: { xs: 140, sm: '100%' },
+                  height: { xs: '100%', sm: 'auto' },
+                  aspectRatio: { sm: '16/9' },
+                  borderRadius: '16px', overflow: 'hidden',
+                }}
+              >
+                <VideoTile {...t} audioStream={rAudio} />
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
+  // --- People / focus / moderation (M12) ---
+  const people = [
+    {
+      id: socket.id, name: user?.name ?? 'You', avatar: user?.avatar,
+      audioOn: localAudioOn, videoOn: localVideoOn, handRaised,
+      isSpeaking: activeSpeaker === socket.id, isLocal: true, isHost, pinned: pinnedKey === socket.id,
+    },
+    ...remoteEntries.map(([sid, stream]) => {
+      const ps = peerStates[sid];
+      return {
+        id: sid, name: ps?.name ?? 'Participant', avatar: ps?.avatar,
+        audioOn: ps ? ps.audio : true,
+        videoOn: ps ? ps.video : stream.getVideoTracks().length > 0,
+        handRaised: ps?.handRaised ?? false,
+        isSpeaking: activeSpeaker === sid, isLocal: false, isHost: false, pinned: pinnedKey === sid,
+      };
+    }),
+  ];
+
+  const handlePin = (person) => setPinnedKey((k) => (k === person.id ? null : person.id));
+  const handleSpotlight = (person) =>
+    socket.emit('sfu-spotlight', { socketId: spotlightKey === person.id ? null : person.id });
+  const handleHostMute = (person) => socket.emit('sfu-host-mute', { socketId: person.id });
+  const handleAskUnmute = (person) => socket.emit('sfu-request-unmute', { socketId: person.id });
+  const handleMuteAll = () => {
+    socket.emit('sfu-mute-all');
+    pushNote({ kind: 'event', variant: 'info', text: 'Muted everyone' });
+  };
+  const handleAskUnmuteAll = () => {
+    socket.emit('sfu-request-unmute-all');
+    pushNote({ kind: 'event', variant: 'info', text: 'Asked everyone to unmute' });
+  };
+  const handleHostRemove = (person) => socket.emit('sfu-host-remove', { socketId: person.id });
+
+  // A focus key is only valid if that person is still present.
+  const keyPresent = (k) => k && (k === socket.id || Boolean(remoteStreams[k]));
+  const explicitFocus = keyPresent(spotlightKey) ? spotlightKey : keyPresent(pinnedKey) ? pinnedKey : null;
+  // Layout chooser forcing spotlight/sidebar with no explicit pick → follow the
+  // active speaker, else the first remote, else self.
+  const fallbackFocus = keyPresent(activeSpeaker)
+    ? activeSpeaker
+    : (remoteEntries[0]?.[0] ?? socket.id);
+  const wantsFocus = explicitFocus || layoutMode === 'spotlight' || layoutMode === 'sidebar';
+  const displayFocus = explicitFocus ?? fallbackFocus;
+
+  // Decide the active stage layout (screen share always wins).
+  let stage;
+  if (hasScreen) stage = renderPresentationLayout();
+  else if (wantsFocus) stage = renderFocusLayout(displayFocus, { showRail: layoutMode !== 'spotlight' });
+  else if (layoutMode === 'tiled') stage = renderGridLayout();
+  else if (isAlone) stage = renderAloneLayout();
+  else if (isSoloCall) stage = renderSoloLayout();
+  else stage = renderGridLayout();
+
   return (
     <Box
       sx={{
@@ -1022,7 +1223,7 @@ export default function RoomPage() {
           sx={{ flex: 1, position: 'relative', minWidth: 0 }}
           onMouseMove={handleStageMouseMove}
         >
-          {hasScreen ? renderPresentationLayout() : isAlone ? renderAloneLayout() : isSoloCall ? renderSoloLayout() : renderGridLayout()}
+          {stage}
 
           {/* Bottom-left floating emoji stream (M7.5) */}
           <ReactionsOverlay reactions={floatingReactions} />
@@ -1090,7 +1291,7 @@ export default function RoomPage() {
                 <Chip
                   label={isMobile ? 'Live' : 'Transcript live'}
                   size="small"
-                  onClick={() => { setShowChat(false); setShowTranscript(true); }}
+                  onClick={() => setActivePanel('transcript')}
                   sx={{
                     height: 26,
                     cursor: 'pointer',
@@ -1161,6 +1362,8 @@ export default function RoomPage() {
               showTranscript={showTranscript}
               transcriptDisabled={!transcriptState.active && transcriptEntries.length === 0 && !isHost}
               onToggleTranscript={handleToggleTranscript}
+              showPeople={showPeople} peopleCount={people.length} onTogglePeople={handleTogglePeople}
+              layoutMode={layoutMode} onLayoutChange={setLayoutMode}
               soundEnabled={soundEnabled} onToggleSound={handleToggleSound}
               pipSupported={pipSupported} pipActive={pipActive} onTogglePip={handleTogglePip}
               onCopyLink={handleCopyLink}
@@ -1175,12 +1378,12 @@ export default function RoomPage() {
           {/* Join/leave flashes + chat-message previews (bottom-left) */}
           <CallNotifications
             notes={notes}
-            onOpenChat={() => { setShowChat(true); setUnreadCount(0); }}
+            onOpenChat={openChat}
             onDismiss={dismissNote}
           />
         </Box>
 
-        {/* Chat */}
+        {/* Right rail — single panel: Chat / People / Transcript (Meet-style) */}
         {showChat && (
           <ChatPanel
             messages={messages}
@@ -1188,7 +1391,21 @@ export default function RoomPage() {
             setInput={setInput}
             onSend={sendMessage}
             currentUserId={user?.id}
-            onClose={() => setShowChat(false)}
+            onClose={() => setActivePanel(null)}
+          />
+        )}
+        {showPeople && (
+          <PeoplePanel
+            people={people}
+            currentUserIsHost={isHost}
+            onClose={() => setActivePanel(null)}
+            onPin={handlePin}
+            onSpotlight={handleSpotlight}
+            onMute={handleHostMute}
+            onAskUnmute={handleAskUnmute}
+            onRemove={handleHostRemove}
+            onMuteAll={handleMuteAll}
+            onAskUnmuteAll={handleAskUnmuteAll}
           />
         )}
         <TranscriptPanel
@@ -1203,7 +1420,7 @@ export default function RoomPage() {
           onEnableContribution={() => setTranscriptConsentOpen(true)}
           onStop={stopSharedTranscript}
           onDownload={handleDownloadTranscript}
-          onClose={() => setShowTranscript(false)}
+          onClose={() => setActivePanel(null)}
         />
       </Box>
 
@@ -1211,6 +1428,35 @@ export default function RoomPage() {
       <Snackbar open={meetingEndedSnack} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
         <Alert severity="info" variant="filled" sx={{ width: '100%' }}>
           The meeting has been ended by the host.
+        </Alert>
+      </Snackbar>
+
+      {/* Host asked you to unmute — one-tap prompt, never forced (M12) */}
+      <Snackbar
+        open={Boolean(unmuteRequestFrom)}
+        onClose={() => setUnmuteRequestFrom(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        sx={{ bottom: { xs: 90, sm: 110 } }}
+      >
+        <Alert
+          severity="info"
+          variant="filled"
+          sx={{ width: '100%', alignItems: 'center' }}
+          action={
+            <Button
+              size="small"
+              color="inherit"
+              onClick={() => {
+                if (!localAudioOn && hasMic) { playSound('toggleOn'); toggleAudio(); }
+                setUnmuteRequestFrom(null);
+              }}
+              sx={{ fontWeight: 700 }}
+            >
+              Unmute
+            </Button>
+          }
+        >
+          {unmuteRequestFrom} asked you to unmute
         </Alert>
       </Snackbar>
 

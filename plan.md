@@ -22,6 +22,7 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 | M9 | Connection stability + in-call UX fixes | 🚧 Code done; prod verify pending |
 | M10 | Landing 3D + Lobby redesign (ember/smoke system) | 🚧 In progress |
 | M11 | Shared live transcription (English) | ✅ Done |
+| M12 | Meeting-room redesign (ember re-skin + Meet feature parity) | 🚧 In progress |
 
 ---
 
@@ -198,6 +199,73 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 - [x] M11.7 Server tests, client tests, and production build pass; feature adds no lint errors.
 - [x] M11.8 Manually verified with two Chromium clients, speaker-labelled shared output, provider
   refinement, and canonical transcript download.
+
+## M12 — Meeting-room redesign (ember re-skin + Meet feature parity)
+
+> Branch: `redesign/landing-3d-meeting`. The landing + lobby moved onto the warm
+> ember/sage/graphite `DK` system (M10) but the **room** still wears the old cold
+> blue/purple `theme.js` skin — the language flips the instant you join a call. This
+> milestone re-skins the room onto the same system AND closes the biggest Google-Meet
+> feature gaps (participants panel, pin/spotlight, layout chooser, host moderation).
+> Design decisions settled with Anuraj via a grilling pass.
+
+### Locked decisions
+- **Skin:** room adopts the landing's `DK` tokens (ember `#e8623d` / emberDark `#d4502c`,
+  sage `#7d9183`, warm graphite bg, Bricolage display / Plus Jakarta body). North star =
+  match Google Meet *behavior*. Ember = UI accent (active/focus); sage = support.
+- **Speaking cue stays GREEN** (`#34d399`) — most legible live-voice signal on warm
+  graphite; replicate Meet behavior (animated active-speaker ring + per-tile mic-level
+  bars + red mute). Flag for later if Anuraj wants Meet's blue.
+- **Side panels = single right rail** — Chat ↔ People ↔ Transcript switch (opening one
+  closes the others), like Meet. Reuses the ChatPanel shell + control-bar badges.
+  (M12 rebased onto main, which already shipped M11's Transcript panel + captions — both
+  are integrated into the one `activePanel` rail.)
+- **Pin vs Spotlight:** local **pin** (any user, client-only state) + host **spotlight**
+  (server relay → everyone).
+- **Host mute = enforced** server-side producer pause; **no force-unmute**. Host
+  **unmute = request-to-unmute** (incl. unmute-all) — a one-tap prompt; no mic reopens
+  without consent (muting keeps the track live, so force-resume would leak audio).
+
+### Phase 0 — Re-skin foundation (`theme.js`)
+- [x] M12.1 Swap room palette to `DK`: bg warm graphite, `primary`→ember (+emberDark),
+  `secondary`/`info`→sage, tiles deep warm black; keep `success`/green for live-voice.
+- [x] M12.2 Fonts: display→Bricolage Grotesque, body→Plus Jakarta Sans (theme defaults;
+  per-component hardcoded `"Outfit"`/`"DM Sans"` sweep pending on non-M11 files).
+- [x] M12.3 Retune keyframes/overrides: speaker-pulse stays green; blue/purple dropped
+  (`speakPulse`→ember, gradients→ember, TextField focus→ember, Tooltip→graphite). Also
+  added the missing `ameet-fade-in` keyframe (referenced but undefined).
+- [x] M12.4 Build passes. Landing/lobby ember-ripple eyeball still pending Anuraj's visual check.
+
+### Phase 1 — People panel + single right-rail
+- [x] M12.5 Right rail is now one switchable surface: `activePanel` makes Chat / People /
+  Transcript mutually exclusive (Meet-style); ControlBar gets a People button (count badge);
+  unread chat badge preserved. Transcript panel + live-captions overlay (M11) integrated
+  into the same rail on rebase.
+- [x] M12.6 `PeoplePanel` component built (searchable list, per-person mic/cam status,
+  raise-hand, speaking ring, local Pin; host section: mute / remove / mute-all /
+  ask-to-unmute / spotlight). Contract-driven; compiles clean via esbuild. *RoomPage
+  wiring deferred to post-M11 (M12.5).*
+
+### Phase 2 — Pin / Spotlight / Layout chooser
+- [x] M12.7 Local pin + host spotlight wired: `pinnedKey`/`spotlightKey` state →
+  `renderFocusLayout` (big tile + rail; spotlight wins over pin). Invoked from the People
+  panel AND a per-tile options menu in `VideoTile` (Pin/Unpin, Spotlight [host],
+  Fullscreen, + the existing per-peer volume slider). Pinned tiles show a pin badge.
+- [x] M12.8 Layout chooser (Auto / Tiled / Spotlight / Sidebar) — ControlBar menu →
+  `layoutMode` drives the stage. Grid pagination added (PAGE_SIZE 9 desktop / 6 mobile,
+  edge arrows + `n / m` indicator) so big calls page instead of shrinking.
+
+### Phase 3 — Host moderation backend + wiring
+- [x] M12.9 Server (host-verified like `sfu-end-meeting`): `sfu-host-mute`, `sfu-mute-all`,
+  `sfu-request-unmute`, `sfu-request-unmute-all`, `sfu-host-remove`, `sfu-spotlight` added
+  to `sfu-handlers.js` (separate from M11's `handlers.js`). Mute reuses the existing
+  `sfu-producer-paused` broadcast + emits `sfu-force-muted` to the target. Syntax OK.
+- [x] M12.10 Client handlers wired (dedicated effect): `sfu-force-muted` → mic off + note,
+  `sfu-unmute-request` → one-tap Unmute snackbar (never forced), `sfu-removed` → leave,
+  `sfu-spotlight` → `spotlightKey` so everyone's stage follows the host.
+- [~] M12.11 Build passes; client 17 + server 31 tests green; **zero new lint errors**
+  (the 3 `set-state-in-effect` errors pre-exist on HEAD). Anuraj manual verify (needs 2
+  peers) + `/journal M12` still pending.
 
 ## Conventions (quick ref)
 - Files: `kebab-case`; Components: `PascalCase.jsx`; Models: `PascalCase` singular

@@ -1,23 +1,40 @@
 import { createTheme } from '@mui/material/styles';
 
-const BRAND_GRADIENT = 'linear-gradient(120deg, #1a73e8, #7c5cbf)';
-const GRAD_TEXT = 'linear-gradient(110deg, #4a7bd4, #8b6cbf 60%, #2ab4a0)';
+// Ember / smoke design system — the SAME warm graphite + ember/sage language the
+// landing and lobby use (their local `DK` object). The room used to wear a cold
+// blue/purple skin, so the whole visual language flipped the moment you joined a
+// call (M12). These tokens unify the product end-to-end.
+//
+//   ember  #e8623d  → UI accent: active controls, focus rings, primary CTAs
+//   sage   #7d9183  → support / secondary / "listening" cues
+//   green  #34d399  → reserved purely for LIVE-VOICE feedback (speaking ring,
+//                     mic-level meter) — the most legible "who's talking" signal
+//                     on warm graphite, mirroring Google Meet's behavior.
+const EMBER = '#e8623d';
+const EMBER_DARK = '#d4502c';
+const SAGE = '#7d9183';
+const VOICE = '#34d399'; // live-voice green (also the keyframe glow below)
+
+const BRAND_GRADIENT = `linear-gradient(120deg, ${EMBER}, ${EMBER_DARK})`;
+const GRAD_TEXT = `linear-gradient(110deg, ${EMBER}, #f08a5d 55%, ${SAGE})`;
 
 const theme = createTheme({
   palette: {
     mode: 'dark',
     background: {
-      default: '#060810',
-      paper: 'rgba(255,255,255,0.045)',
+      // Warm graphite, a touch deeper than the landing's #140f0c so video tiles
+      // read crisply against it.
+      default: '#0e0a08',
+      paper: 'rgba(255,255,255,0.05)',
     },
     primary: {
-      main: '#4a7bd4',
-      dark: '#1a73e8',
+      main: EMBER,
+      dark: EMBER_DARK,
       contrastText: '#fff',
     },
     secondary: {
-      main: '#7c5cbf',
-      light: '#8b6cbf',
+      main: SAGE,
+      light: '#93a596',
     },
     error: {
       main: '#ef4444',
@@ -26,19 +43,20 @@ const theme = createTheme({
     warning: {
       main: '#f5b542',
       dark: '#f97316',
-      contrastText: '#060810',
+      contrastText: '#1a120c',
     },
     success: {
-      main: '#3db389',
+      main: VOICE,
+      dark: '#10b981',
     },
     info: {
-      main: '#2ab4a0',
+      main: SAGE,
     },
     divider: 'rgba(255,255,255,0.10)',
     text: {
-      primary: '#f2f4f9',
-      secondary: '#94a3b8',
-      disabled: '#475569',
+      primary: '#f4efe9',
+      secondary: '#a89f97',
+      disabled: '#6f675f',
     },
     brand: {
       gradient: BRAND_GRADIENT,
@@ -47,29 +65,39 @@ const theme = createTheme({
     control: {
       idle: 'rgba(255,255,255,0.07)',
       idleHover: 'rgba(255,255,255,0.12)',
-      surface: 'rgba(6,8,16,0.6)',
+      surface: 'rgba(20,15,12,0.62)',
     },
     tile: {
-      bg: '#0a0d18',
+      bg: '#0a0806',
     },
     glass: {
-      surface: 'rgba(255,255,255,0.045)',
-      surface2: 'rgba(255,255,255,0.07)',
+      surface: 'rgba(255,255,255,0.05)',
+      surface2: 'rgba(255,255,255,0.09)',
       border: 'rgba(255,255,255,0.10)',
       border2: 'rgba(255,255,255,0.16)',
+    },
+    ember: {
+      main: EMBER,
+      dark: EMBER_DARK,
+      soft: 'rgba(232,98,61,0.16)',
+    },
+    sage: {
+      main: SAGE,
+      soft: 'rgba(125,145,131,0.16)',
     },
   },
 
   typography: {
-    fontFamily: '"DM Sans", system-ui, sans-serif',
-    h1: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 700, letterSpacing: '-0.04em' },
-    h2: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 700, letterSpacing: '-0.03em' },
-    h3: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.02em' },
-    h4: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.02em' },
-    h5: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.01em' },
-    h6: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600 },
-    button: { fontFamily: '"Outfit", system-ui, sans-serif', fontWeight: 600 },
-    caption: { fontFamily: '"DM Sans", system-ui, sans-serif' },
+    // Body → Plus Jakarta Sans, display → Bricolage Grotesque: the landing/lobby pair.
+    fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif',
+    h1: { fontFamily: '"Bricolage Grotesque", system-ui, sans-serif', fontWeight: 700, letterSpacing: '-0.04em' },
+    h2: { fontFamily: '"Bricolage Grotesque", system-ui, sans-serif', fontWeight: 700, letterSpacing: '-0.03em' },
+    h3: { fontFamily: '"Bricolage Grotesque", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.02em' },
+    h4: { fontFamily: '"Bricolage Grotesque", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.02em' },
+    h5: { fontFamily: '"Bricolage Grotesque", system-ui, sans-serif', fontWeight: 600, letterSpacing: '-0.01em' },
+    h6: { fontFamily: '"Bricolage Grotesque", system-ui, sans-serif', fontWeight: 600 },
+    button: { fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif', fontWeight: 700 },
+    caption: { fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' },
     overline: { fontFamily: '"JetBrains Mono", monospace', letterSpacing: '0.12em' },
   },
 
@@ -83,7 +111,7 @@ const theme = createTheme({
         'html, body, #root': { height: '100%' },
         body: {
           margin: 0,
-          backgroundColor: '#060810',
+          backgroundColor: '#0e0a08',
           overscrollBehavior: 'none',
           WebkitFontSmoothing: 'antialiased',
           scrollbarColor: 'rgba(255,255,255,0.18) transparent',
@@ -109,10 +137,17 @@ const theme = createTheme({
           '0%': { transform: 'translateX(-100%)' },
           '55%, 100%': { transform: 'translateX(100%)' },
         },
+        // Generic fade/rise used by chat rows, call notes, and the empty-room card.
+        '@keyframes ameet-fade-in': {
+          '0%': { opacity: 0, transform: 'translateY(6px)' },
+          '100%': { opacity: 1, transform: 'translateY(0)' },
+        },
+        // Ember speak pulse (UI accent variant — the live-voice ring uses the
+        // green `ameet-speaker-pulse` below).
         '@keyframes speakPulse': {
-          '0%': { boxShadow: '0 0 0 1px #4a7bd4, 0 0 0 0 rgba(74,123,212,0.5)' },
-          '70%': { boxShadow: '0 0 0 2px #4a7bd4, 0 0 0 14px rgba(74,123,212,0)' },
-          '100%': { boxShadow: '0 0 0 1px #4a7bd4, 0 0 0 0 rgba(74,123,212,0)' },
+          '0%': { boxShadow: `0 0 0 1px ${EMBER}, 0 0 0 0 rgba(232,98,61,0.5)` },
+          '70%': { boxShadow: `0 0 0 2px ${EMBER}, 0 0 0 14px rgba(232,98,61,0)` },
+          '100%': { boxShadow: `0 0 0 1px ${EMBER}, 0 0 0 0 rgba(232,98,61,0)` },
         },
         '@keyframes blink': {
           '0%, 100%': { opacity: 1 },
@@ -136,9 +171,10 @@ const theme = createTheme({
         },
         // Active-speaker tile ring — gently breathes the green inset glow.
         // Inset (not outer) so the grid wrapper's overflow:hidden never clips it.
+        // Stays GREEN: live-voice cue, deliberately distinct from the ember UI accent.
         '@keyframes ameet-speaker-pulse': {
-          '0%, 100%': { boxShadow: 'inset 0 0 0 3px #3db389, inset 0 0 10px rgba(61,179,137,0.30)' },
-          '50%': { boxShadow: 'inset 0 0 0 3px #3db389, inset 0 0 20px rgba(61,179,137,0.55)' },
+          '0%, 100%': { boxShadow: 'inset 0 0 0 3px #34d399, inset 0 0 10px rgba(52,211,153,0.30)' },
+          '50%': { boxShadow: 'inset 0 0 0 3px #34d399, inset 0 0 20px rgba(52,211,153,0.55)' },
         },
         '@media (prefers-reduced-motion: reduce)': {
           '*': { animationDuration: '0.01ms !important', transitionDuration: '0.01ms !important' },
@@ -149,7 +185,7 @@ const theme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { textTransform: 'none', fontWeight: 600, fontFamily: '"Outfit", system-ui, sans-serif' },
+        root: { textTransform: 'none', fontWeight: 700, fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif' },
         sizeLarge: { paddingTop: 13, paddingBottom: 13 },
       },
     },
@@ -158,7 +194,7 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          backgroundColor: 'rgba(6,8,16,0.8)',
+          backgroundColor: 'rgba(20,15,12,0.82)',
           backdropFilter: 'blur(20px)',
           border: '1px solid rgba(255,255,255,0.10)',
         },
@@ -169,21 +205,21 @@ const theme = createTheme({
       defaultProps: { arrow: true, enterDelay: 400, enterNextDelay: 200 },
       styleOverrides: {
         tooltip: {
-          backgroundColor: '#1a1d2e',
+          backgroundColor: '#241a14',
           fontSize: 12,
           fontWeight: 500,
           padding: '6px 10px',
           borderRadius: 8,
           border: '1px solid rgba(255,255,255,0.1)',
         },
-        arrow: { color: '#1a1d2e' },
+        arrow: { color: '#241a14' },
       },
     },
 
     MuiMenu: {
       styleOverrides: {
         paper: {
-          backgroundColor: 'rgba(8,10,22,0.95)',
+          backgroundColor: 'rgba(20,14,10,0.95)',
           borderRadius: 16,
           border: '1px solid rgba(255,255,255,0.10)',
           boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
@@ -195,7 +231,7 @@ const theme = createTheme({
     MuiPopover: {
       styleOverrides: {
         paper: {
-          backgroundColor: 'rgba(8,10,22,0.95)',
+          backgroundColor: 'rgba(20,14,10,0.95)',
           borderRadius: 20,
           border: '1px solid rgba(255,255,255,0.10)',
           boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
@@ -210,7 +246,7 @@ const theme = createTheme({
           '& .MuiOutlinedInput-root': {
             '& fieldset': { borderColor: 'rgba(255,255,255,0.10)' },
             '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.20)' },
-            '&.Mui-focused fieldset': { borderColor: '#4a7bd4' },
+            '&.Mui-focused fieldset': { borderColor: EMBER },
           },
         },
       },
@@ -225,7 +261,7 @@ const theme = createTheme({
     },
 
     MuiChip: {
-      styleOverrides: { root: { fontWeight: 500, fontFamily: '"DM Sans", sans-serif' } },
+      styleOverrides: { root: { fontWeight: 500, fontFamily: '"Plus Jakarta Sans", sans-serif' } },
     },
 
     MuiIconButton: {
