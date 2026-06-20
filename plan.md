@@ -21,6 +21,7 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 | M8 | Per-participant output volume (Discord-style) | ✅ Done |
 | M9 | Connection stability + in-call UX fixes | 🚧 Code done; prod verify pending |
 | M10 | Landing 3D + Lobby redesign (ember/smoke system) | 🚧 In progress |
+| M11 | Shared live transcription (English) | ✅ Done |
 
 ---
 
@@ -174,6 +175,29 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
   + router + mocked API). Backend needs no change — the original `isHost` field was reverted.
 
 ---
+
+## M11 — Shared live transcription (English)
+
+> The transcript is one canonical, server-ordered room artifact. Each participant's
+> browser streams only that participant's microphone; headphones do not affect capture.
+> Deepgram provides low-latency captions, then Groq refines completed speech turns.
+
+- [x] M11.1 Research browser-native, on-device Whisper/WebGPU, and hosted STT approaches.
+- [x] M11.2 Replace unreliable Chromium `SpeechRecognition` after Chrome/Brave live testing:
+  Brave exposed/disabled the API, Chrome produced delayed fragmented final results.
+- [x] M11.2a Adapt Hyprvox's provider strategy: Deepgram Nova-3 streaming for interim/final
+  captions plus Groq Whisper Large V3 refinement and guarded LLM merge on disagreement.
+- [x] M11.3 Host-controlled shared transcript session with one-time participant consent.
+- [x] M11.4 Server-authoritative speaker identity, sequence, timestamp, deduplication, reconnect
+  snapshots, 5,000-entry bound, and six-hour in-memory expiry after the room empties.
+- [x] M11.5 AudioWorklet 16 kHz PCM capture from each participant, live caption overlay, shared
+  transcript drawer, remote interim feedback, status/error states, mobile layout, and canonical
+  `.txt` download available to every participant.
+- [x] M11.6 Automated coverage for transcript ordering/revision, WAV preparation, Deepgram turn
+  assembly, download formatting, and the browser PCM capture hook.
+- [x] M11.7 Server tests, client tests, and production build pass; feature adds no lint errors.
+- [x] M11.8 Manually verified with two Chromium clients, speaker-labelled shared output, provider
+  refinement, and canonical transcript download.
 
 ## Conventions (quick ref)
 - Files: `kebab-case`; Components: `PascalCase.jsx`; Models: `PascalCase` singular

@@ -1,6 +1,21 @@
-import { addUser, removeUser, getRoomUsers, isUserInRoom } from './room-manager.js';
+import { addUser, removeUser, getRoomUsers, isUserInRoom, getUserRoom } from './room-manager.js';
 import { registerWebrtcHandlers } from './webrtc.js';
 import { registerSfuHandlers } from './sfu-handlers.js';
+import { Room } from '../models/Room.js';
+import {
+  cancelTranscriptExpiry,
+  getTranscriptSnapshot,
+  scheduleTranscriptExpiry,
+  startTranscript,
+  stopTranscript,
+} from './transcript-manager.js';
+import {
+  sendContributorAudio,
+  startContributor,
+  stopContributor,
+  stopRoomContributors,
+  transcriptionConfigured,
+} from '../transcription/meeting-transcription.js';
 import { logger } from '../config/logger.js';
 
 // A dropped connection (network blip, reload, server restart) makes Socket.IO
@@ -44,10 +59,15 @@ export function registerHandlers(io) {
       const alreadyPresent = isUserInRoom(roomId, socket.user.id);
       socket.join(roomId);
       addUser(roomId, socket.id, socket.user);
+      cancelTranscriptExpiry(roomId);
 
       logger.info({ event: 'room.joined', roomId, socketId: socket.id, userId: socket.user?.id }, 'user joined room');
 
       socket.emit('room-users', getRoomUsers(roomId));
+      socket.emit('transcript-snapshot', {
+        ...getTranscriptSnapshot(roomId),
+        configured: transcriptionConfigured(),
+      });
       if (!alreadyPresent && !rejoinedInGrace) {
         socket.to(roomId).emit('user-joined', socket.user);
       }
@@ -68,6 +88,8 @@ export function registerHandlers(io) {
       if (!isUserInRoom(roomId, user.id)) {
         socket.to(roomId).emit('user-left', user);
       }
+      void stopContributor(socket.id);
+      if (getRoomUsers(roomId).length === 0) scheduleTranscriptExpiry(roomId);
     });
 
     socket.on('chat-message', ({ roomId, text }) => {
@@ -82,7 +104,68 @@ export function registerHandlers(io) {
       });
     });
 
+    // Shared transcription is host-controlled and server-authoritative. Clients
+    // recognize only their own microphone; the server supplies identity, ordering
+    // and timestamps, then broadcasts one canonical transcript to the room.
+    socket.on('transcript-start', async (_payload, callback) => {
+      const roomId = getUserRoom(socket.id);
+      if (!roomId) return callback?.({ error: 'Not in a room' });
+      if (!transcriptionConfigured()) return callback?.({ error: 'Transcription providers are not configured' });
+      try {
+        const room = await Room.findOne({ roomId }).select('host').lean();
+        if (!room || room.host.toString() !== socket.user.id) {
+          return callback?.({ error: 'Only the host can start the transcript' });
+        }
+        const state = startTranscript(roomId, socket.user);
+        io.to(roomId).emit('transcript-state', state);
+        logger.info({ event: 'transcript.started', roomId, userId: socket.user.id }, 'shared transcript started');
+        return callback?.({ ok: true, state });
+      } catch (err) {
+        return callback?.({ error: err.message });
+      }
+    });
+
+    socket.on('transcript-stop', async (_payload, callback) => {
+      const roomId = getUserRoom(socket.id);
+      if (!roomId) return callback?.({ error: 'Not in a room' });
+      try {
+        const room = await Room.findOne({ roomId }).select('host').lean();
+        if (!room || room.host.toString() !== socket.user.id) {
+          return callback?.({ error: 'Only the host can stop the transcript' });
+        }
+        await stopRoomContributors(roomId);
+        const state = stopTranscript(roomId);
+        io.to(roomId).emit('transcript-state', state);
+        logger.info({ event: 'transcript.stopped', roomId, userId: socket.user.id }, 'shared transcript stopped');
+        return callback?.({ ok: true, state });
+      } catch (err) {
+        return callback?.({ error: err.message });
+      }
+    });
+
+    socket.on('transcript-contributor-start', async (_payload, callback) => {
+      const roomId = getUserRoom(socket.id);
+      if (!roomId) return callback?.({ error: 'Not in a room' });
+      if (!getTranscriptSnapshot(roomId).active) return callback?.({ error: 'Transcript is not active' });
+      try {
+        await startContributor({ io, socket, roomId });
+        return callback?.({ ok: true });
+      } catch (error) {
+        logger.warn({ event: 'transcript.contributorFailed', roomId, userId: socket.user.id, err: error.message }, 'could not start transcription contributor');
+        return callback?.({ error: 'Could not connect to the transcription provider' });
+      }
+    });
+
+    socket.on('transcript-audio', (audio) => {
+      if (!audio || !sendContributorAudio(socket.id, audio)) return;
+    });
+
+    socket.on('transcript-contributor-stop', () => {
+      void stopContributor(socket.id);
+    });
+
     socket.on('disconnect', () => {
+      void stopContributor(socket.id);
       logger.debug({ event: 'socket.disconnected', socketId: socket.id, userId: socket.user?.id }, 'socket disconnected');
       const result = removeUser(socket.id);
       if (!result) return;
@@ -101,6 +184,7 @@ export function registerHandlers(io) {
         if (!isUserInRoom(roomId, user.id)) {
           io.to(roomId).emit('user-left', user);
         }
+        if (getRoomUsers(roomId).length === 0) scheduleTranscriptExpiry(roomId);
       }, LEAVE_GRACE_MS));
     });
   });

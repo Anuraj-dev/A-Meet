@@ -31,10 +31,21 @@ export const env = {
     // Empty → one worker per CPU core (decided in workers.js).
     numWorkers: Number(process.env.MEDIASOUP_NUM_WORKERS) || 0,
   },
+  transcription: {
+    deepgramApiKey: process.env.DEEPGRAM_API_KEY || '',
+    groqApiKey: process.env.GROQ_API_KEY || '',
+    deepgramModel: process.env.DEEPGRAM_TRANSCRIPTION_MODEL || 'nova-3',
+    groqModel: process.env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3',
+    mergeModel: process.env.GROQ_TRANSCRIPT_MERGE_MODEL || 'llama-3.3-70b-versatile',
+  },
 };
 
 // Warn (don't crash) if Google OAuth isn't configured yet — lets the server
 // boot for early development before credentials are pasted in.
 if (!env.google.clientId || !env.google.clientSecret) {
   console.warn('[env] Google OAuth not configured yet (GOOGLE_CLIENT_ID/SECRET empty). Login will be disabled until set.');
+}
+
+if (!env.transcription.deepgramApiKey) {
+  console.warn('[env] DEEPGRAM_API_KEY is missing. Shared transcription will be unavailable.');
 }

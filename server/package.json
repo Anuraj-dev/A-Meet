@@ -14,11 +14,13 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@deepgram/sdk": "^4.11.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
+    "groq-sdk": "^0.37.0",
     "helmet": "^8.2.0",
     "joi": "^18.2.1",
     "jsonwebtoken": "^9.0.3",

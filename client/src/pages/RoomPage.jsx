@@ -15,18 +15,28 @@ import { RoomMetaContext } from '../components/RoomGuard';
 import socket from '../services/socket';
 import { useMediasoup } from '../hooks/useMediasoup';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
+import { isPcmCaptureSupported, usePcmCapture } from '../hooks/usePcmCapture';
 import VideoTile from '../components/VideoTile';
 import RemoteAudio from '../components/RemoteAudio';
 import RtcStatsOverlay from '../components/RtcStatsOverlay';
 import ControlBar from '../components/ControlBar';
 import ChatPanel from '../components/ChatPanel';
+import TranscriptPanel from '../components/TranscriptPanel';
+import LiveCaptions from '../components/LiveCaptions';
 import CallNotifications from '../components/CallNotifications';
 import ReactionsOverlay from '../components/ReactionsOverlay';
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
 import { copyMeetingScreenshot, downloadMeetingScreenshot } from '../utils/capture-screenshot';
 import { appLogger } from '../utils/logger';
+import { downloadTranscript, mergeTranscriptEntries } from '../utils/transcript';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '👏', '🎉'];
+const TRANSCRIPT_CONSENT_KEY = 'ameet:transcription-consent-v2';
+
+function hasTranscriptConsent() {
+  try { return localStorage.getItem(TRANSCRIPT_CONSENT_KEY) === 'accepted'; }
+  catch { return false; }
+}
 
 // Local clock so the header time updates without re-rendering the call.
 function LiveClock(props) {
@@ -55,6 +65,19 @@ export default function RoomPage() {
   const [users, setUsers] = useState([]);
   const [input, setInput] = useState('');
   const [showChat, setShowChat] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [transcriptState, setTranscriptState] = useState({
+    active: false, startedAt: null, startedBy: null, stoppedAt: null,
+  });
+  const [transcriptEntries, setTranscriptEntries] = useState([]);
+  const [transcriptConfigured, setTranscriptConfigured] = useState(null);
+  const [transcriptInterims, setTranscriptInterims] = useState({});
+  const [contributorState, setContributorState] = useState({ status: 'idle', provider: null, error: '' });
+  const [transcriptConsent, setTranscriptConsent] = useState(hasTranscriptConsent);
+  const [transcriptConsentOpen, setTranscriptConsentOpen] = useState(false);
+  const pendingTranscriptStartRef = useRef(false);
+  const [latestCaption, setLatestCaption] = useState(null);
+  const captionTimerRef = useRef(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [activeReactions, setActiveReactions] = useState({});
   const [floatingReactions, setFloatingReactions] = useState([]);
@@ -150,6 +173,34 @@ export default function RoomPage() {
     activeSpeaker, socketConnected, permissionDenied, rtcStats,
   } = useMediasoup(roomId, devices);
 
+  const sendTranscriptAudio = useCallback((audio) => {
+    socket.emit('transcript-audio', audio);
+  }, []);
+  const audioTrack = localStream?.getAudioTracks()[0] ?? null;
+  const shouldContributeTranscript = !!transcriptConfigured
+    && transcriptState.active && transcriptConsent && localAudioOn;
+  const pcmCapture = usePcmCapture({
+    enabled: shouldContributeTranscript,
+    audioTrack: localAudioOn ? audioTrack : null,
+    onChunk: sendTranscriptAudio,
+  });
+  const transcriptInterimList = Object.values(transcriptInterims).sort((a, b) => a.ts - b.ts);
+  const latestInterim = transcriptInterimList[transcriptInterimList.length - 1] ?? null;
+
+  useEffect(() => {
+    if (!shouldContributeTranscript || !pcmCapture.supported) return undefined;
+    let cancelled = false;
+    socket.emit('transcript-contributor-start', {}, (response) => {
+      if (cancelled || !response?.error) return;
+      setContributorState({ status: 'error', provider: null, error: response.error });
+      appLogger.warn('transcript-contributor-start-failed', { error: response.error });
+    });
+    return () => {
+      cancelled = true;
+      socket.emit('transcript-contributor-stop');
+    };
+  }, [shouldContributeTranscript, pcmCapture.supported, roomId]);
+
   // Keep peerStatesRef in sync so the mount-only socket effect can read fresh state
   useEffect(() => { peerStatesRef.current = peerStates; }, [peerStates]);
 
@@ -244,6 +295,9 @@ export default function RoomPage() {
       setMessages((prev) => [...prev, { type: 'event', text: `${u.name} left`, ts: Date.now() }]);
       pushNote({ kind: 'event', variant: 'leave', name: u.name, avatar: u.avatar });
       playSound('leave');
+      setTranscriptInterims((current) => Object.fromEntries(
+        Object.entries(current).filter(([, interim]) => interim.speaker?.id !== u.id),
+      ));
     });
     socket.on('chat-message', (msg) => {
       setMessages((prev) => [...prev, { type: 'chat', ...msg }]);
@@ -260,6 +314,54 @@ export default function RoomPage() {
           duration: 6000,
         });
       }
+    });
+    socket.on('transcript-snapshot', (snapshot) => {
+      setTranscriptState({
+        active: !!snapshot.active,
+        startedAt: snapshot.startedAt ?? null,
+        startedBy: snapshot.startedBy ?? null,
+        stoppedAt: snapshot.stoppedAt ?? null,
+      });
+      setTranscriptEntries((current) => mergeTranscriptEntries(current, snapshot.entries ?? []));
+      setTranscriptConfigured(!!snapshot.configured);
+      if (snapshot.active
+          && !hasTranscriptConsent()
+          && isPcmCaptureSupported()) {
+        setTranscriptConsentOpen(true);
+      }
+    });
+    socket.on('transcript-state', (state) => {
+      setTranscriptState(state);
+      setTranscriptInterims({});
+      if (state.active) {
+        setShowChat(false);
+        setShowTranscript(true);
+        if (!hasTranscriptConsent()
+            && isPcmCaptureSupported()) {
+          setTranscriptConsentOpen(true);
+        }
+      }
+    });
+    socket.on('transcript-segment', (entry) => {
+      setTranscriptEntries((current) => mergeTranscriptEntries(current, [entry]));
+      setLatestCaption(entry);
+      clearTimeout(captionTimerRef.current);
+      captionTimerRef.current = setTimeout(() => setLatestCaption(null), 6500);
+    });
+    socket.on('transcript-interim', (interim) => {
+      setTranscriptInterims((current) => {
+        const next = { ...current };
+        if (interim.text) next[interim.utteranceId] = interim;
+        else delete next[interim.utteranceId];
+        return next;
+      });
+    });
+    socket.on('transcript-contributor-state', (state) => {
+      setContributorState({
+        status: state.status,
+        provider: state.provider ?? null,
+        error: state.message ?? '',
+      });
     });
     socket.on('sfu-meeting-ended', () => {
       setMeetingEndedSnack(true);
@@ -295,6 +397,11 @@ export default function RoomPage() {
       socket.off('user-joined');
       socket.off('user-left');
       socket.off('chat-message');
+      socket.off('transcript-snapshot');
+      socket.off('transcript-state');
+      socket.off('transcript-segment');
+      socket.off('transcript-interim');
+      socket.off('transcript-contributor-state');
       socket.off('sfu-meeting-ended');
       socket.off('sfu-reaction');
       socket.off('sfu-hand-raise-update', onPeerHandRaise);
@@ -305,6 +412,7 @@ export default function RoomPage() {
       // the packet doesn't flush before disconnect, the grace window still covers it.
       socket.emit('leave-room', roomId);
       socket.disconnect();
+      clearTimeout(captionTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
@@ -312,6 +420,7 @@ export default function RoomPage() {
   const handleToggleChat = () => {
     const next = !showChat;
     setShowChat(next);
+    if (next) setShowTranscript(false);
     if (next) setUnreadCount(0); // clear unread when opening
   };
 
@@ -326,6 +435,65 @@ export default function RoomPage() {
   function sendReaction(emoji) {
     socket.emit('sfu-reaction', { emoji }); // echoes back via io.in → shows + sound
     setReactionAnchor(null);
+  }
+
+  function requestTranscriptStart() {
+    socket.emit('transcript-start', {}, (response) => {
+      if (response?.error) {
+        pushNote({ kind: 'event', variant: 'info', text: response.error });
+        return;
+      }
+      setShowChat(false);
+      setShowTranscript(true);
+    });
+  }
+
+  function handleToggleTranscript() {
+    if (transcriptState.active || transcriptEntries.length > 0) {
+      setShowTranscript((open) => !open);
+      setShowChat(false);
+      if (!transcriptConsent && pcmCapture.supported) setTranscriptConsentOpen(true);
+      return;
+    }
+    if (!isHost) return;
+    if (!transcriptConfigured) {
+      pushNote({ kind: 'event', variant: 'info', text: 'The server transcription providers are not configured.' });
+      return;
+    }
+    if (!pcmCapture.supported) {
+      pushNote({ kind: 'event', variant: 'info', text: 'This browser cannot stream microphone audio for transcription.' });
+      return;
+    }
+    if (!transcriptConsent) {
+      pendingTranscriptStartRef.current = true;
+      setTranscriptConsentOpen(true);
+      return;
+    }
+    requestTranscriptStart();
+  }
+
+  function acceptTranscriptConsent() {
+    try { localStorage.setItem(TRANSCRIPT_CONSENT_KEY, 'accepted'); } catch { /* session-only consent */ }
+    setTranscriptConsent(true);
+    setTranscriptConsentOpen(false);
+    if (pendingTranscriptStartRef.current) requestTranscriptStart();
+    pendingTranscriptStartRef.current = false;
+  }
+
+  function declineTranscriptConsent() {
+    pendingTranscriptStartRef.current = false;
+    setTranscriptConsentOpen(false);
+  }
+
+  function stopSharedTranscript() {
+    socket.emit('transcript-stop', {}, (response) => {
+      if (response?.error) pushNote({ kind: 'event', variant: 'info', text: response.error });
+    });
+  }
+
+  function handleDownloadTranscript() {
+    downloadTranscript({ entries: transcriptEntries, roomId, meetingTitle });
+    pushNote({ kind: 'event', variant: 'info', text: 'Shared transcript downloaded' });
   }
 
   const handlePeerVolumeChange = useCallback((peerId, name, volume) => {
@@ -859,6 +1027,11 @@ export default function RoomPage() {
           {/* Bottom-left floating emoji stream (M7.5) */}
           <ReactionsOverlay reactions={floatingReactions} />
 
+          <LiveCaptions
+            entry={transcriptState.active ? latestCaption : null}
+            interim={transcriptState.active ? latestInterim : null}
+          />
+
           {/* Top overlay: meeting info (left) + participants (right) */}
           <Box
             sx={{
@@ -910,6 +1083,24 @@ export default function RoomPage() {
                     bgcolor: 'error.main', color: '#fff', fontWeight: 600,
                     '& .MuiChip-icon': { color: 'rgba(255,255,255,0.85)' },
                     '&:hover': { bgcolor: 'error.dark' },
+                  }}
+                />
+              )}
+              {transcriptState.active && (
+                <Chip
+                  label={isMobile ? 'Live' : 'Transcript live'}
+                  size="small"
+                  onClick={() => { setShowChat(false); setShowTranscript(true); }}
+                  sx={{
+                    height: 26,
+                    cursor: 'pointer',
+                    color: '#fff',
+                    bgcolor: 'rgba(239,68,68,0.88)',
+                    '&::before': {
+                      content: '""', width: 7, height: 7, borderRadius: '50%',
+                      bgcolor: '#fff', ml: 1, mr: -0.25, animation: 'blink 1.6s ease-in-out infinite',
+                    },
+                    '&:hover': { bgcolor: 'error.main' },
                   }}
                 />
               )}
@@ -965,6 +1156,11 @@ export default function RoomPage() {
               handRaised={handRaised} onToggleHand={handleToggleHand}
               onReact={(el) => setReactionAnchor(el)}
               showChat={showChat} unreadCount={unreadCount} onToggleChat={handleToggleChat}
+              transcriptActive={transcriptState.active}
+              transcriptAvailable={transcriptState.active || transcriptEntries.length > 0}
+              showTranscript={showTranscript}
+              transcriptDisabled={!transcriptState.active && transcriptEntries.length === 0 && !isHost}
+              onToggleTranscript={handleToggleTranscript}
               soundEnabled={soundEnabled} onToggleSound={handleToggleSound}
               pipSupported={pipSupported} pipActive={pipActive} onTogglePip={handleTogglePip}
               onCopyLink={handleCopyLink}
@@ -995,6 +1191,20 @@ export default function RoomPage() {
             onClose={() => setShowChat(false)}
           />
         )}
+        <TranscriptPanel
+          open={showTranscript}
+          entries={transcriptEntries}
+          active={transcriptState.active}
+          interims={transcriptInterimList}
+          contributorStatus={shouldContributeTranscript ? contributorState.status : (localAudioOn ? 'idle' : 'paused')}
+          contributorError={contributorState.error || pcmCapture.error}
+          isHost={isHost}
+          canContribute={transcriptConsent && pcmCapture.supported && !!transcriptConfigured}
+          onEnableContribution={() => setTranscriptConsentOpen(true)}
+          onStop={stopSharedTranscript}
+          onDownload={handleDownloadTranscript}
+          onClose={() => setShowTranscript(false)}
+        />
       </Box>
 
       {/* Meeting-ended snackbar */}
@@ -1026,6 +1236,31 @@ export default function RoomPage() {
           >
             End for everyone
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={transcriptConsentOpen}
+        onClose={declineTranscriptConsent}
+        slotProps={{ paper: { sx: { borderRadius: 3, maxWidth: 500 } } }}
+      >
+        <DialogTitle sx={{ pb: 1 }}>Contribute to the shared transcript?</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5}>
+            <Typography variant="body2" color="text.secondary">
+              A Meet will stream only your microphone in English to the meeting server. Every participant's results are merged into one shared, speaker-labelled transcript.
+            </Typography>
+            <Alert severity="info" variant="outlined">
+              Audio is sent to Deepgram Nova-3 for live captions. Completed speech turns may also be sent to Groq Whisper for accuracy and jargon correction. A Meet does not save the audio.
+            </Alert>
+            <Typography variant="caption" color="text.disabled">
+              This choice is remembered on this browser. You can mute your microphone to pause your contribution.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+          <Button onClick={declineTranscriptConsent}>Not now</Button>
+          <Button variant="contained" onClick={acceptTranscriptConsent}>Allow transcription</Button>
         </DialogActions>
       </Dialog>
 
