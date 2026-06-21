@@ -4,6 +4,11 @@ import socket from '../services/socket';
 import { request } from '../services/mediasoup-signal';
 import { ICE_SERVERS, ICE_TRANSPORT_POLICY } from '../services/ice-config';
 import { appLogger } from '../utils/logger';
+import {
+  drainPendingProducers,
+  dropPendingProducersForSocket,
+  queuePendingProducer,
+} from '../utils/pending-producers';
 
 // Camera simulcast (3 spatial layers, each with L1T3 temporal layers). Single-
 // encoding video can't degrade per-receiver: when a viewer's downlink drops the
@@ -47,6 +52,7 @@ export function useMediasoup(roomId, devices = {}) {
   const peerStreamsRef = useRef(new Map());
   const screenStreamsRef = useRef(new Map());
   const producerInfoRef = useRef(new Map());
+  const pendingProducersRef = useRef(new Map());
   const screenProducerRef = useRef(null);
   const localScreenStreamRef = useRef(null);
   const handRaisedRef = useRef(false);
@@ -215,6 +221,7 @@ export function useMediasoup(roomId, devices = {}) {
     const peerStreams = peerStreamsRef.current;
     const screenStreams = screenStreamsRef.current;
     const producerInfo = producerInfoRef.current;
+    const pendingProducers = pendingProducersRef.current;
     const producers = producersRef.current;
 
     function dropPeer(socketId) {
@@ -241,6 +248,7 @@ export function useMediasoup(roomId, devices = {}) {
       const recvTransport = recvTransportRef.current;
       const device = deviceRef.current;
       if (!recvTransport || !device) {
+        queuePendingProducer(pendingProducers, { producerId, socketId, user, kind, paused, appData });
         logSfuStage('consume-skipped', {
           producerId,
           socketId,
@@ -248,6 +256,7 @@ export function useMediasoup(roomId, devices = {}) {
           source,
           hasRecvTransport: Boolean(recvTransport),
           hasDevice: Boolean(device),
+          queued: true,
         }, 'warn');
         return;
       }
@@ -371,6 +380,7 @@ export function useMediasoup(roomId, devices = {}) {
         consumers.delete(cid);
         producerInfo.delete(entry.producerId);
       }
+      dropPendingProducersForSocket(pendingProducers, socketId);
       peerStreams.delete(socketId);
       screenStreams.delete(socketId);
       dropPeer(socketId);
@@ -560,6 +570,12 @@ export function useMediasoup(roomId, devices = {}) {
       logSfuStage('existing-producers-received', { count: existing.length });
       for (const prod of existing) await consumeProducer(prod);
 
+      const queued = drainPendingProducers(pendingProducers);
+      if (queued.length > 0) {
+        logSfuStage('pending-producers-drained', { count: queued.length });
+        for (const prod of queued) await consumeProducer(prod);
+      }
+
       // Re-assert raise-hand after a reconnect: the server creates a fresh peer
       // (handRaised=false) on rejoin, so without this the indicator others saw
       // would silently clear. handRaisedRef persists across reconnects.
@@ -648,6 +664,7 @@ export function useMediasoup(roomId, devices = {}) {
       peerStreams.clear();
       screenStreams.clear();
       producerInfo.clear();
+      pendingProducers.clear();
       producers.clear();
       setRemoteStreams({});
       setRemoteScreens({});
@@ -703,6 +720,7 @@ export function useMediasoup(roomId, devices = {}) {
       peerStreams.clear();
       screenStreams.clear();
       producerInfo.clear();
+      pendingProducers.clear();
 
       try { screenProducerRef.current?.close(); } catch { /* gone */ }
       screenProducerRef.current = null;
