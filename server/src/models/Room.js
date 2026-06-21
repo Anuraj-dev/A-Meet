@@ -4,6 +4,13 @@ const roomSchema = new mongoose.Schema(
   {
     roomId: { type: String, required: true, unique: true, index: true },
     host: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    // The person who created this meeting. This is deliberately persisted
+    // separately from transient room membership, so leaving/rejoining can
+    // never remove their administrator privileges.
+    //
+    // `host` is retained for scheduled-meeting compatibility. Older rooms that
+    // predate this field treat `host` as their admin in room-admin.js.
+    admin: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     active: { type: Boolean, default: true },
     participants: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     // Scheduling metadata. Instant meetings leave these at their defaults; a

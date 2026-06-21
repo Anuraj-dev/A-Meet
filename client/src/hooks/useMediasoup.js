@@ -56,21 +56,31 @@ export function useMediasoup(roomId, devices = {}) {
   const gainDestRef = useRef(null);
   const micGainRef = useRef(1);        // desired mic gain (persists across reconnects)
   const devicesRef = useRef(devices);
+  // These are the user's requested states, independent of whether mediasoup
+  // has finished creating producers yet. On first join the local camera/mic is
+  // available a little before the SFU negotiation completes; without these
+  // refs, a click in that window was silently ignored.
+  const desiredAudioOnRef = useRef(devices.startAudioOn ?? true);
+  const desiredVideoOnRef = useRef(devices.startVideoOn ?? true);
   const initializedRef = useRef(false);
   useEffect(() => { devicesRef.current = devices; }, [devices]);
 
   const toggleAudio = useCallback(async () => {
+    const next = !desiredAudioOnRef.current;
+    desiredAudioOnRef.current = next;
+    localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = next; });
+    // Update the local UI immediately. If negotiation is still in flight,
+    // setupSfu reads the ref and creates the producer in this requested state.
+    setLocalAudioOn(next && localStreamRef.current?.getAudioTracks().length > 0);
     const producer = producersRef.current.get('audio');
     if (!producer) return;
     try {
-      if (producer.paused) {
+      if (next) {
         producer.resume();
         await request('sfu-resume-producer', { producerId: producer.id });
-        setLocalAudioOn(true);
       } else {
         producer.pause();
         await request('sfu-pause-producer', { producerId: producer.id });
-        setLocalAudioOn(false);
       }
     } catch (err) {
       if (import.meta.env.DEV) console.warn('[sfu] toggle audio failed:', err.message);
@@ -78,17 +88,19 @@ export function useMediasoup(roomId, devices = {}) {
   }, []);
 
   const toggleVideo = useCallback(async () => {
+    const next = !desiredVideoOnRef.current;
+    desiredVideoOnRef.current = next;
+    localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = next; });
+    setLocalVideoOn(next && localStreamRef.current?.getVideoTracks().length > 0);
     const producer = producersRef.current.get('video');
     if (producer) {
       try {
-        if (producer.paused) {
+        if (next) {
           producer.resume();
           await request('sfu-resume-producer', { producerId: producer.id });
-          setLocalVideoOn(true);
         } else {
           producer.pause();
           await request('sfu-pause-producer', { producerId: producer.id });
-          setLocalVideoOn(false);
         }
       } catch (err) {
         if (import.meta.env.DEV) console.warn('[sfu] toggle video failed:', err.message);
@@ -96,6 +108,10 @@ export function useMediasoup(roomId, devices = {}) {
       return;
     }
 
+    // The common first-join path already has a camera track. If there is no
+    // track (permission was granted later / no camera at entry), wait until the
+    // send transport exists rather than pretending the camera is on.
+    if (!next) return;
     const sendTransport = sendTransportRef.current;
     if (!sendTransport || !deviceRef.current?.canProduce('video')) return;
     const { videoDeviceId } = devicesRef.current;
@@ -114,7 +130,7 @@ export function useMediasoup(roomId, devices = {}) {
       });
       producersRef.current.set('video', newProducer);
       newProducer.on('transportclose', () => producersRef.current.delete('video'));
-      setLocalVideoOn(true);
+      setLocalVideoOn(desiredVideoOnRef.current);
       setHasCamera(true);
     } catch (err) {
       if (import.meta.env.DEV) console.warn('[sfu] camera still unavailable:', err.name);
@@ -365,8 +381,6 @@ export function useMediasoup(roomId, devices = {}) {
       recvTransportRef.current = null;
       deviceRef.current = null;
 
-      const { startVideoOn = true, startAudioOn = true } = devicesRef.current;
-
       const { rtpCapabilities } = await request('sfu-get-rtp-capabilities', { roomId });
       if (cancelled) return;
 
@@ -466,9 +480,9 @@ export function useMediasoup(roomId, devices = {}) {
         });
         producers.set('audio', p);
         p.on('transportclose', () => producers.delete('audio'));
-        if (!startAudioOn) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
-        setLocalAudioOn(!!startAudioOn);
-        appLogger.info('audio producer created', { producerId: p.id, startAudioOn: !!startAudioOn });
+        if (!desiredAudioOnRef.current) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
+        setLocalAudioOn(desiredAudioOnRef.current);
+        appLogger.info('audio producer created', { producerId: p.id, audioOn: desiredAudioOnRef.current });
       }
       const videoTrack = stream?.getVideoTracks()[0];
       if (videoTrack && device.canProduce('video')) {
@@ -480,8 +494,8 @@ export function useMediasoup(roomId, devices = {}) {
         });
         producers.set('video', p);
         p.on('transportclose', () => producers.delete('video'));
-        if (!startVideoOn) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
-        setLocalVideoOn(!!startVideoOn);
+        if (!desiredVideoOnRef.current) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
+        setLocalVideoOn(desiredVideoOnRef.current);
       }
       if (cancelled) return;
 
@@ -535,6 +549,11 @@ export function useMediasoup(roomId, devices = {}) {
       setLocalStream(stream);
       setHasMic(hasMicTrack);
       setHasCamera(hasCamTrack);
+      // Show the actual requested device state as soon as capture completes,
+      // not only after the async SFU producer handshake. This keeps controls
+      // truthful and makes immediate first-join clicks deterministic.
+      setLocalAudioOn(hasMicTrack && desiredAudioOnRef.current);
+      setLocalVideoOn(hasCamTrack && desiredVideoOnRef.current);
 
       socket.connect();
 

@@ -209,7 +209,7 @@ export default function PeoplePanel({
                   {p.name}{p.isLocal ? ' (You)' : ''}
                 </Typography>
                 {p.isHost && (
-                  <Typography variant="caption" color="text.secondary">Host</Typography>
+                  <Typography variant="caption" color="text.secondary">Admin</Typography>
                 )}
               </Box>
 
