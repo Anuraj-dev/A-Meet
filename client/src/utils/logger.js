@@ -1,10 +1,16 @@
-// Client-side batched logger. Buffers entries and flushes to /api/logs/client
-// every 5 seconds or when the buffer reaches 20 entries.
+// Client-side batched logger. Buffers entries and flushes to the API backend's
+// /api/logs/client endpoint every 5 seconds or when the buffer reaches 20 entries.
 // Uses navigator.sendBeacon on page hide for zero-loss unload flush.
 
 const FLUSH_INTERVAL_MS = 5000;
 const MAX_BUFFER = 20;
-const ENDPOINT = '/api/logs/client';
+
+export function resolveClientLogEndpoint(serverUrl = import.meta.env.VITE_SERVER_URL) {
+  if (!serverUrl) return '/api/logs/client';
+  return `${serverUrl.replace(/\/$/, '')}/api/logs/client`;
+}
+
+const ENDPOINT = resolveClientLogEndpoint();
 
 // Stable per-session correlation ID so client and server logs for the same
 // browser session can be joined in Grafana / grepped in the log file.

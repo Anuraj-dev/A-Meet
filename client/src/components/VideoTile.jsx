@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Avatar, Box, Chip, Divider, IconButton, ListItemIcon, ListItemText, MenuList,
-  MenuItem, Popover, Slider, Stack, Tooltip, Typography,
+  Avatar, Box, Chip, Divider, IconButton, ListItemIcon, MenuList,
+  MenuItem, Popover, Slider, Tooltip, Typography,
 } from '@mui/material';
 import {
   Fullscreen as FullscreenIcon,
@@ -476,18 +476,18 @@ export default function VideoTile({
           {onPin && (
             <MenuItem onClick={() => { onPin(); setVolumeMenuOpen(false); }}>
               <ListItemIcon>{pinned ? <PinIcon fontSize="small" /> : <PinOutlineIcon fontSize="small" />}</ListItemIcon>
-              <ListItemText slotProps={{ primary: { variant: 'body2' } }}>{pinned ? 'Unpin for me' : 'Pin for me'}</ListItemText>
+              <Typography variant="body2">{pinned ? 'Unpin for me' : 'Pin for me'}</Typography>
             </MenuItem>
           )}
           {canSpotlight && onSpotlight && (
             <MenuItem onClick={() => { onSpotlight(); setVolumeMenuOpen(false); }}>
               <ListItemIcon><SpotlightIcon fontSize="small" sx={{ color: spotlighted ? 'primary.main' : undefined }} /></ListItemIcon>
-              <ListItemText slotProps={{ primary: { variant: 'body2' } }}>{spotlighted ? 'Remove spotlight' : 'Spotlight for everyone'}</ListItemText>
+              <Typography variant="body2">{spotlighted ? 'Remove spotlight' : 'Spotlight for everyone'}</Typography>
             </MenuItem>
           )}
           <MenuItem onClick={() => { enterFullscreen(); setVolumeMenuOpen(false); }}>
             <ListItemIcon><FullscreenIcon fontSize="small" /></ListItemIcon>
-            <ListItemText slotProps={{ primary: { variant: 'body2' } }}>Fullscreen</ListItemText>
+            <Typography variant="body2">Fullscreen</Typography>
           </MenuItem>
         </MenuList>
 
@@ -497,7 +497,7 @@ export default function VideoTile({
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
               Output volume
             </Typography>
-            <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               {peerVolume === 0
                 ? <VolumeOffIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
                 : <VolumeUpIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />}
@@ -516,7 +516,7 @@ export default function VideoTile({
               <Typography variant="caption" sx={{ minWidth: 34, textAlign: 'right', color: 'text.secondary' }}>
                 {Math.round(peerVolume * 100)}%
               </Typography>
-            </Stack>
+            </Box>
           </Box>
         )}
       </Popover>
