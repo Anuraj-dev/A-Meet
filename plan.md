@@ -263,7 +263,7 @@ Stack: MERN · JavaScript · Material UI · Socket.io · mediasoup SFU.
 - [x] M12.10 Client handlers wired (dedicated effect): `sfu-force-muted` → mic off + note,
   `sfu-unmute-request` → one-tap Unmute snackbar (never forced), `sfu-removed` → leave,
   `sfu-spotlight` → `spotlightKey` so everyone's stage follows the host.
-- [~] M12.11 Build passes; client 17 + server 31 tests green; **zero new lint errors**
+- [~] M12.11 Build passes; client 22 + server 41 tests green; **zero new lint errors**
   (the 3 `set-state-in-effect` errors pre-exist on HEAD). Anuraj manual verify (needs 2
   peers) + `/journal M12` still pending.
 

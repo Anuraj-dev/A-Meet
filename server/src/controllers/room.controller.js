@@ -1,5 +1,6 @@
 import { customAlphabet } from 'nanoid';
 import { Room } from '../models/Room.js';
+import { isRoomAdmin } from '../rooms/room-admin.js';
 
 // Generates a Google Meet-style code: xxx-xxxx-xxx (lowercase letters only).
 const segment = customAlphabet('abcdefghijklmnopqrstuvwxyz', 1);
@@ -38,7 +39,7 @@ function toMeetingDto(room) {
 // POST /api/rooms — create a new instant room (host = current user).
 export async function createRoom(req, res, next) {
   try {
-    const room = await createUniqueRoom({ host: req.user.id });
+    const room = await createUniqueRoom({ host: req.user.id, admin: req.user.id });
     if (!room) return res.status(500).json({ error: 'Could not generate a unique room code' });
     res.status(201).json({ roomId: room.roomId });
   } catch (err) {
@@ -53,6 +54,7 @@ export async function createScheduledRoom(req, res, next) {
     const { title, scheduledFor, description } = req.body;
     const room = await createUniqueRoom({
       host: req.user.id,
+      admin: req.user.id,
       title,
       scheduledFor,
       description,
@@ -90,7 +92,7 @@ async function loadOwnedMeeting(req, res) {
     res.status(404).json({ error: 'Meeting not found' });
     return null;
   }
-  if (room.host.toString() !== req.user.id) {
+  if (!isRoomAdmin(room, req.user.id)) {
     res.status(403).json({ error: 'Only the host can change this meeting' });
     return null;
   }
@@ -135,6 +137,7 @@ export async function getRoom(req, res, next) {
     const roomId = String(req.params.roomId || '').toLowerCase();
     const room = await Room.findOne({ roomId })
       .populate('host', 'name avatar')
+      .populate('admin', 'name avatar')
       .lean();
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
@@ -144,9 +147,17 @@ export async function getRoom(req, res, next) {
       // can show "this meeting has ended" instead of "check your code".
       return res.status(410).json({ error: 'Meeting has ended', ended: true });
     }
+    // Persist the explicit flag as legacy rooms are next accessed. The response
+    // still uses the fallback immediately, so a creator never loses admin UI
+    // while the backfill happens.
+    const admin = room.admin ?? room.host;
+    if (!room.admin && room.host?._id) {
+      void Room.updateOne({ _id: room._id, admin: null }, { $set: { admin: room.host._id } }).catch(() => {});
+    }
     res.json({
       roomId: room.roomId,
       host: room.host,
+      admin,
       active: room.active,
       title: room.title,
       description: room.description,

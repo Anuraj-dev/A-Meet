@@ -12,6 +12,7 @@ import {
   listOtherProducers, removePeer, closeRoomIfEmpty,
 } from '../sfu/sfu-rooms.js';
 import { Room } from '../models/Room.js';
+import { isRoomAdmin } from '../rooms/room-admin.js';
 import { logger } from '../config/logger.js';
 
 // socketId → roomId, established on get-rtp-capabilities. SFU-scoped (independent
@@ -301,7 +302,7 @@ export function registerSfuHandlers(io, socket) {
     if (!roomId) return;
     try {
       const room = await Room.findOne({ roomId });
-      if (!room || room.host.toString() !== socket.user?.id) return;
+      if (!isRoomAdmin(room, socket.user?.id)) return;
       io.to(roomId).emit('sfu-meeting-ended');
       await Room.updateOne({ roomId }, { $set: { active: false } });
     } catch { /* ignore */ }
@@ -321,7 +322,7 @@ export function registerSfuHandlers(io, socket) {
     if (!roomId) return null;
     try {
       const room = await Room.findOne({ roomId });
-      if (!room || room.host.toString() !== socket.user?.id) return null;
+      if (!isRoomAdmin(room, socket.user?.id)) return null;
       return roomId;
     } catch { return null; }
   }

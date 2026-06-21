@@ -133,7 +133,7 @@ export default function ControlBar({
 
       {!isMobile && (
         <CircleButton
-          title={transcriptDisabled ? 'The host starts the shared transcript' : transcriptAvailable ? (showTranscript ? 'Hide transcript' : 'Show transcript') : 'Start shared transcript'}
+          title={transcriptDisabled ? 'The meeting admin starts the shared transcript' : transcriptAvailable ? (showTranscript ? 'Hide transcript' : 'Show transcript') : 'Start shared transcript'}
           onClick={onToggleTranscript}
           disabled={transcriptDisabled}
           variant={transcriptActive ? 'active' : 'idle'}

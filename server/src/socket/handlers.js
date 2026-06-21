@@ -2,6 +2,7 @@ import { addUser, removeUser, getRoomUsers, isUserInRoom, getUserRoom } from './
 import { registerWebrtcHandlers } from './webrtc.js';
 import { registerSfuHandlers } from './sfu-handlers.js';
 import { Room } from '../models/Room.js';
+import { isRoomAdmin } from '../rooms/room-admin.js';
 import {
   cancelTranscriptExpiry,
   getTranscriptSnapshot,
@@ -112,9 +113,9 @@ export function registerHandlers(io) {
       if (!roomId) return callback?.({ error: 'Not in a room' });
       if (!transcriptionConfigured()) return callback?.({ error: 'Transcription providers are not configured' });
       try {
-        const room = await Room.findOne({ roomId }).select('host').lean();
-        if (!room || room.host.toString() !== socket.user.id) {
-          return callback?.({ error: 'Only the host can start the transcript' });
+        const room = await Room.findOne({ roomId }).select('host admin').lean();
+        if (!isRoomAdmin(room, socket.user.id)) {
+          return callback?.({ error: 'Only the meeting admin can start the transcript' });
         }
         const state = startTranscript(roomId, socket.user);
         io.to(roomId).emit('transcript-state', state);
@@ -129,9 +130,9 @@ export function registerHandlers(io) {
       const roomId = getUserRoom(socket.id);
       if (!roomId) return callback?.({ error: 'Not in a room' });
       try {
-        const room = await Room.findOne({ roomId }).select('host').lean();
-        if (!room || room.host.toString() !== socket.user.id) {
-          return callback?.({ error: 'Only the host can stop the transcript' });
+        const room = await Room.findOne({ roomId }).select('host admin').lean();
+        if (!isRoomAdmin(room, socket.user.id)) {
+          return callback?.({ error: 'Only the meeting admin can stop the transcript' });
         }
         await stopRoomContributors(roomId);
         const state = stopTranscript(roomId);

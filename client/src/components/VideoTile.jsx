@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Avatar, Box, Chip, Divider, IconButton, ListItemIcon, ListItemText,
+  Avatar, Box, Chip, Divider, IconButton, ListItemIcon, ListItemText, MenuList,
   MenuItem, Popover, Slider, Stack, Tooltip, Typography,
 } from '@mui/material';
 import {
@@ -52,7 +52,7 @@ export default function VideoTile({
   const initial = name?.trim()?.[0]?.toUpperCase() ?? '?';
   const levelRef = useAudioLevel(audioStream ?? stream, audioOn);
   const [hovered, setHovered] = useState(false);
-  const [volAnchor, setVolAnchor] = useState(null);
+  const [volumeMenuOpen, setVolumeMenuOpen] = useState(false);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -408,25 +408,31 @@ export default function VideoTile({
             position: 'absolute',
             bottom: 'clamp(10px, 3.5cqmin, 16px)',
             right: 'clamp(10px, 3.5cqmin, 16px)',
-            opacity: hovered || Boolean(volAnchor) ? 1 : 0.65,
+            opacity: hovered || volumeMenuOpen ? 1 : 0.65,
             transition: 'opacity 0.15s, transform 0.15s',
-            transform: hovered || Boolean(volAnchor) ? 'scale(1.05)' : 'scale(1)',
+            transform: hovered || volumeMenuOpen ? 'scale(1.05)' : 'scale(1)',
             zIndex: 2,
           }}
         >
           <Tooltip title={peerVolume === 0 && showVolumeControl ? `${name ?? 'Participant'} muted for you` : 'Tile options'}>
             <IconButton
               size="small"
-              onClick={() => setVolAnchor(volAnchor ? null : volBtnRef.current)}
+              onClick={(event) => {
+                // Tile controls are local UI only. Keeping the menu state as a
+                // boolean and resolving the anchor from a ref avoids retaining
+                // a detached DOM node when a tile/layout updates underneath it.
+                event.stopPropagation();
+                setVolumeMenuOpen((open) => !open);
+              }}
               sx={{
                 width: 'clamp(28px, 8.5cqmin, 34px)',
                 height: 'clamp(28px, 8.5cqmin, 34px)',
-                bgcolor: volAnchor ? 'primary.main' : 'rgba(0,0,0,0.6)',
+                bgcolor: volumeMenuOpen ? 'primary.main' : 'rgba(0,0,0,0.6)',
                 backdropFilter: 'blur(4px)',
                 WebkitBackdropFilter: 'blur(4px)',
                 color: '#fff',
                 boxShadow: '0 1px 6px rgba(0,0,0,0.45)',
-                '&:hover': { bgcolor: volAnchor ? 'primary.main' : 'rgba(0,0,0,0.8)' },
+                '&:hover': { bgcolor: volumeMenuOpen ? 'primary.main' : 'rgba(0,0,0,0.8)' },
               }}
             >
               {showVolumeControl && peerVolume === 0
@@ -442,9 +448,9 @@ export default function VideoTile({
         to nest. Pin/spotlight/fullscreen rows, then the per-peer volume slider. */}
     {hasMenu && (
       <Popover
-        open={Boolean(volAnchor)}
-        anchorEl={volAnchor}
-        onClose={() => setVolAnchor(null)}
+        open={volumeMenuOpen}
+        anchorEl={() => volBtnRef.current}
+        onClose={() => setVolumeMenuOpen(false)}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
         transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         slotProps={{
@@ -463,22 +469,27 @@ export default function VideoTile({
           {name}
         </Typography>
 
-        {onPin && (
-          <MenuItem onClick={() => { onPin(); setVolAnchor(null); }}>
-            <ListItemIcon>{pinned ? <PinIcon fontSize="small" /> : <PinOutlineIcon fontSize="small" />}</ListItemIcon>
-            <ListItemText primaryTypographyProps={{ variant: 'body2' }}>{pinned ? 'Unpin for me' : 'Pin for me'}</ListItemText>
+        {/* MUI MenuItem requires MenuList context. Without this wrapper, opening
+            the three-dot popover throws a render error and RoomPage cleanup
+            disconnects the caller from the meeting. */}
+        <MenuList disablePadding>
+          {onPin && (
+            <MenuItem onClick={() => { onPin(); setVolumeMenuOpen(false); }}>
+              <ListItemIcon>{pinned ? <PinIcon fontSize="small" /> : <PinOutlineIcon fontSize="small" />}</ListItemIcon>
+              <ListItemText slotProps={{ primary: { variant: 'body2' } }}>{pinned ? 'Unpin for me' : 'Pin for me'}</ListItemText>
+            </MenuItem>
+          )}
+          {canSpotlight && onSpotlight && (
+            <MenuItem onClick={() => { onSpotlight(); setVolumeMenuOpen(false); }}>
+              <ListItemIcon><SpotlightIcon fontSize="small" sx={{ color: spotlighted ? 'primary.main' : undefined }} /></ListItemIcon>
+              <ListItemText slotProps={{ primary: { variant: 'body2' } }}>{spotlighted ? 'Remove spotlight' : 'Spotlight for everyone'}</ListItemText>
+            </MenuItem>
+          )}
+          <MenuItem onClick={() => { enterFullscreen(); setVolumeMenuOpen(false); }}>
+            <ListItemIcon><FullscreenIcon fontSize="small" /></ListItemIcon>
+            <ListItemText slotProps={{ primary: { variant: 'body2' } }}>Fullscreen</ListItemText>
           </MenuItem>
-        )}
-        {canSpotlight && onSpotlight && (
-          <MenuItem onClick={() => { onSpotlight(); setVolAnchor(null); }}>
-            <ListItemIcon><SpotlightIcon fontSize="small" sx={{ color: spotlighted ? 'primary.main' : undefined }} /></ListItemIcon>
-            <ListItemText primaryTypographyProps={{ variant: 'body2' }}>{spotlighted ? 'Remove spotlight' : 'Spotlight for everyone'}</ListItemText>
-          </MenuItem>
-        )}
-        <MenuItem onClick={() => { enterFullscreen(); setVolAnchor(null); }}>
-          <ListItemIcon><FullscreenIcon fontSize="small" /></ListItemIcon>
-          <ListItemText primaryTypographyProps={{ variant: 'body2' }}>Fullscreen</ListItemText>
-        </MenuItem>
+        </MenuList>
 
         {showVolumeControl && (
           <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
@@ -494,7 +505,12 @@ export default function VideoTile({
                 size="small"
                 min={0} max={1} step={0.05}
                 value={peerVolume}
-                onChange={(_, v) => onPeerVolumeChange?.(v)}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event, value) => {
+                  event.stopPropagation();
+                  if (typeof value === 'number') onPeerVolumeChange?.(value);
+                }}
                 sx={{ color: 'primary.main' }}
               />
               <Typography variant="caption" sx={{ minWidth: 34, textAlign: 'right', color: 'text.secondary' }}>

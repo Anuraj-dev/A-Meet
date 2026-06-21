@@ -128,15 +128,20 @@ export default function RoomPage() {
   // it — Meet only chimes when you actually arrive, not on each reconnect.
   const selfJoinChimeRef = useRef(false);
 
-  // Determine whether the current user created (and therefore hosts) this room
-  // so we can offer "End for everyone" vs "Leave call" on the leave button.
+  // The backend persists the creator as the meeting's admin. Re-evaluate this
+  // on every room/user change (including a leave + rejoin) instead of relying
+  // on transient socket membership.
   useEffect(() => {
+    let active = true;
     fetch(`/api/rooms/${roomId}`, { credentials: 'include' })
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
-        if (data?.host && user?.id && data.host._id === user.id) setIsHost(true);
+        if (!active) return;
+        const adminId = data?.admin?._id ?? data?.admin?.id ?? data?.host?._id ?? data?.host?.id;
+        setIsHost(Boolean(user?.id && adminId && String(adminId) === String(user.id)));
       })
-      .catch(() => {});
+      .catch(() => { if (active) setIsHost(false); });
+    return () => { active = false; };
   }, [roomId, user?.id]);
 
   // Push a transient notification; auto-dismisses after `duration` ms.
@@ -436,9 +441,9 @@ export default function RoomPage() {
   useEffect(() => {
     const onForceMuted = () => {
       if (localAudioOn) { playSound('toggleOff'); toggleAudio(); }
-      pushNote({ kind: 'event', variant: 'info', text: 'You were muted by the host' });
+      pushNote({ kind: 'event', variant: 'info', text: 'You were muted by the meeting admin' });
     };
-    const onUnmuteRequest = ({ by } = {}) => setUnmuteRequestFrom(by ?? 'The host');
+    const onUnmuteRequest = ({ by } = {}) => setUnmuteRequestFrom(by ?? 'The meeting admin');
     const onRemoved = () => {
       playSound('callEnd');
       setMeetingEndedSnack(false);
@@ -1427,7 +1432,7 @@ export default function RoomPage() {
       {/* Meeting-ended snackbar */}
       <Snackbar open={meetingEndedSnack} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
         <Alert severity="info" variant="filled" sx={{ width: '100%' }}>
-          The meeting has been ended by the host.
+          The meeting has been ended by the meeting admin.
         </Alert>
       </Snackbar>
 
@@ -1469,7 +1474,7 @@ export default function RoomPage() {
         <DialogTitle sx={{ pb: 1 }}>Leave this meeting?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            You're the host. You can leave quietly and let others continue, or end the meeting for everyone.
+            You're the meeting admin. You can leave quietly and let others continue, or end the meeting for everyone.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
