@@ -65,6 +65,11 @@ export function useMediasoup(roomId, devices = {}) {
   const initializedRef = useRef(false);
   useEffect(() => { devicesRef.current = devices; }, [devices]);
 
+  const logSfuStage = useCallback((stage, data = {}, level = 'info') => {
+    const fn = appLogger[level] ?? appLogger.info;
+    fn('sfu-stage', { roomId, stage, ...data });
+  }, [roomId]);
+
   const toggleAudio = useCallback(async () => {
     const next = !desiredAudioOnRef.current;
     desiredAudioOnRef.current = next;
@@ -235,11 +240,22 @@ export function useMediasoup(roomId, devices = {}) {
       const source = appData?.source === 'screen' ? 'screen' : 'camera';
       const recvTransport = recvTransportRef.current;
       const device = deviceRef.current;
-      if (!recvTransport || !device) return;
+      if (!recvTransport || !device) {
+        logSfuStage('consume-skipped', {
+          producerId,
+          socketId,
+          kind,
+          source,
+          hasRecvTransport: Boolean(recvTransport),
+          hasDevice: Boolean(device),
+        }, 'warn');
+        return;
+      }
       if (producerInfo.has(producerId)) return;
       producerInfo.set(producerId, { socketId, kind, source });
 
       try {
+        logSfuStage('consume-requested', { producerId, socketId, kind, source });
         const params = await request('sfu-consume', {
           transportId: recvTransport.id,
           producerId,
@@ -247,6 +263,13 @@ export function useMediasoup(roomId, devices = {}) {
         });
         if (cancelled) return;
 
+        logSfuStage('consume-params-received', {
+          producerId,
+          socketId,
+          consumerId: params.id,
+          kind: params.kind,
+          source,
+        });
         const consumer = await recvTransport.consume({
           id: params.id,
           producerId: params.producerId,
@@ -275,6 +298,7 @@ export function useMediasoup(roomId, devices = {}) {
         }
 
         await request('sfu-resume-consumer', { consumerId: consumer.id });
+        logSfuStage('consumer-resumed', { producerId, socketId, consumerId: consumer.id, kind: params.kind, source });
 
         if (source !== 'screen') {
           const off = paused || params.producerPaused;
@@ -294,6 +318,13 @@ export function useMediasoup(roomId, devices = {}) {
         setPeerConnectionStates((prev) => ({ ...prev, [socketId]: recvTransportRef.current?.connectionState }));
       } catch (err) {
         producerInfo.delete(producerId);
+        logSfuStage('consume-failed', {
+          producerId,
+          socketId,
+          kind,
+          source,
+          err: err.message,
+        }, 'error');
         if (import.meta.env.DEV) console.warn('[sfu] consume failed:', err.message);
       }
     }
@@ -373,6 +404,10 @@ export function useMediasoup(roomId, devices = {}) {
     // Does NOT re-acquire media; expects `stream` to already be set in localStreamRef.
     async function setupSfu(stream) {
       if (cancelled) return;
+      logSfuStage('setup-started', {
+        hasAudioTrack: Boolean(stream?.getAudioTracks()[0]),
+        hasVideoTrack: Boolean(stream?.getVideoTracks()[0]),
+      });
 
       // Close any stale transports from a previous session before signaling.
       try { sendTransportRef.current?.close(); } catch { /* gone */ }
@@ -381,13 +416,17 @@ export function useMediasoup(roomId, devices = {}) {
       recvTransportRef.current = null;
       deviceRef.current = null;
 
+      logSfuStage('rtp-capabilities-requested');
       const { rtpCapabilities } = await request('sfu-get-rtp-capabilities', { roomId });
       if (cancelled) return;
+      logSfuStage('rtp-capabilities-received');
 
       const device = new Device();
       await device.load({ routerRtpCapabilities: rtpCapabilities });
       deviceRef.current = device;
+      logSfuStage('device-loaded');
 
+      logSfuStage('send-transport-requested');
       const sendParams = await request('sfu-create-transport', { direction: 'send' });
       if (cancelled) return;
       // iceServers/iceTransportPolicy let the browser relay through coturn when
@@ -397,15 +436,23 @@ export function useMediasoup(roomId, devices = {}) {
         iceServers: ICE_SERVERS,
         iceTransportPolicy: ICE_TRANSPORT_POLICY,
       });
+      logSfuStage('send-transport-created', { transportId: sendTransport.id });
       sendTransport.on('connect', ({ dtlsParameters }, cb, errb) => {
+        logSfuStage('send-transport-connect-requested', { transportId: sendTransport.id });
         request('sfu-connect-transport', { transportId: sendTransport.id, dtlsParameters }).then(cb).catch(errb);
       });
       sendTransport.on('produce', ({ kind, rtpParameters, appData }, cb, errb) => {
+        logSfuStage('produce-requested', { transportId: sendTransport.id, kind, source: appData?.source, mediaTag: appData?.mediaTag });
         request('sfu-produce', { transportId: sendTransport.id, kind, rtpParameters, appData })
           .then(({ id }) => cb({ id })).catch(errb);
       });
+      sendTransport.on('connectionstatechange', (state) => {
+        const level = state === 'failed' ? 'error' : state === 'connected' ? 'info' : 'debug';
+        logSfuStage('send-transport-state', { transportId: sendTransport.id, state }, level);
+      });
       sendTransportRef.current = sendTransport;
 
+      logSfuStage('recv-transport-requested');
       const recvParams = await request('sfu-create-transport', { direction: 'recv' });
       if (cancelled) return;
       const recvTransport = device.createRecvTransport({
@@ -413,7 +460,9 @@ export function useMediasoup(roomId, devices = {}) {
         iceServers: ICE_SERVERS,
         iceTransportPolicy: ICE_TRANSPORT_POLICY,
       });
+      logSfuStage('recv-transport-created', { transportId: recvTransport.id });
       recvTransport.on('connect', ({ dtlsParameters }, cb, errb) => {
+        logSfuStage('recv-transport-connect-requested', { transportId: recvTransport.id });
         request('sfu-connect-transport', { transportId: recvTransport.id, dtlsParameters }).then(cb).catch(errb);
       });
       // One recv transport serves every remote peer, so its live ICE/DTLS state
@@ -423,6 +472,8 @@ export function useMediasoup(roomId, devices = {}) {
       // never clears once the transport reaches "connected". (A peer leaving
       // closes consumers, not this transport, so this won't false-flag tiles.)
       recvTransport.on('connectionstatechange', (state) => {
+        const level = state === 'failed' ? 'error' : state === 'connected' ? 'info' : 'debug';
+        logSfuStage('recv-transport-state', { transportId: recvTransport.id, state }, level);
         setPeerConnectionStates((prev) => {
           const ids = Object.keys(prev);
           if (ids.length === 0) return prev;
@@ -435,6 +486,7 @@ export function useMediasoup(roomId, devices = {}) {
 
       const audioTrack = stream?.getAudioTracks()[0];
       if (audioTrack && device.canProduce('audio')) {
+        logSfuStage('audio-producer-started');
         // Build the gain graph before producing. The GainNode is always in the
         // signal path (gain=1.0 at startup = transparent passthrough). Matching
         // sampleRate to the captured track prevents resampling on PipeWire.
@@ -483,9 +535,11 @@ export function useMediasoup(roomId, devices = {}) {
         if (!desiredAudioOnRef.current) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
         setLocalAudioOn(desiredAudioOnRef.current);
         appLogger.info('audio producer created', { producerId: p.id, audioOn: desiredAudioOnRef.current });
+        logSfuStage('audio-producer-created', { producerId: p.id, audioOn: desiredAudioOnRef.current });
       }
       const videoTrack = stream?.getVideoTracks()[0];
       if (videoTrack && device.canProduce('video')) {
+        logSfuStage('video-producer-started');
         const p = await sendTransport.produce({
           track: videoTrack,
           encodings: CAM_VIDEO_ENCODINGS,
@@ -496,11 +550,14 @@ export function useMediasoup(roomId, devices = {}) {
         p.on('transportclose', () => producers.delete('video'));
         if (!desiredVideoOnRef.current) { p.pause(); await request('sfu-pause-producer', { producerId: p.id }); }
         setLocalVideoOn(desiredVideoOnRef.current);
+        logSfuStage('video-producer-created', { producerId: p.id, videoOn: desiredVideoOnRef.current });
       }
       if (cancelled) return;
 
+      logSfuStage('existing-producers-requested');
       const existing = await request('sfu-get-producers');
       if (cancelled) return;
+      logSfuStage('existing-producers-received', { count: existing.length });
       for (const prod of existing) await consumeProducer(prod);
 
       // Re-assert raise-hand after a reconnect: the server creates a fresh peer
@@ -545,6 +602,11 @@ export function useMediasoup(roomId, devices = {}) {
       const hasMicTrack = stream.getAudioTracks().length > 0;
       const hasCamTrack = stream.getVideoTracks().length > 0;
       appLogger.info('media acquired', { hasMic: hasMicTrack, hasCamera: hasCamTrack, permissionDenied: deniedCount === 2 });
+      logSfuStage('media-acquired', {
+        hasMic: hasMicTrack,
+        hasCamera: hasCamTrack,
+        permissionDenied: deniedCount === 2,
+      });
       localStreamRef.current = stream;
       setLocalStream(stream);
       setHasMic(hasMicTrack);
@@ -569,8 +631,10 @@ export function useMediasoup(roomId, devices = {}) {
         await setupSfu(stream);
         initializedRef.current = true;
         appLogger.info('SFU init complete');
+        logSfuStage('setup-complete');
       } catch (err) {
         appLogger.error('SFU init failed', { err: err.message });
+        logSfuStage('setup-failed', { err: err.message }, 'error');
         if (!cancelled && import.meta.env.DEV) console.error('[sfu] init failed:', err.message);
       }
     }
@@ -600,8 +664,10 @@ export function useMediasoup(roomId, devices = {}) {
 
       try {
         await setupSfu(localStreamRef.current);
+        logSfuStage('reconnect-complete');
       } catch (err) {
         appLogger.error('SFU reconnect failed', { err: err.message });
+        logSfuStage('reconnect-failed', { err: err.message }, 'error');
         if (!cancelled && import.meta.env.DEV) console.error('[sfu] reconnect failed:', err.message);
       }
     };
