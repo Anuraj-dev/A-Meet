@@ -210,16 +210,32 @@ You can watch SFU `produce` / `consume` / `close-producer` events in real time w
 
 ---
 
-## Deployment (EC2 quick-start)
+## Deployment (EC2, containerized)
+
+Production runs the backend as an **immutable Docker image** built from `server/Dockerfile`,
+supervised by Docker (not pm2). The container uses **host networking** so mediasoup's RTP
+port range is reachable, and the server's SIGTERM graceful-drain handles clean restarts.
 
 ```bash
-# On the server
+# On the EC2 node (Docker + Docker Compose plugin installed)
 git clone ... && cd A-Meet
-# Set MEDIASOUP_ANNOUNCED_IP to your EC2 public IP in server/.env
-# Open UDP ports 10000–59999 in your security group (mediasoup RTP range)
-npm run docker:up
-NODE_ENV=production node server/src/index.js
+
+# server/.env carries the runtime contract (same keys as everywhere else). In prod:
+#   MEDIASOUP_ANNOUNCED_IP = the box's public IPv4
+#   MONGO_URI              = Atlas connection string
+# Open UDP ports 10000–59999 in the security group (mediasoup RTP range), plus 5000 (API).
+
+# Build the image and start it (Docker's restart policy keeps it up across crashes/reboots):
+docker compose -f docker-compose.prod.yml up -d --build
+
+docker compose -f docker-compose.prod.yml logs -f      # tail logs
+docker compose -f docker-compose.prod.yml down         # SIGTERM → graceful drain, then stop
 ```
+
+The image is built once and run as-is, replacing the old hand-prepared `pm2`-on-a-mutable-box
+path: Docker's `restart: unless-stopped` is the supervisor, and `./server/logs` is mounted into
+the container so the existing Promtail tail keeps working. (Publishing images to a registry and
+deploying by tag is a later slice.)
 
 For HTTPS (required for camera/mic on non-localhost), put Nginx in front with a Let's Encrypt cert and proxy to `localhost:5000`.
 

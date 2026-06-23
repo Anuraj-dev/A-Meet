@@ -1,0 +1,18 @@
+# Keep the build context small and the image clean of host/dev artifacts.
+node_modules
+npm-debug.log*
+
+# Secrets + local config never belong in the image (provided at run time via env).
+.env
+.env.*
+!.env.example
+
+# Runtime + dev-only files
+logs
+test
+vitest.config.js
+*.md
+.git
+.gitignore
+.dockerignore
+Dockerfile
