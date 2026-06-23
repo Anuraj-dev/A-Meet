@@ -1,4 +1,5 @@
 import http from 'http';
+import mongoose from 'mongoose';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { connectDB } from './config/db.js';
@@ -6,8 +7,9 @@ import { createApp } from './app.js';
 import { initSocket } from './socket/io.js';
 import { socketAuth } from './middleware/socket-auth.js';
 import { registerHandlers } from './socket/handlers.js';
-import { createWorkers } from './sfu/workers.js';
+import { createWorkers, closeWorkers } from './sfu/workers.js';
 import { resolveAnnouncedIp } from './sfu/config.js';
+import { createLifecycle } from './lifecycle.js';
 
 async function start() {
   try {
@@ -23,6 +25,19 @@ async function start() {
 
     io.use(socketAuth);
     registerHandlers(io);
+
+    // Crash-safe lifecycle: orderly drain on SIGTERM/SIGINT and fail-fast exit
+    // on uncaught errors so a supervisor restarts us from a clean state.
+    const lifecycle = createLifecycle({
+      // Best-effort heads-up so clients can show "reconnecting" and back off.
+      notifyRestart: () => io.emit('server-restarting'),
+      // io.close() disconnects every socket; we drain the bare HTTP server after.
+      closeSockets: () => new Promise((resolve) => io.close(() => resolve())),
+      closeHttp: () => new Promise((resolve) => httpServer.close(() => resolve())),
+      closeWorkers,
+      closeDb: () => mongoose.disconnect(),
+    });
+    lifecycle.register();
 
     httpServer.listen(env.port, () => {
       logger.info({ port: env.port, env: env.nodeEnv }, 'A-Meet API listening');
