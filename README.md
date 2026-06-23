@@ -109,10 +109,11 @@ cp server/.env.example server/.env
 Open `server/.env` and fill in:
 
 ```env
-# MongoDB
+# MongoDB — local dev points at the Docker Mongo container (below).
+# In production, set MONGO_URI to your Atlas SRV string instead (see Deployment).
 MONGO_URI=mongodb://root:root@localhost:27017/ameet?authSource=admin
-MONGO_ROOT_USERNAME=root
-MONGO_ROOT_PASSWORD=root
+MONGO_ROOT_USERNAME=root   # local Docker Mongo only; unused in production
+MONGO_ROOT_PASSWORD=root   # local Docker Mongo only; unused in production
 
 # Auth
 GOOGLE_CLIENT_ID=your_google_client_id
@@ -133,12 +134,18 @@ To get a Google OAuth client:
 2. Create a project → APIs & Services → Credentials → Create OAuth 2.0 Client ID
 3. Authorized redirect URI: `http://localhost:5000/auth/google/callback`
 
-### 3. Start infrastructure
+### 3. Start infrastructure (local dev)
 ```bash
 npm run docker:up
 ```
 
-This starts MongoDB (27017), mongo-express (8081), Loki (3100), Promtail, and Grafana (3000).
+This starts the **local development** stack from `docker-compose.yml`: MongoDB (27017),
+mongo-express (8081), Loki (3100), Promtail, and Grafana (3000). This is the one documented
+way to run MongoDB locally for offline/full-stack work.
+
+> **Dev vs production database:** the local Mongo container above is for development only.
+> In production the database is **MongoDB Atlas** (set `MONGO_URI` to the Atlas connection
+> string) and no Mongo container runs on the server — see [Deployment](#deployment-ec2-containerized).
 
 ### 4. Run the app
 ```bash
@@ -174,7 +181,8 @@ A-Meet/
 │       ├── socket/          # room events, SFU signalling
 │       ├── models/          # User, Meeting
 │       └── middleware/      # JWT cookie auth
-├── docker-compose.yml       # MongoDB + observability stack
+├── docker-compose.yml       # LOCAL DEV: MongoDB + observability stack
+├── docker-compose.prod.yml  # PRODUCTION: server only (DB is Atlas via MONGO_URI)
 ├── docker-compose.coturn.yml
 └── plan.md                  # milestone roadmap (source of truth)
 ```
@@ -236,6 +244,23 @@ The image is built once and run as-is, replacing the old hand-prepared `pm2`-on-
 path: Docker's `restart: unless-stopped` is the supervisor, and `./server/logs` is mounted into
 the container so the existing Promtail tail keeps working. (Publishing images to a registry and
 deploying by tag is a later slice.)
+
+### Database: MongoDB Atlas (production)
+
+Production persistence is **MongoDB Atlas**, decoupled from the application box — the server
+node runs **no Mongo container** (`docker-compose.prod.yml` has no `mongo`/`mongo-express`
+services). The local `docker-compose.yml` Mongo stack is for development only.
+
+1. Create an Atlas cluster and a database user.
+2. **Network allowlist:** in Atlas → *Network Access*, add the production node's **public IPv4**
+   (the same value you set for `MEDIASOUP_ANNOUNCED_IP`) so the EC2 box can reach the cluster.
+   On a fixed-IP node prefer that exact `/32`; if the IP can change, an Elastic IP keeps the
+   allowlist stable. (`0.0.0.0/0` works but is not recommended.)
+3. Set `MONGO_URI` in `server/.env` on the node to the Atlas SRV connection string, e.g.
+   `mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/ameet?retryWrites=true&w=majority`.
+
+`MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD` are local-Docker-Mongo credentials only and are
+not used in production.
 
 For HTTPS (required for camera/mic on non-localhost), put Nginx in front with a Let's Encrypt cert and proxy to `localhost:5000`.
 
