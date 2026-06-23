@@ -16,6 +16,15 @@ on:
       - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
 
+# Serialize production releases. Without this, two quick merges could build and
+# deploy concurrently and a slower older run could restart EC2 *after* a newer
+# one — silently rolling production back to the older SHA. Queue instead of
+# cancelling (cancel-in-progress: false) so an in-flight deploy is never
+# interrupted mid-restart; the newer run waits and deploys last.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 permissions:
   id-token: write   # OIDC federation to assume the AWS deploy role
   contents: read

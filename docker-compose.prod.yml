@@ -44,6 +44,7 @@ services:
       - ./server/.env
     environment:
       NODE_ENV: production
-    # Persist/expose logs so the existing Promtail tail (./server/logs) still works.
-    volumes:
-      - ./server/logs:/app/logs
+    # No logs volume: in production the logger emits structured JSON to stdout
+    # only (it does not write logs/server.log), so logs are collected from the
+    # container's stdout via `docker compose logs` or the host's Docker log
+    # driver / collector — not a bind-mounted file.

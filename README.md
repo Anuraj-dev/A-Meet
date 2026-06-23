@@ -263,8 +263,11 @@ port range is reachable, and the server's SIGTERM graceful-drain handles clean r
 
 Releases are **image-based**: CI builds the server image, publishes an immutable tag to
 **Amazon ECR**, and the EC2 node **pulls that tag** and restarts the container — it never
-rebuilds mediasoup on the box. Docker's `restart: unless-stopped` is the supervisor and
-`./server/logs` is mounted in, so the existing Promtail tail keeps working.
+rebuilds mediasoup on the box. Docker's `restart: unless-stopped` is the supervisor. In
+production the server logs **structured JSON to stdout only**, so logs are collected from the
+container's stdout (`docker compose logs` or the host's Docker log driver / collector) rather
+than a bind-mounted file. (The local `docker-compose.yml` dev stack still uses the
+Loki/Promtail/Grafana file tail.)
 
 ```bash
 # On the EC2 node (Docker + Docker Compose plugin + AWS CLI installed)
