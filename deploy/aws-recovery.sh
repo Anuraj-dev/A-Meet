@@ -56,27 +56,63 @@ setup() {
   echo "==> Done. Run 'verify' to confirm the recovery contract."
 }
 
+# Prints the evidence AND enforces the recovery contract: exits non-zero if the
+# EIP is not associated to INSTANCE_ID, the alarm is missing / lacks the regional
+# ec2:recover action, or the instance is not EBS-backed. The `|| true` on each
+# capture stops a failed AWS call from aborting before the explicit check runs.
 verify() {
+  local failures=0
+
   echo "==> Elastic IP association (stable address)"
   aws ec2 describe-addresses \
     --region "$AWS_REGION" \
     --allocation-ids "$EIP_ALLOCATION_ID" \
     --query 'Addresses[0].{PublicIp:PublicIp,InstanceId:InstanceId,AssociationId:AssociationId}' \
-    --output table
+    --output table || true
+  local eip_instance
+  eip_instance=$(aws ec2 describe-addresses --region "$AWS_REGION" \
+    --allocation-ids "$EIP_ALLOCATION_ID" \
+    --query 'Addresses[0].InstanceId' --output text 2>/dev/null || true)
+  if [ "$eip_instance" != "$INSTANCE_ID" ]; then
+    echo "FAIL: EIP ${EIP_ALLOCATION_ID} is associated to '${eip_instance:-<none>}', expected '${INSTANCE_ID}'" >&2
+    failures=$((failures + 1))
+  fi
 
   echo "==> Recovery alarm (action must be the ec2:recover ARN)"
   aws cloudwatch describe-alarms \
     --region "$AWS_REGION" \
     --alarm-names "$ALARM_NAME" \
     --query 'MetricAlarms[0].{Name:AlarmName,Metric:MetricName,State:StateValue,Comparison:ComparisonOperator,Actions:AlarmActions}' \
-    --output table
+    --output table || true
+  local alarm_actions
+  alarm_actions=$(aws cloudwatch describe-alarms --region "$AWS_REGION" \
+    --alarm-names "$ALARM_NAME" \
+    --query 'MetricAlarms[0].AlarmActions' --output text 2>/dev/null || true)
+  if ! printf '%s' "$alarm_actions" | grep -qF "$RECOVER_ACTION"; then
+    echo "FAIL: alarm '${ALARM_NAME}' missing or lacks recover action '${RECOVER_ACTION}' (actions: '${alarm_actions:-<none>}')" >&2
+    failures=$((failures + 1))
+  fi
 
   echo "==> Instance root device (must be 'ebs' — recovery requires EBS-backed)"
   aws ec2 describe-instances \
     --region "$AWS_REGION" \
     --instance-ids "$INSTANCE_ID" \
     --query 'Reservations[0].Instances[0].{InstanceId:InstanceId,RootDeviceType:RootDeviceType,PublicIp:PublicIpAddress}' \
-    --output table
+    --output table || true
+  local root_type
+  root_type=$(aws ec2 describe-instances --region "$AWS_REGION" \
+    --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[0].Instances[0].RootDeviceType' --output text 2>/dev/null || true)
+  if [ "$root_type" != "ebs" ]; then
+    echo "FAIL: instance ${INSTANCE_ID} RootDeviceType='${root_type:-<none>}', expected 'ebs'" >&2
+    failures=$((failures + 1))
+  fi
+
+  if [ "$failures" -ne 0 ]; then
+    echo "==> Recovery contract NOT satisfied (${failures} check(s) failed)" >&2
+    return 1
+  fi
+  echo "==> Recovery contract verified."
 }
 
 case "${1:-}" in

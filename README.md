@@ -369,8 +369,10 @@ deploy/aws-recovery.sh setup     # associate EIP + create the recovery alarm (id
 deploy/aws-recovery.sh verify    # print evidence: EIP association, alarm state + recover action, EBS root
 ```
 
-`verify` is the AWS-CLI evidence for the recovery contract: the EIP's `InstanceId`/`AssociationId`,
-the alarm's `StateValue` + `AlarmActions` (must be the `ec2:recover` ARN), and `RootDeviceType: ebs`.
+`verify` prints the AWS-CLI evidence (EIP `InstanceId`/`AssociationId`, the alarm's `StateValue` +
+`AlarmActions`, and `RootDeviceType`) **and enforces** the contract — it **exits non-zero** if the
+EIP isn't associated to `INSTANCE_ID`, the alarm is missing or lacks the `ec2:recover` action, or
+the instance isn't `ebs`-backed. That makes it safe to use as an automated post-recovery gate.
 
 **Operator validation after a recovery event:**
 1. `deploy/aws-recovery.sh verify` — EIP still associated to the instance; alarm back to `OK`; root device `ebs`.
