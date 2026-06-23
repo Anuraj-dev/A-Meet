@@ -1,49 +1,125 @@
 name: Deploy backend
 
+# Image-based release: build the production server image in CI, publish an
+# immutable tag to ECR, then have EC2 pull that exact tag and restart the
+# container — no source checkout build / mediasoup recompile on the instance.
+#
+# Activates only when the ECR_REPOSITORY repo variable is set (see README
+# "Deployment"); until then both jobs skip cleanly so merges to main stay green.
+
 on:
   push:
     branches: [main]
     paths:
       - 'server/**'
-      - 'deploy/**'
+      - 'docker-compose.prod.yml'
+      - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
 
+# Serialize production releases. Without this, two quick merges could build and
+# deploy concurrently and a slower older run could restart EC2 *after* a newer
+# one — silently rolling production back to the older SHA. Queue instead of
+# cancelling (cancel-in-progress: false) so an in-flight deploy is never
+# interrupted mid-restart; the newer run waits and deploys last.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # OIDC federation to assume the AWS deploy role
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
 jobs:
+  build-and-push:
+    name: Build & push image to ECR
+    if: ${{ vars.ECR_REPOSITORY != '' }}
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      registry: ${{ steps.login-ecr.outputs.registry }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Resolve immutable image tag
+        id: meta
+        run: |
+          echo "image=${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      # Build the runtime target explicitly — the Dockerfile's last stage is `smoke`
+      # (which runs a mediasoup worker), so an unqualified build would ship that.
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          target: runtime
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
+    name: Deploy image to EC2
+    needs: build-and-push
+    if: ${{ vars.ECR_REPOSITORY != '' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy server to EC2
+      - name: Pull image tag on EC2 and restart
         uses: appleboy/ssh-action@v1.2.5
+        env:
+          SERVER_IMAGE: ${{ needs.build-and-push.outputs.image }}
+          ECR_REGISTRY: ${{ needs.build-and-push.outputs.registry }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          DEPLOY_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
-          # mediasoup compiles from C++ source when deps change (~15 min on t3.small),
-          # so allow well over the 10m default. Most deploys skip npm ci and finish in seconds.
-          command_timeout: 25m
+          command_timeout: 10m
+          envs: SERVER_IMAGE,ECR_REGISTRY,AWS_REGION,DEPLOY_SHA
           script: |
-            set -e
-            # Non-interactive SSH shells don't load ~/.bashrc, so nvm (and npm/pm2) aren't
-            # on PATH until we source it explicitly.
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            set -euo pipefail
+            # Authenticate the Docker daemon to ECR. The instance needs an IAM role
+            # with ECR pull permissions and the AWS CLI installed.
+            aws ecr get-login-password --region "$AWS_REGION" \
+              | docker login --username AWS --password-stdin "$ECR_REGISTRY"
             cd ~/ameet
-            PREV=$(git rev-parse HEAD)
-            git pull origin main
-            # Only reinstall (and recompile mediasoup) when the lockfile actually changed.
-            if git diff --name-only "$PREV" HEAD | grep -q '^server/package-lock.json$'; then
-              echo "Lockfile changed -> npm ci (mediasoup will recompile, may take ~15 min)"
-              cd server && npm ci --omit=dev && cd ..
-            else
-              echo "Lockfile unchanged -> skipping npm ci"
-            fi
-            pm2 restart ameet-server
-            pm2 save
+            # Check out the EXACT commit that produced SERVER_IMAGE (detached HEAD)
+            # rather than moving `main`, so the compose file + env contract used to
+            # deploy always match the image tag being released — even if a newer
+            # commit has already landed on main.
+            git fetch --quiet origin main
+            git checkout --quiet --force --detach "$DEPLOY_SHA"
+            export SERVER_IMAGE
+            # Pull the exact published tag and (re)start. `set -e` makes the deploy
+            # fail fast if the pull or container start fails.
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f
 
       - name: Health check
         run: |
+          HEALTH_URL="${{ vars.HEALTH_URL || 'https://api.ameet.raja-dev.me/api/health' }}"
           for i in $(seq 1 12); do
-            if curl -fsS https://api.ameet.raja-dev.me/api/health | grep -q '"ok":true'; then
+            if curl -fsS "$HEALTH_URL" | grep -q '"ok":true'; then
               echo "Health check passed (attempt $i)"
               exit 0
             fi

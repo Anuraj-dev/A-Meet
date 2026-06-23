@@ -261,26 +261,68 @@ Production runs the backend as an **immutable Docker image** built from `server/
 supervised by Docker (not pm2). The container uses **host networking** so mediasoup's RTP
 port range is reachable, and the server's SIGTERM graceful-drain handles clean restarts.
 
+Releases are **image-based**: CI builds the server image, publishes an immutable tag to
+**Amazon ECR**, and the EC2 node **pulls that tag** and restarts the container — it never
+rebuilds mediasoup on the box. Docker's `restart: unless-stopped` is the supervisor. In
+production the server logs **structured JSON to stdout only**, so logs are collected from the
+container's stdout (`docker compose logs` or the host's Docker log driver / collector) rather
+than a bind-mounted file. (The local `docker-compose.yml` dev stack still uses the
+Loki/Promtail/Grafana file tail.)
+
 ```bash
-# On the EC2 node (Docker + Docker Compose plugin installed)
-git clone ... && cd A-Meet
+# On the EC2 node (Docker + Docker Compose plugin + AWS CLI installed)
+git clone ... && cd A-Meet   # the node keeps a checkout for config (compose file + env)
 
 # server/.env carries the runtime contract (same keys as everywhere else). In prod:
 #   MEDIASOUP_ANNOUNCED_IP = the box's public IPv4
 #   MONGO_URI              = Atlas connection string
 # Open UDP ports 10000–59999 in the security group (mediasoup RTP range), plus 5000 (API).
 
-# Build the image and start it (Docker's restart policy keeps it up across crashes/reboots):
-docker compose -f docker-compose.prod.yml up -d --build
+# Pull the published image tag and start (this is what CI automates on each deploy):
+export SERVER_IMAGE=<account>.dkr.ecr.<region>.amazonaws.com/a-meet-server:<git-sha>
+aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 
 docker compose -f docker-compose.prod.yml logs -f      # tail logs
 docker compose -f docker-compose.prod.yml down         # SIGTERM → graceful drain, then stop
 ```
 
-The image is built once and run as-is, replacing the old hand-prepared `pm2`-on-a-mutable-box
-path: Docker's `restart: unless-stopped` is the supervisor, and `./server/logs` is mounted into
-the container so the existing Promtail tail keeps working. (Publishing images to a registry and
-deploying by tag is a later slice.)
+> For a local/manual build instead of pulling, leave `SERVER_IMAGE` unset and run
+> `docker compose -f docker-compose.prod.yml up -d --build`.
+
+### CI/CD: build → ECR → deploy by tag
+
+The **Deploy backend** workflow (`.github/workflows/deploy-backend.yml`) runs on merges to
+`main` that touch `server/**`, the prod compose, or the workflow itself. It builds the
+Dockerfile's `runtime` target, pushes it to ECR, and SSHes to EC2 to pull and restart. The
+deploy **fails fast** if the image pull, container start, or the post-deploy health check fails.
+
+It activates only once the registry is configured — until `ECR_REPOSITORY` is set the jobs skip
+cleanly, so merges to `main` stay green. To enable it:
+
+**Repository variables** (Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Purpose |
+|---|---|
+| `AWS_REGION` | ECR / deploy region, e.g. `ap-south-1` |
+| `ECR_REPOSITORY` | ECR repo name, e.g. `a-meet-server` (must exist) |
+| `HEALTH_URL` | optional; defaults to `https://api.ameet.raja-dev.me/api/health` |
+
+**Repository secrets:**
+
+| Secret | Purpose |
+|---|---|
+| `AWS_DEPLOY_ROLE_ARN` | IAM role assumed via GitHub OIDC; needs `ecr:GetAuthorizationToken` + push to the repo |
+| `EC2_HOST` | public host/IP of the production node |
+| `EC2_SSH_KEY` | SSH private key for the `ubuntu` user |
+
+**On the EC2 node:** Docker + Compose plugin + AWS CLI, and an **IAM instance role with ECR
+pull** permissions (so `aws ecr get-login-password` works without static keys).
+
+**Image-tag contract:** every build is pushed as both `:latest` and an **immutable `:<git-sha>`**
+tag; deploys pull the specific `:<git-sha>` so a release maps to exact bytes and can be rolled
+back by redeploying an older SHA.
 
 ### Database: MongoDB Atlas (production)
 

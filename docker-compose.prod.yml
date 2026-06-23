@@ -4,10 +4,15 @@
 # pm2-on-a-mutable-box path. Docker's restart policy keeps the process up, and
 # the server's own SIGTERM graceful-drain handles clean restarts/redeploys.
 #
-# Usage on the production node:
-#   docker compose -f docker-compose.prod.yml up -d --build
+# Usage on the production node (image-based release — see README "Deployment"):
+#   export SERVER_IMAGE=<account>.dkr.ecr.<region>.amazonaws.com/a-meet-server:<tag>
+#   docker compose -f docker-compose.prod.yml pull        # pull the published image tag
+#   docker compose -f docker-compose.prod.yml up -d        # start/replace the container
 #   docker compose -f docker-compose.prod.yml logs -f
 #   docker compose -f docker-compose.prod.yml down        # sends SIGTERM → graceful drain
+#
+# For a local/manual build instead of pulling a published image, leave SERVER_IMAGE
+# unset and run `up -d --build` (uses the build: context below).
 #
 # Note: this file is intentionally separate from docker-compose.yml (which is the
 # local dev/observability stack). Production persistence is Atlas via MONGO_URI —
@@ -15,10 +20,15 @@
 
 services:
   server:
+    # In production SERVER_IMAGE is the immutable ECR tag the CI pipeline published;
+    # `docker compose pull` fetches it instead of rebuilding mediasoup on the box.
+    # When SERVER_IMAGE is unset it falls back to a locally built image.
+    image: ${SERVER_IMAGE:-a-meet-server:latest}
+    # build: is kept for local/manual builds (`up -d --build`); production pulls
+    # the prebuilt image and never compiles on the instance.
     build:
       context: ./server
       dockerfile: Dockerfile
-    image: a-meet-server:latest
     container_name: a-meet-server
     # Host networking is required for mediasoup: the WebRtcTransport binds a wide
     # UDP/TCP RTC port range (MEDIASOUP_MIN_PORT..MAX_PORT) that browsers connect
@@ -34,6 +44,7 @@ services:
       - ./server/.env
     environment:
       NODE_ENV: production
-    # Persist/expose logs so the existing Promtail tail (./server/logs) still works.
-    volumes:
-      - ./server/logs:/app/logs
+    # No logs volume: in production the logger emits structured JSON to stdout
+    # only (it does not write logs/server.log), so logs are collected from the
+    # container's stdout via `docker compose logs` or the host's Docker log
+    # driver / collector — not a bind-mounted file.
