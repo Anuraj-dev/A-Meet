@@ -6,7 +6,9 @@
 # mediasoup's RTP port range is reachable (see docker-compose.prod.yml).
 
 # ---- build stage: install deps; mediasoup compiles its C++ worker here ----
-FROM node:20-bookworm AS build
+# Node 22: mediasoup@3.20 declares "engines": { "node": ">=22" }; on Node 20 npm
+# only warns (EBADENGINE) but ships an unsupported runtime, so we pin 22 here.
+FROM node:22-bookworm AS build
 WORKDIR /app
 
 # mediasoup builds (or falls back to building) its worker from source on install,
@@ -23,7 +25,9 @@ RUN npm ci --omit=dev
 COPY src ./src
 
 # ---- runtime stage: slim image carrying only the built artifacts ----
-FROM node:20-bookworm-slim AS runtime
+# Must match the build stage's major (Node 22) so the runtime satisfies the
+# mediasoup engine constraint that the worker was built against.
+FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
@@ -43,3 +47,10 @@ USER node
 EXPOSE 5000
 
 CMD ["node", "src/server.js"]
+
+# ---- smoke stage: exercise the actual runtime so a bad runtime fails the build ----
+# Build with `docker build --target smoke ...` (see CI). This spawns a real
+# mediasoup worker on the runtime image: it would fail on an unsupported Node
+# (EBADENGINE) or a worker binary that can't run, instead of shipping silently.
+FROM runtime AS smoke
+RUN node --input-type=module -e "import * as mediasoup from 'mediasoup'; const worker = await mediasoup.createWorker(); console.log('smoke: mediasoup worker started, pid', worker.pid); worker.close();"
