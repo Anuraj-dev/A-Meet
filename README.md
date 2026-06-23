@@ -102,18 +102,33 @@ npm --prefix server install
 ```
 
 ### 2. Configure environment
+
+Two env files, with distinct jobs:
+
 ```bash
-cp server/.env.example server/.env
+cp .env.example .env               # repo root — local Docker Mongo credentials (read by Compose)
+cp server/.env.example server/.env # server app config (read by the Node server)
+```
+
+`docker compose` reads the **repo-root `.env`** for the Mongo container credentials, so those
+live there — not in `server/.env`. Keep the two in sync: the username/password in the root
+`.env` must match the ones embedded in the server's `MONGO_URI` (both default to
+`admin` / `change-me`).
+
+Repo-root `.env` (local Docker Mongo only — unused in production):
+
+```env
+MONGO_ROOT_USERNAME=admin
+MONGO_ROOT_PASSWORD=change-me
 ```
 
 Open `server/.env` and fill in:
 
 ```env
-# MongoDB — local dev points at the Docker Mongo container (below).
-# In production, set MONGO_URI to your Atlas SRV string instead (see Deployment).
-MONGO_URI=mongodb://root:root@localhost:27017/ameet?authSource=admin
-MONGO_ROOT_USERNAME=root   # local Docker Mongo only; unused in production
-MONGO_ROOT_PASSWORD=root   # local Docker Mongo only; unused in production
+# MongoDB — local dev points at the Docker Mongo container; credentials must match
+# the repo-root .env above. In production, set MONGO_URI to your Atlas SRV string
+# instead (see Deployment).
+MONGO_URI=mongodb://admin:change-me@localhost:27017/ameet?authSource=admin
 
 # Auth
 GOOGLE_CLIENT_ID=your_google_client_id
