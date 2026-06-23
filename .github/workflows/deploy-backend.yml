@@ -88,12 +88,13 @@ jobs:
           SERVER_IMAGE: ${{ needs.build-and-push.outputs.image }}
           ECR_REGISTRY: ${{ needs.build-and-push.outputs.registry }}
           AWS_REGION: ${{ vars.AWS_REGION }}
+          DEPLOY_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           command_timeout: 10m
-          envs: SERVER_IMAGE,ECR_REGISTRY,AWS_REGION
+          envs: SERVER_IMAGE,ECR_REGISTRY,AWS_REGION,DEPLOY_SHA
           script: |
             set -euo pipefail
             # Authenticate the Docker daemon to ECR. The instance needs an IAM role
@@ -101,9 +102,12 @@ jobs:
             aws ecr get-login-password --region "$AWS_REGION" \
               | docker login --username AWS --password-stdin "$ECR_REGISTRY"
             cd ~/ameet
-            # Sync config only (compose file + env contract). The image is pulled,
-            # never built, on the instance.
-            git pull origin main
+            # Check out the EXACT commit that produced SERVER_IMAGE (detached HEAD)
+            # rather than moving `main`, so the compose file + env contract used to
+            # deploy always match the image tag being released — even if a newer
+            # commit has already landed on main.
+            git fetch --quiet origin main
+            git checkout --quiet --force --detach "$DEPLOY_SHA"
             export SERVER_IMAGE
             # Pull the exact published tag and (re)start. `set -e` makes the deploy
             # fail fast if the pull or container start fails.
