@@ -8,6 +8,23 @@ on:
   pull_request:
 
 jobs:
+  server-lint:
+    name: Server lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      # ESLint needs no native build, so --ignore-scripts keeps install fast.
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+
   server:
     name: Server tests
     runs-on: ubuntu-latest

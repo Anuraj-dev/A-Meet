@@ -179,6 +179,28 @@ npm run dev
 
 ---
 
+## Linting & tests
+
+Each package has its own ESLint flat config (ESLint 10) and test suite. The same
+commands run locally and in CI:
+
+```bash
+# Server (Express + Socket.io + mediasoup)
+npm --prefix server run lint    # ESLint over src/, test/, and config files
+npm --prefix server test        # Vitest
+
+# Client (React + Vite)
+npm --prefix client run lint
+npm --prefix client test
+```
+
+The server lint config (`server/eslint.config.js`) uses Node globals for source and
+Vitest globals for `test/**`, and ignores generated/dependency dirs
+(`node_modules`, `logs`, `coverage`, `dist`). `npm --prefix server run lint` exits zero
+on a clean checkout and runs as a CI gate.
+
+---
+
 ## Project Structure
 
 ```
