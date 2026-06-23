@@ -4,52 +4,90 @@ import { createWriteStream, mkdirSync } from 'fs';
 import { resolve } from 'path';
 import { env } from './env.js';
 
-const isTest = env.nodeEnv === 'test';
-
 // SSE clients registry — populated by /api/logs/stream connections (dev only)
 const sseClients = new Set();
 export function addSseClient(res) { sseClients.add(res); }
 export function removeSseClient(res) { sseClients.delete(res); }
 
-const streams = [];
+// Sensitive fields stripped from every log line, in every environment.
+export const REDACT_PATHS = ['req.headers.authorization', 'req.headers.cookie', '*.password', '*.token'];
 
-if (isTest) {
-  // Silence all output in test runs
-  streams.push({ stream: new Writable({ write(c, e, cb) { cb(); } }) });
-} else {
-  streams.push({ stream: process.stdout });
+// Pure: which log targets are active for a given environment. Exported so the
+// stream contract can be asserted in tests without constructing pino or touching
+// the filesystem.
+//   • test        → a single discarding stream (silent)
+//   • production   → stdout only, so logs are structured JSON for an external
+//                    collector; no local file and no SSE tail are created
+//   • development  → stdout + local file (info+) + SSE live-tail (current behavior)
+export function selectLogTargets(nodeEnv) {
+  if (nodeEnv === 'test') return [{ type: 'null' }];
+  if (nodeEnv === 'production') return [{ type: 'stdout' }];
+  return [
+    { type: 'stdout' },
+    { type: 'file', level: 'info' },
+    { type: 'sse' },
+  ];
+}
 
-  // File: info+ only (keeps debug spam out of the log file Promtail tails)
-  const logsDir = resolve(process.cwd(), 'logs');
-  mkdirSync(logsDir, { recursive: true });
-  streams.push({
-    stream: createWriteStream(resolve(logsDir, 'server.log'), { flags: 'a' }),
-    level: 'info',
-  });
+// Pure: the pino instance options for a given environment. Exported for tests so
+// the level/redaction/correlation contract can be checked without inspecting
+// pino internals. Production defaults to `info`; LOG_LEVEL overrides everywhere.
+export function buildLoggerOptions(nodeEnv, logLevel = process.env.LOG_LEVEL) {
+  return {
+    level: logLevel || (nodeEnv === 'production' ? 'info' : 'debug'),
+    redact: REDACT_PATHS,
+    timestamp: pino.stdTimeFunctions.isoTime,
+    base: { service: 'a-meet' },
+  };
+}
 
-  // SSE fan-out: every log line is pushed to /api/logs/stream subscribers (dev only)
-  if (env.nodeEnv !== 'production') {
-    const sseWritable = new Writable({
-      write(chunk, _enc, cb) {
-        if (sseClients.size > 0) {
-          const data = `data: ${chunk.toString().trimEnd()}\n\n`;
-          for (const res of sseClients) {
-            try { res.write(data); } catch { sseClients.delete(res); }
-          }
+function createNullStream() {
+  return new Writable({ write(_chunk, _enc, cb) { cb(); } });
+}
+
+// SSE fan-out: every log line is pushed to /api/logs/stream subscribers (dev only).
+function createSseStream() {
+  return new Writable({
+    write(chunk, _enc, cb) {
+      if (sseClients.size > 0) {
+        const data = `data: ${chunk.toString().trimEnd()}\n\n`;
+        for (const res of sseClients) {
+          try { res.write(data); } catch { sseClients.delete(res); }
         }
-        cb();
-      },
-    });
-    streams.push({ stream: sseWritable });
-  }
+      }
+      cb();
+    },
+  });
+}
+
+// Materialize selected targets into pino multistream entries. The file/SSE side
+// effects (mkdir, open file handle) happen only when those targets are selected,
+// so production never creates the local log file or an SSE stream.
+function buildStreams(targets) {
+  return targets.map((target) => {
+    switch (target.type) {
+      case 'null':
+        return { stream: createNullStream() };
+      case 'stdout':
+        return { stream: process.stdout };
+      case 'file': {
+        // File: info+ only (keeps debug spam out of the log file Promtail tails).
+        const logsDir = resolve(process.cwd(), 'logs');
+        mkdirSync(logsDir, { recursive: true });
+        return {
+          stream: createWriteStream(resolve(logsDir, 'server.log'), { flags: 'a' }),
+          level: target.level,
+        };
+      }
+      case 'sse':
+        return { stream: createSseStream() };
+      default:
+        throw new Error(`unknown log target: ${target.type}`);
+    }
+  });
 }
 
 export const logger = pino(
-  {
-    level: process.env.LOG_LEVEL || (env.nodeEnv === 'production' ? 'info' : 'debug'),
-    redact: ['req.headers.authorization', 'req.headers.cookie', '*.password', '*.token'],
-    timestamp: pino.stdTimeFunctions.isoTime,
-    base: { service: 'a-meet' },
-  },
-  pino.multistream(streams),
+  buildLoggerOptions(env.nodeEnv),
+  pino.multistream(buildStreams(selectLogTargets(env.nodeEnv))),
 );
