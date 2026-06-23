@@ -1,0 +1,39 @@
+# Production run surface for the A-Meet backend.
+#
+# This is the supervisor for the server in production — it replaces the old
+# pm2-on-a-mutable-box path. Docker's restart policy keeps the process up, and
+# the server's own SIGTERM graceful-drain handles clean restarts/redeploys.
+#
+# Usage on the production node:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml logs -f
+#   docker compose -f docker-compose.prod.yml down        # sends SIGTERM → graceful drain
+#
+# Note: this file is intentionally separate from docker-compose.yml (which is the
+# local dev/observability stack). Production persistence is Atlas via MONGO_URI —
+# no mongo/mongo-express container here.
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: a-meet-server:latest
+    container_name: a-meet-server
+    # Host networking is required for mediasoup: the WebRtcTransport binds a wide
+    # UDP/TCP RTC port range (MEDIASOUP_MIN_PORT..MAX_PORT) that browsers connect
+    # to directly. Port-mapping that range through Docker's NAT is impractical and
+    # breaks media, so the container shares the host's network namespace.
+    network_mode: host
+    # Auto-restart on crash/reboot; the server drains gracefully on the SIGTERM
+    # Docker sends, so restarts don't drop in-flight media abruptly.
+    restart: unless-stopped
+    # Environment contract is the same server/.env used everywhere else. In prod,
+    # MONGO_URI points at Atlas and MEDIASOUP_ANNOUNCED_IP is the public IPv4.
+    env_file:
+      - ./server/.env
+    environment:
+      NODE_ENV: production
+    # Persist/expose logs so the existing Promtail tail (./server/logs) still works.
+    volumes:
+      - ./server/logs:/app/logs
