@@ -1,3 +1,12 @@
+# LOCAL DEVELOPMENT stack only — not for production.
+#
+# This brings up a local MongoDB (+ mongo-express GUI) and the observability
+# stack (Loki/Promtail/Grafana) so you can run the full app offline on one box.
+#
+# Production does NOT use this file and does NOT run a Mongo container: prod
+# persistence is MongoDB Atlas via MONGO_URI, and the server runs from
+# docker-compose.prod.yml. See the README "Deployment" section.
+
 services:
   mongo:
     image: mongo:7
