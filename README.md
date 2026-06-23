@@ -341,6 +341,45 @@ services). The local `docker-compose.yml` Mongo stack is for development only.
 `MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD` are local-Docker-Mongo credentials only and are
 not used in production.
 
+### Host identity & automatic recovery
+
+The production node has a **stable identity** so it survives host failure without manual
+re-wiring. One **Elastic IP (EIP)** is the single fixed address used everywhere downstream, and
+a **CloudWatch auto-recovery alarm** rebuilds the instance onto healthy hardware while keeping
+that address.
+
+- **The EIP is the canonical address** for all three of:
+  - the `api.<domain>` **DNS A record**,
+  - **`MEDIASOUP_ANNOUNCED_IP`** in `server/.env` (the IP browsers send media to), and
+  - the **MongoDB Atlas Network Access** allowlist entry.
+
+  Because the EIP is reassociated on recovery, none of these need to change after a recovery event.
+- A CloudWatch alarm on **`StatusCheckFailed_System`** (2× 60s) triggers the EC2 **recover**
+  action, which restarts the *same* instance (same EIP, same EBS root volume) on new hardware.
+  This only covers EBS-backed instances.
+
+Provision and verify both with the helper script (AWS CLI v2 + EC2/CloudWatch permissions):
+
+```bash
+export AWS_REGION=ap-south-1
+export INSTANCE_ID=i-0abc123...
+export EIP_ALLOCATION_ID=eipalloc-0abc123...
+
+deploy/aws-recovery.sh setup     # associate EIP + create the recovery alarm (idempotent)
+deploy/aws-recovery.sh verify    # print evidence: EIP association, alarm state + recover action, EBS root
+```
+
+`verify` prints the AWS-CLI evidence (EIP `InstanceId`/`AssociationId`, the alarm's `StateValue` +
+`AlarmActions`, and `RootDeviceType`) **and enforces** the contract — it **exits non-zero** if the
+EIP isn't associated to `INSTANCE_ID`, the alarm is missing or lacks the `ec2:recover` action, or
+the instance isn't `ebs`-backed. That makes it safe to use as an automated post-recovery gate.
+
+**Operator validation after a recovery event:**
+1. `deploy/aws-recovery.sh verify` — EIP still associated to the instance; alarm back to `OK`; root device `ebs`.
+2. **API health:** `curl -fsS https://api.<domain>/api/health` returns `{"ok":true}` (the deploy health check uses the same endpoint).
+3. **Container up:** on the box, `docker compose -f docker-compose.prod.yml ps` shows the server running, and `logs -f` shows mediasoup workers started.
+4. **Media connectivity:** join a meeting from two devices and confirm audio/video flows — i.e. `MEDIASOUP_ANNOUNCED_IP` still equals the EIP and the security-group UDP RTC range (10000–59999) is open.
+
 For HTTPS (required for camera/mic on non-localhost), put Nginx in front with a Let's Encrypt cert and proxy to `localhost:5000`.
 
 ---
