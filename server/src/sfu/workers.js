@@ -39,3 +39,14 @@ export function getWorker() {
   nextWorkerIdx = (nextWorkerIdx + 1) % workers.length;
   return worker;
 }
+
+// Tear the whole pool down on shutdown. worker.close() cascades to every Router
+// and transport on it, so this frees all media resources. Closing is deliberate
+// (not a crash), so it never trips the 'died' handler above. Idempotent.
+export async function closeWorkers() {
+  for (const worker of workers) {
+    try { worker.close(); } catch { /* already closed */ }
+  }
+  workers.length = 0;
+  nextWorkerIdx = 0;
+}
