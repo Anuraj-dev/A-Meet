@@ -215,15 +215,16 @@ export default function PeoplePanel({
 
               {/* Status icons */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0, color: 'text.secondary' }}>
-                {p.handRaised && <PanToolIcon sx={{ fontSize: 18, color: 'warning.main' }} />}
-                {p.pinned && <PinIcon sx={{ fontSize: 16, color: 'primary.main' }} />}
-                {!p.videoOn && <VideocamOffIcon sx={{ fontSize: 18 }} />}
+                {p.handRaised && <PanToolIcon titleAccess="Hand raised" sx={{ fontSize: 18, color: 'warning.main' }} />}
+                {p.pinned && <PinIcon titleAccess="Pinned" sx={{ fontSize: 16, color: 'primary.main' }} />}
+                {!p.videoOn && <VideocamOffIcon titleAccess="Camera off" sx={{ fontSize: 18 }} />}
                 {p.audioOn
-                  ? (p.isSpeaking && <SpeakingIcon sx={{ fontSize: 18, color: 'success.main' }} />)
-                  : <MicOffIcon sx={{ fontSize: 18 }} />}
+                  ? (p.isSpeaking && <SpeakingIcon titleAccess="Speaking" sx={{ fontSize: 18, color: 'success.main' }} />)
+                  : <MicOffIcon titleAccess="Microphone off" sx={{ fontSize: 18 }} />}
                 {showMenuFor(p) && (
                   <IconButton
                     size="small"
+                    aria-label={`More actions for ${p.name}`}
                     onClick={(e) => setMenuFor({ anchor: e.currentTarget, person: p })}
                     sx={{ color: 'text.secondary' }}
                   >
