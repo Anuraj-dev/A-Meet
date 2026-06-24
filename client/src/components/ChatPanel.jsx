@@ -170,7 +170,7 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
               sx: { borderRadius: 999, bgcolor: 'rgba(255,255,255,0.04)' },
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton type="submit" size="small" disabled={!input.trim()} color="primary">
+                  <IconButton type="submit" size="small" aria-label="Send message" disabled={!input.trim()} color="primary">
                     <SendIcon fontSize="small" />
                   </IconButton>
                 </InputAdornment>
