@@ -1,0 +1,281 @@
+// Host-moderation authorization for the SFU signaling handlers — the app's core
+// trust boundary. We use the "capture-and-invoke" pattern: register the handlers
+// on a fake socket that records each `.on(event, cb)`, seed the module's
+// socket→room map by driving `sfu-get-rtp-capabilities`, then invoke the captured
+// moderation callbacks and assert EXTERNAL effects (producer pause/close, emits,
+// disconnect) — proving a non-host caller is always a no-op.
+//
+// No real mediasoup worker and no DB: the room store and logger are mocked, and
+// the host vs non-host branch is driven by stubbing `Room.findOne` (the real,
+// already-tested `isRoomAdmin` runs against it).
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../src/sfu/sfu-rooms.js', () => ({
+  getOrCreateRoom: vi.fn(),
+  getRoom: vi.fn(),
+  addPeer: vi.fn(),
+  getPeer: vi.fn(),
+  listOtherProducers: vi.fn(),
+  removePeer: vi.fn(),
+  closeRoomIfEmpty: vi.fn(),
+}));
+vi.mock('../src/models/Room.js', () => ({
+  Room: { findOne: vi.fn(), updateOne: vi.fn() },
+}));
+vi.mock('../src/config/logger.js', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() },
+}));
+
+import { registerSfuHandlers } from '../src/socket/sfu-handlers.js';
+import { getOrCreateRoom, getRoom, getPeer } from '../src/sfu/sfu-rooms.js';
+import { Room } from '../src/models/Room.js';
+
+const ROOM = 'room-1';
+const HOST_ID = 'host-user';
+const TARGET = 'target-sock';
+
+// Build a fake io/socket pair that records every emit with its target channel.
+function setup({ userId } = {}) {
+  const handlers = {};
+  const ioEmits = [];
+  const socketEmits = [];
+
+  const socket = {
+    id: 'caller-sock',
+    user: { id: userId, name: 'Caller' },
+    on: vi.fn((event, cb) => { handlers[event] = cb; }),
+    join: vi.fn(),
+    emit: vi.fn(),
+    to: vi.fn((target) => ({ emit: (event, payload) => socketEmits.push({ target, event, payload }) })),
+    disconnect: vi.fn(),
+  };
+
+  const io = {
+    to: vi.fn((target) => ({ emit: (event, payload) => ioEmits.push({ target, event, payload }) })),
+    in: vi.fn((target) => ({ emit: (event, payload) => ioEmits.push({ target, event, payload }) })),
+    sockets: { sockets: { get: vi.fn() } },
+  };
+
+  registerSfuHandlers(io, socket);
+  return { handlers, socket, io, ioEmits, socketEmits };
+}
+
+// Seed the module's socketRoom map for the caller via the real entry handler.
+async function joinRoom(handlers) {
+  await handlers['sfu-get-rtp-capabilities']({ roomId: ROOM }, () => {});
+}
+
+// Make the caller the host (or not) for the DB-backed authorization check.
+function asHost() { Room.findOne.mockResolvedValue({ admin: HOST_ID }); }
+function asNonHost() { Room.findOne.mockResolvedValue({ admin: 'someone-else' }); }
+
+// A live primary-mic producer for a target peer, with spied pause/resume/close.
+function makeMicPeer() {
+  const producer = {
+    id: 'aud-1', kind: 'audio', appData: {}, paused: false,
+    pause: vi.fn().mockResolvedValue(undefined),
+    resume: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn(),
+  };
+  return { peer: { producers: new Map([[producer.id, producer]]) }, producer };
+}
+
+const emittedTo = (emits, target, event) => emits.some((e) => e.target === target && e.event === event);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+  // get-rtp-capabilities only needs a room with a router and an existing
+  // audioLevelObserver (truthy → skip the observer-creation branch).
+  getOrCreateRoom.mockResolvedValue({ router: { rtpCapabilities: {} }, audioLevelObserver: {} });
+});
+
+describe('SFU host-moderation authorization', () => {
+  describe('sfu-host-mute', () => {
+    it('host: pauses the target mic and broadcasts the mute + force-muted', async () => {
+      const { handlers, ioEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+      const { peer, producer } = makeMicPeer();
+      getPeer.mockImplementation((_room, sid) => (sid === TARGET ? peer : null));
+
+      await handlers['sfu-host-mute']({ socketId: TARGET });
+
+      expect(producer.pause).toHaveBeenCalledTimes(1);
+      expect(emittedTo(ioEmits, ROOM, 'sfu-producer-paused')).toBe(true);
+      expect(emittedTo(ioEmits, TARGET, 'sfu-force-muted')).toBe(true);
+    });
+
+    it('non-host: does nothing (no pause, no emit)', async () => {
+      const { handlers, ioEmits } = setup({ userId: 'rando' });
+      await joinRoom(handlers);
+      asNonHost();
+      const { peer, producer } = makeMicPeer();
+      getPeer.mockImplementation((_room, sid) => (sid === TARGET ? peer : null));
+
+      await handlers['sfu-host-mute']({ socketId: TARGET });
+
+      expect(producer.pause).not.toHaveBeenCalled();
+      expect(emittedTo(ioEmits, TARGET, 'sfu-force-muted')).toBe(false);
+    });
+
+    it('host: muting yourself is a no-op', async () => {
+      const { handlers, ioEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+
+      await handlers['sfu-host-mute']({ socketId: 'caller-sock' });
+
+      expect(emittedTo(ioEmits, 'caller-sock', 'sfu-force-muted')).toBe(false);
+    });
+  });
+
+  describe('sfu-mute-all', () => {
+    it('host: mutes every peer except the host', async () => {
+      const { handlers } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+      const t1 = makeMicPeer();
+      const t2 = makeMicPeer();
+      getRoom.mockReturnValue({ peers: new Map([['caller-sock', {}], ['t1', {}], ['t2', {}]]) });
+      getPeer.mockImplementation((_room, sid) => {
+        if (sid === 't1') return t1.peer;
+        if (sid === 't2') return t2.peer;
+        return null;
+      });
+
+      await handlers['sfu-mute-all']();
+
+      expect(t1.producer.pause).toHaveBeenCalledTimes(1);
+      expect(t2.producer.pause).toHaveBeenCalledTimes(1);
+    });
+
+    it('non-host: mutes no one', async () => {
+      const { handlers } = setup({ userId: 'rando' });
+      await joinRoom(handlers);
+      asNonHost();
+      const t1 = makeMicPeer();
+      getRoom.mockReturnValue({ peers: new Map([['caller-sock', {}], ['t1', {}]]) });
+      getPeer.mockImplementation((_room, sid) => (sid === 't1' ? t1.peer : null));
+
+      await handlers['sfu-mute-all']();
+
+      expect(t1.producer.pause).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sfu-request-unmute', () => {
+    it('host: only sends an unmute request — never force-resumes the mic', async () => {
+      const { handlers, ioEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+      const { peer, producer } = makeMicPeer();
+      getPeer.mockImplementation((_room, sid) => (sid === TARGET ? peer : null));
+
+      await handlers['sfu-request-unmute']({ socketId: TARGET });
+
+      expect(emittedTo(ioEmits, TARGET, 'sfu-unmute-request')).toBe(true);
+      expect(producer.resume).not.toHaveBeenCalled();
+    });
+
+    it('non-host: sends no unmute request', async () => {
+      const { handlers, ioEmits } = setup({ userId: 'rando' });
+      await joinRoom(handlers);
+      asNonHost();
+
+      await handlers['sfu-request-unmute']({ socketId: TARGET });
+
+      expect(emittedTo(ioEmits, TARGET, 'sfu-unmute-request')).toBe(false);
+    });
+  });
+
+  describe('sfu-host-remove', () => {
+    it('host: notifies the target and disconnects their socket', async () => {
+      vi.useFakeTimers();
+      const { handlers, io, ioEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+      const targetSocket = { disconnect: vi.fn() };
+      io.sockets.sockets.get.mockReturnValue(targetSocket);
+
+      await handlers['sfu-host-remove']({ socketId: TARGET });
+
+      expect(emittedTo(ioEmits, TARGET, 'sfu-removed')).toBe(true);
+      // Disconnect is deferred ~250ms so the notification can flush first.
+      expect(targetSocket.disconnect).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(250);
+      expect(targetSocket.disconnect).toHaveBeenCalledWith(true);
+    });
+
+    it('non-host: neither notifies nor disconnects', async () => {
+      const { handlers, io, ioEmits } = setup({ userId: 'rando' });
+      await joinRoom(handlers);
+      asNonHost();
+
+      await handlers['sfu-host-remove']({ socketId: TARGET });
+
+      expect(emittedTo(ioEmits, TARGET, 'sfu-removed')).toBe(false);
+      expect(io.sockets.sockets.get).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sfu-spotlight', () => {
+    it('host: relays the spotlight target to everyone', async () => {
+      const { handlers, ioEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+
+      await handlers['sfu-spotlight']({ socketId: TARGET });
+
+      const evt = ioEmits.find((e) => e.target === ROOM && e.event === 'sfu-spotlight');
+      expect(evt?.payload).toEqual({ socketId: TARGET });
+    });
+
+    it('host: clears the spotlight on a null payload', async () => {
+      const { handlers, ioEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+
+      await handlers['sfu-spotlight']({});
+
+      const evt = ioEmits.find((e) => e.target === ROOM && e.event === 'sfu-spotlight');
+      expect(evt?.payload).toEqual({ socketId: null });
+    });
+
+    it('non-host: relays nothing', async () => {
+      const { handlers, ioEmits } = setup({ userId: 'rando' });
+      await joinRoom(handlers);
+      asNonHost();
+
+      await handlers['sfu-spotlight']({ socketId: TARGET });
+
+      expect(emittedTo(ioEmits, ROOM, 'sfu-spotlight')).toBe(false);
+    });
+  });
+
+  describe('sfu-end-meeting', () => {
+    it('host: notifies the room and marks the room inactive', async () => {
+      const { handlers, ioEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+      Room.updateOne.mockResolvedValue({});
+
+      await handlers['sfu-end-meeting']();
+
+      expect(emittedTo(ioEmits, ROOM, 'sfu-meeting-ended')).toBe(true);
+      expect(Room.updateOne).toHaveBeenCalledWith({ roomId: ROOM }, { $set: { active: false } });
+    });
+
+    it('non-host: neither ends the meeting nor mutates the room', async () => {
+      const { handlers, ioEmits } = setup({ userId: 'rando' });
+      await joinRoom(handlers);
+      asNonHost();
+
+      await handlers['sfu-end-meeting']();
+
+      expect(emittedTo(ioEmits, ROOM, 'sfu-meeting-ended')).toBe(false);
+      expect(Room.updateOne).not.toHaveBeenCalled();
+    });
+  });
+});
