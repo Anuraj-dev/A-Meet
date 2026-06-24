@@ -43,7 +43,9 @@ jobs:
       # transformer — resolves its binary from the @esbuild/* optional-dep
       # package at runtime, so it works without its postinstall.
       - run: npm ci --ignore-scripts
-      - run: npm test
+      # Run under coverage so the non-decreasing ratchet (thresholds in
+      # vitest.config.js) gates every PR — a coverage drop fails this check.
+      - run: npm run test:coverage
 
   client:
     name: Client tests + build
@@ -59,7 +61,9 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
       - run: npm ci
-      - run: npm test
+      # Run under coverage so the non-decreasing ratchet (thresholds in
+      # vitest.config.js) gates every PR — a coverage drop fails this check.
+      - run: npm run test:coverage
       - run: npm run build
       # Lint is intentionally not a gate yet: RoomPage.jsx has pre-existing
       # react-hooks/set-state-in-effect errors unrelated to the test setup.
