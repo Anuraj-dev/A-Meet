@@ -101,4 +101,21 @@ describe('useReactions', () => {
 
     expect(socket.off).toHaveBeenCalledWith('sfu-reaction', registered[1]);
   });
+
+  it('clears pending floating + per-tile expiry timers on unmount so none fire after teardown', () => {
+    const socket = makeSocket('me');
+    const { result, unmount } = setup(socket);
+
+    // Reaction in flight: a 1.8s floating timer and a 3s per-tile timer are pending.
+    act(() => socket._emitIncoming('sfu-reaction', { emoji: '👍', socketId: 'peer1' }));
+    expect(result.current.floatingReactions).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(2);
+
+    unmount();
+
+    // Cleanup must clear both timers; nothing is left to call a state setter post-unmount.
+    expect(vi.getTimerCount()).toBe(0);
+    // Advancing past both expiries is now a no-op and must not throw.
+    expect(() => act(() => vi.advanceTimersByTime(3000))).not.toThrow();
+  });
 });

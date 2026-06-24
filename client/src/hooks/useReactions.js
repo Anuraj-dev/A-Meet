@@ -20,6 +20,9 @@ export function useReactions({ socket, userRef, peerStatesRef }) {
   const [activeReactions, setActiveReactions] = useState({});
   const [floatingReactions, setFloatingReactions] = useState([]);
   const reactionTimers = useRef({});
+  // Pending floating-reaction expiry timers, keyed by float id, so they can be
+  // cleared on unmount and can't call setFloatingReactions after teardown.
+  const floatTimers = useRef({});
   const floatIdRef = useRef(0);
 
   useEffect(() => {
@@ -39,15 +42,21 @@ export function useReactions({ socket, userRef, peerStatesRef }) {
         : { name: peerStatesRef.current[socketId]?.name, avatar: peerStatesRef.current[socketId]?.avatar };
       const fid = (floatIdRef.current += 1);
       setFloatingReactions((p) => [...p, { id: fid, emoji, ...meta }]);
-      setTimeout(() => setFloatingReactions((p) => p.filter((r) => r.id !== fid)), 1800);
+      floatTimers.current[fid] = setTimeout(() => {
+        delete floatTimers.current[fid];
+        setFloatingReactions((p) => p.filter((r) => r.id !== fid));
+      }, 1800);
     };
 
     socket.on('sfu-reaction', onReaction);
-    const timers = reactionTimers.current;
+    const tileTimers = reactionTimers.current;
+    const floatingTimers = floatTimers.current;
     return () => {
       socket.off('sfu-reaction', onReaction);
-      // Clear pending per-tile expiry timers so they can't fire after unmount.
-      for (const id of Object.values(timers)) clearTimeout(id);
+      // Clear pending per-tile and floating expiry timers so neither can fire
+      // (and call a state setter) after unmount.
+      for (const id of Object.values(tileTimers)) clearTimeout(id);
+      for (const id of Object.values(floatingTimers)) clearTimeout(id);
     };
   }, [socket, userRef, peerStatesRef]);
 
