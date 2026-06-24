@@ -12,7 +12,10 @@
     "docker:logs": "docker compose logs -f",
     "test": "npm run test:server && npm run test:client",
     "test:server": "npm --prefix server test",
-    "test:client": "npm --prefix client test"
+    "test:client": "npm --prefix client test",
+    "coverage": "npm run coverage:server && npm run coverage:client",
+    "coverage:server": "npm --prefix server run test:coverage",
+    "coverage:client": "npm --prefix client run test:coverage"
   },
   "devDependencies": {
     "concurrently": "^10.0.0"
