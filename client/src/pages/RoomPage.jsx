@@ -18,6 +18,7 @@ import socket from '../services/socket';
 import { useMediasoup } from '../hooks/useMediasoup';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { isPcmCaptureSupported, usePcmCapture } from '../hooks/usePcmCapture';
+import { useReactions } from '../hooks/useReactions';
 import VideoTile from '../components/VideoTile';
 import RemoteAudio from '../components/RemoteAudio';
 import RtcStatsOverlay from '../components/RtcStatsOverlay';
@@ -94,9 +95,6 @@ export default function RoomPage() {
   const [gridPage, setGridPage] = useState(0); // grid pagination for large calls
   // Host asked us to unmute — surfaced as a one-tap prompt (never forced).
   const [unmuteRequestFrom, setUnmuteRequestFrom] = useState(null);
-  const [activeReactions, setActiveReactions] = useState({});
-  const [floatingReactions, setFloatingReactions] = useState([]);
-  const floatIdRef = useRef(0);
   const [reactionAnchor, setReactionAnchor] = useState(null);
   const [outputVolume, setOutputVolume] = useState(1);
   const [peerVolumes, setPeerVolumes] = useState({});
@@ -110,7 +108,6 @@ export default function RoomPage() {
   const [showScreenAnyway, setShowScreenAnyway] = useState(false);
   // Bottom-left transient flashes: join/leave, chat previews, copy confirmation.
   const [notes, setNotes] = useState([]);
-  const reactionTimers = useRef({});
   const noteIdRef = useRef(0);
   const noteTimers = useRef({});
   // Live refs so the mount-only socket effect always sees current values
@@ -123,6 +120,13 @@ export default function RoomPage() {
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
   const peerStatesRef = useRef({});
+
+  // Reaction feature (per-tile + floating stream + sound) lives in its own hook.
+  const { activeReactions, floatingReactions, sendReaction } = useReactions({
+    socket,
+    userRef,
+    peerStatesRef,
+  });
   // Plays the join chime once for THIS user on their own entry. Guarded so the
   // re-`room-users` we receive on every reconnect (network blip) doesn't replay
   // it — Meet only chimes when you actually arrive, not on each reconnect.
@@ -386,24 +390,7 @@ export default function RoomPage() {
       setMeetingEndedSnack(true);
       setTimeout(() => navigate('/'), 2500);
     });
-    socket.on('sfu-reaction', ({ emoji, socketId }) => {
-      setActiveReactions((prev) => ({ ...prev, [socketId]: emoji }));
-      playSound('reaction');
-      clearTimeout(reactionTimers.current[socketId]);
-      reactionTimers.current[socketId] = setTimeout(() => {
-        setActiveReactions((prev) => {
-          const next = { ...prev }; delete next[socketId]; return next;
-        });
-      }, 3000);
-      // Bottom-left floating stream — read fresh metadata via refs
-      const isSelf = socketId === socket.id;
-      const meta = isSelf
-        ? { name: userRef.current?.name, avatar: userRef.current?.avatar }
-        : { name: peerStatesRef.current[socketId]?.name, avatar: peerStatesRef.current[socketId]?.avatar };
-      const fid = (floatIdRef.current += 1);
-      setFloatingReactions((p) => [...p, { id: fid, emoji, ...meta }]);
-      setTimeout(() => setFloatingReactions((p) => p.filter((r) => r.id !== fid)), 1800);
-    });
+    // The `sfu-reaction` subscription lives in the useReactions hook.
     // Separate listener purely for the raise-hand cue (peers only; server
     // excludes the sender, so this never fires for our own toggle). Removed by
     // reference so we don't also detach useMediasoup's own listener.
@@ -422,7 +409,6 @@ export default function RoomPage() {
       socket.off('transcript-interim');
       socket.off('transcript-contributor-state');
       socket.off('sfu-meeting-ended');
-      socket.off('sfu-reaction');
       socket.off('sfu-hand-raise-update', onPeerHandRaise);
       // Announce an intentional leave so peers see it instantly (this cleanup
       // runs on in-app navigation away — the "Leave call" button — not on a
@@ -482,10 +468,6 @@ export default function RoomPage() {
     setInput('');
   }
 
-  function sendReaction(emoji) {
-    socket.emit('sfu-reaction', { emoji }); // echoes back via io.in → shows + sound
-    setReactionAnchor(null);
-  }
 
   function requestTranscriptStart() {
     socket.emit('transcript-start', {}, (response) => {
@@ -1528,7 +1510,7 @@ export default function RoomPage() {
           {REACTION_EMOJIS.map((emoji) => (
             <IconButton
               key={emoji}
-              onClick={() => sendReaction(emoji)}
+              onClick={() => { sendReaction(emoji); setReactionAnchor(null); }}
               sx={{
                 fontSize: 26, width: 48, height: 48,
                 transition: 'transform 0.12s ease',
