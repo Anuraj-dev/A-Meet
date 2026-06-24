@@ -74,12 +74,11 @@ function renderBar(overrides = {}) {
   return props;
 }
 
-// Buttons carry no accessible name (icon-only, tooltip titles aren't exposed as
-// names), so we locate a control by the icon that represents its current state —
-// which icon is shown IS the user-observable behavior the toggles drive.
-function buttonByIcon(testId) {
-  return screen.getByTestId(testId).closest('button');
-}
+// Each control is an icon-only button whose accessible name comes from its MUI
+// Tooltip title, so we locate it by that user-facing label — the control-bar
+// contract — rather than by icon internals.
+const btn = (name) => screen.getByRole('button', { name });
+const queryBtn = (name) => screen.queryByRole('button', { name });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -87,27 +86,29 @@ beforeEach(() => {
 
 describe('ControlBar', () => {
   describe('microphone toggle', () => {
-    it('shows the live mic icon when audio is on and toggles on click', () => {
+    it('exposes the "turn off" control when audio is on and toggles on click', () => {
       const props = renderBar({ localAudioOn: true });
 
-      expect(screen.getByTestId('MicIcon')).toBeInTheDocument();
-      expect(screen.queryByTestId('MicOffIcon')).not.toBeInTheDocument();
+      expect(btn('Turn off microphone')).toBeInTheDocument();
+      expect(queryBtn('Turn on microphone')).not.toBeInTheDocument();
 
-      fireEvent.click(buttonByIcon('MicIcon'));
+      fireEvent.click(btn('Turn off microphone'));
       expect(props.onToggleAudio).toHaveBeenCalledTimes(1);
     });
 
-    it('shows the muted icon when audio is off', () => {
+    it('exposes the "turn on" control when audio is muted', () => {
       renderBar({ localAudioOn: false });
 
-      expect(screen.getByTestId('MicOffIcon')).toBeInTheDocument();
-      expect(screen.queryByTestId('MicIcon')).not.toBeInTheDocument();
+      expect(btn('Turn on microphone')).toBeInTheDocument();
+      expect(queryBtn('Turn off microphone')).not.toBeInTheDocument();
     });
 
     it('disables the mic control when there is no microphone', () => {
       const props = renderBar({ hasMic: false, localAudioOn: false });
 
-      const micButton = buttonByIcon('MicOffIcon');
+      // A disabled control can't host the Tooltip directly, so its "No microphone"
+      // label sits on the wrapping region; the button inside it is non-interactive.
+      const micButton = within(screen.getByLabelText('No microphone')).getByRole('button');
       expect(micButton).toBeDisabled();
       fireEvent.click(micButton);
       expect(props.onToggleAudio).not.toHaveBeenCalled();
@@ -115,38 +116,38 @@ describe('ControlBar', () => {
   });
 
   describe('camera toggle', () => {
-    it('shows the live camera icon when video is on and toggles on click', () => {
+    it('exposes the "turn off" control when video is on and toggles on click', () => {
       const props = renderBar({ localVideoOn: true });
 
-      expect(screen.getByTestId('VideocamIcon')).toBeInTheDocument();
+      expect(btn('Turn off camera')).toBeInTheDocument();
 
-      fireEvent.click(buttonByIcon('VideocamIcon'));
+      fireEvent.click(btn('Turn off camera'));
       expect(props.onToggleVideo).toHaveBeenCalledTimes(1);
     });
 
-    it('shows the camera-off icon when video is off', () => {
+    it('exposes the "turn on" control when video is off', () => {
       renderBar({ localVideoOn: false });
 
-      expect(screen.getByTestId('VideocamOffIcon')).toBeInTheDocument();
-      expect(screen.queryByTestId('VideocamIcon')).not.toBeInTheDocument();
+      expect(btn('Turn on camera')).toBeInTheDocument();
+      expect(queryBtn('Turn off camera')).not.toBeInTheDocument();
     });
   });
 
   describe('screen share', () => {
-    it('shows the present icon when idle and invokes the share handler on click', () => {
+    it('offers "present now" when idle and invokes the share handler on click', () => {
       const props = renderBar({ isScreenSharing: false });
 
-      expect(screen.getByTestId('PresentToAllIcon')).toBeInTheDocument();
+      expect(btn('Present now')).toBeInTheDocument();
 
-      fireEvent.click(buttonByIcon('PresentToAllIcon'));
+      fireEvent.click(btn('Present now'));
       expect(props.onToggleShare).toHaveBeenCalledTimes(1);
     });
 
-    it('shows the stop-presenting icon while actively sharing', () => {
+    it('offers "stop presenting" while actively sharing', () => {
       renderBar({ isScreenSharing: true });
 
-      expect(screen.getByTestId('CancelPresentationIcon')).toBeInTheDocument();
-      expect(screen.queryByTestId('PresentToAllIcon')).not.toBeInTheDocument();
+      expect(btn('Stop presenting')).toBeInTheDocument();
+      expect(queryBtn('Present now')).not.toBeInTheDocument();
     });
   });
 
@@ -157,7 +158,7 @@ describe('ControlBar', () => {
       // Unread count is visible as a badge while the chat panel is hidden.
       expect(screen.getByText('3')).toBeInTheDocument();
 
-      fireEvent.click(buttonByIcon('ChatOutlinedIcon'));
+      fireEvent.click(btn('Show chat'));
       expect(props.onToggleChat).toHaveBeenCalledTimes(1);
     });
 
@@ -165,21 +166,21 @@ describe('ControlBar', () => {
       renderBar({ showChat: true, unreadCount: 3 });
 
       expect(screen.queryByText('3')).not.toBeInTheDocument();
-      // Open-state icon is shown instead of the outlined one.
-      expect(screen.getByTestId('ChatIcon')).toBeInTheDocument();
+      // Open state exposes the "hide chat" control instead.
+      expect(btn('Hide chat')).toBeInTheDocument();
     });
 
     it('people: invokes the people toggle on click', () => {
-      const props = renderBar();
+      const props = renderBar({ showPeople: false });
 
-      fireEvent.click(buttonByIcon('PeopleAltIcon'));
+      fireEvent.click(btn('Show people'));
       expect(props.onTogglePeople).toHaveBeenCalledTimes(1);
     });
 
     it('transcript: invokes the transcript toggle on click', () => {
-      const props = renderBar({ transcriptActive: false, transcriptDisabled: false });
+      const props = renderBar({ transcriptAvailable: false, transcriptDisabled: false });
 
-      fireEvent.click(buttonByIcon('ClosedCaptionOffIcon'));
+      fireEvent.click(btn('Start shared transcript'));
       expect(props.onToggleTranscript).toHaveBeenCalledTimes(1);
     });
   });
@@ -191,7 +192,7 @@ describe('ControlBar', () => {
       // Menu is closed initially.
       expect(screen.queryByRole('menu')).not.toBeInTheDocument();
 
-      fireEvent.click(buttonByIcon('ViewModuleIcon'));
+      fireEvent.click(btn('Change layout'));
 
       const menu = screen.getByRole('menu');
       expect(within(menu).getByText('Auto')).toBeInTheDocument();
