@@ -17,19 +17,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
 
-      # The harness builds the client and boots the server, so both need their
-      # deps. --ignore-scripts on the server skips mediasoup's native build —
-      # the harness runs with SFU_DISABLED=1, so the worker binary is never used.
-      - name: Install server deps
+      # Install the whole workspace once from the root. The harness builds the
+      # client and boots the server (server/src/server.js imports mongoose &c.),
+      # so npm-workspace hoisting must put those deps in the root node_modules
+      # where Node resolves them — separate per-package installs in a single job
+      # fight that hoisting. --ignore-scripts skips mediasoup's native build; the
+      # harness runs with SFU_DISABLED=1, so the worker binary is never used.
+      - name: Install workspace deps
         run: npm ci --ignore-scripts
-        working-directory: server
-      - name: Install client deps
-        run: npm ci
-        working-directory: client
-      - name: Install harness deps
-        run: npm ci
-        working-directory: e2e
 
       # Chromium + its OS libraries. Cached by setup-node's npm cache only for
       # the npm packages; the browser binary download is the main cost here.
