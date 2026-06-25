@@ -18,6 +18,10 @@ export const env = {
   mongoUri: process.env.MONGO_URI,
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  // Boot the HTTP/auth/socket server WITHOUT the mediasoup SFU. Used by the E2E
+  // harness so a landing/auth smoke test can run without compiling the native
+  // mediasoup worker binary. Never set in production.
+  sfuDisabled: process.env.SFU_DISABLED === '1',
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID || '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
