@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "A-Meet — a Google Meet clone (MERN + Socket.io + mediasoup SFU)",
+  "workspaces": [
+    "client",
+    "server",
+    "shared",
+    "e2e"
+  ],
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm --prefix server run dev",
@@ -17,9 +23,14 @@
     "coverage:server": "npm --prefix server run test:coverage",
     "coverage:client": "npm --prefix client run test:coverage",
     "test:e2e": "npm --prefix e2e test",
-    "test:e2e:install": "npm --prefix e2e run install:browsers"
+    "test:e2e:install": "npm --prefix e2e run install:browsers",
+    "typecheck": "npm run typecheck:shared && npm run typecheck:server && npm run typecheck:client",
+    "typecheck:shared": "npm --prefix shared run typecheck",
+    "typecheck:server": "npm --prefix server run typecheck",
+    "typecheck:client": "npm --prefix client run typecheck"
   },
   "devDependencies": {
-    "concurrently": "^10.0.0"
+    "concurrently": "^10.0.0",
+    "typescript": "^5.9.2"
   }
 }

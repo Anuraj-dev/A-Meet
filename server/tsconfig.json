@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  // Leaf-up migration: today only the contract-check module is type-checked.
+  // As `src/` modules are converted to TypeScript, add "src" here so the
+  // strict checker covers them too. JavaScript keeps running untouched via Node.
+  "include": ["typecheck"]
+}
