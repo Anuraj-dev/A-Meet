@@ -262,4 +262,173 @@ describe('useMediasoup', () => {
       expect(H.socket._handlers[event] ?? []).toHaveLength(0);
     }
   });
+
+  it('pauses and resumes the local audio producer when toggled', async () => {
+    const { result } = mount();
+    await waitForSetup();
+    expect(result.current.localAudioOn).toBe(true);
+
+    await act(async () => { await result.current.toggleAudio(); });
+    expect(result.current.localAudioOn).toBe(false);
+    expect(H.request).toHaveBeenCalledWith('sfu-pause-producer', expect.objectContaining({ producerId: expect.any(String) }));
+
+    await act(async () => { await result.current.toggleAudio(); });
+    expect(result.current.localAudioOn).toBe(true);
+    expect(H.request).toHaveBeenCalledWith('sfu-resume-producer', expect.objectContaining({ producerId: expect.any(String) }));
+  });
+
+  it('pauses the local video producer when toggled off', async () => {
+    const { result } = mount();
+    await waitForSetup();
+    expect(result.current.localVideoOn).toBe(true);
+
+    await act(async () => { await result.current.toggleVideo(); });
+    expect(result.current.localVideoOn).toBe(false);
+  });
+
+  it('toggles raise-hand on then off, emitting both states', async () => {
+    const { result } = mount();
+    await waitForSetup();
+
+    act(() => { result.current.toggleHand(); });
+    expect(result.current.handRaised).toBe(true);
+    act(() => { result.current.toggleHand(); });
+    expect(result.current.handRaised).toBe(false);
+    expect(H.socket.emit).toHaveBeenCalledWith('sfu-raise-hand', { raised: false });
+  });
+
+  it('applies a clamped mic gain to the live gain node', async () => {
+    const { result } = mount();
+    await waitForSetup();
+
+    act(() => { result.current.setMicGain(1.5); });
+    expect(result.current.micGain).toBe(1.5);
+    // Out-of-range requests clamp into [0, 2].
+    act(() => { result.current.setMicGain(5); });
+    expect(result.current.micGain).toBe(2);
+  });
+
+  it('starts and stops screen sharing', async () => {
+    navigator.mediaDevices.getDisplayMedia.mockResolvedValue(new FakeMediaStream([fakeTrack('video', 'screen-1')]));
+    const { result } = mount();
+    await waitForSetup();
+
+    await act(async () => { await result.current.shareScreen(); });
+    expect(result.current.isScreenSharing).toBe(true);
+    expect(result.current.localScreenStream).toBeInstanceOf(FakeMediaStream);
+    expect(H.produced.some((p) => p.appData?.source === 'screen')).toBe(true);
+
+    act(() => { result.current.stopScreenShare(); });
+    expect(result.current.isScreenSharing).toBe(false);
+    expect(H.request).toHaveBeenCalledWith('sfu-close-producer', expect.objectContaining({ producerId: expect.any(String) }));
+  });
+
+  it('reflects peer pause/resume, hand-raise, and active-speaker events', async () => {
+    const { result } = mount();
+    await waitForSetup();
+    await consumePeer(result, { producerId: 'p-remote-1', socketId: 'peer-1', kind: 'video' });
+
+    await act(async () => { H.socket._emit('sfu-producer-paused', { producerId: 'p-remote-1' }); await Promise.resolve(); });
+    expect(result.current.peerStates['peer-1'].video).toBe(false);
+
+    await act(async () => { H.socket._emit('sfu-producer-resumed', { producerId: 'p-remote-1' }); await Promise.resolve(); });
+    expect(result.current.peerStates['peer-1'].video).toBe(true);
+
+    await act(async () => { H.socket._emit('sfu-hand-raise-update', { socketId: 'peer-1', raised: true }); await Promise.resolve(); });
+    expect(result.current.peerStates['peer-1'].handRaised).toBe(true);
+
+    await act(async () => { H.socket._emit('sfu-active-speaker', { socketId: 'peer-1' }); await Promise.resolve(); });
+    expect(result.current.activeSpeaker).toBe('peer-1');
+  });
+
+  it('consumes producers already present in the room on join', async () => {
+    H.existingProducers = [{
+      producerId: 'p-existing', socketId: 'peer-9', user: { name: 'Early Bird', avatar: 'e.png' },
+      kind: 'audio', paused: false, appData: { source: 'camera' },
+    }];
+    H.producerKinds['p-existing'] = 'audio';
+
+    const { result } = mount();
+
+    await waitFor(() => expect(result.current.remoteStreams['peer-9']).toBeDefined());
+    expect(result.current.peerStates['peer-9']).toMatchObject({ name: 'Early Bird' });
+  });
+
+  it('flags permissionDenied when camera and microphone are both blocked', async () => {
+    navigator.mediaDevices.getUserMedia.mockRejectedValue(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }));
+
+    const { result } = mount();
+
+    await waitFor(() => expect(result.current.permissionDenied).toBe(true));
+    expect(result.current.hasMic).toBe(false);
+    expect(result.current.hasCamera).toBe(false);
+  });
+
+  it('produces in the paused state when joining muted with camera off', async () => {
+    const { result } = mount({ startAudioOn: false, startVideoOn: false });
+    await waitForSetup();
+
+    // Tracks are produced (so toggling later is instant) but immediately paused.
+    expect(result.current.localAudioOn).toBe(false);
+    expect(result.current.localVideoOn).toBe(false);
+    const producedTags = H.produced.map((p) => p.appData?.mediaTag);
+    expect(producedTags).toContain('audio');
+    expect(producedTags).toContain('video');
+    expect(H.request).toHaveBeenCalledWith('sfu-pause-producer', expect.objectContaining({ producerId: expect.any(String) }));
+  });
+
+  it('ignores a screen-share that the user cancels', async () => {
+    navigator.mediaDevices.getDisplayMedia.mockRejectedValue(Object.assign(new Error('cancelled'), { name: 'NotAllowedError' }));
+    const { result } = mount();
+    await waitForSetup();
+
+    await act(async () => { await result.current.shareScreen(); });
+    expect(result.current.isScreenSharing).toBe(false);
+  });
+
+  it('is a no-op to stop screen sharing when nothing is shared', async () => {
+    const { result } = mount();
+    await waitForSetup();
+
+    act(() => { result.current.stopScreenShare(); });
+    expect(result.current.isScreenSharing).toBe(false);
+    expect(H.request).not.toHaveBeenCalledWith('sfu-close-producer', expect.anything());
+  });
+
+  it('recovers (stays connected) when the reconnect setup fails', async () => {
+    const { result } = mount();
+    await waitForSetup();
+
+    // Fail the first signaling call of the reconnect; onSocketConnect should
+    // catch it without throwing or wedging the connected state.
+    H.request.mockImplementationOnce(async () => { throw new Error('reconnect boom'); });
+    await act(async () => { H.socket.connected = true; H.socket._emit('connect'); await Promise.resolve(); });
+
+    await waitFor(() => expect(result.current.socketConnected).toBe(true));
+  });
+
+  it('swallows a failed pause request but still updates local mic state', async () => {
+    const { result } = mount();
+    await waitForSetup();
+
+    await act(async () => {
+      H.request.mockImplementationOnce(async () => { throw new Error('network'); });
+      await result.current.toggleAudio();
+    });
+    // The UI reflects the user's intent even though the server call failed.
+    expect(result.current.localAudioOn).toBe(false);
+  });
+
+  it('does not flag permissionDenied when only the camera is unavailable', async () => {
+    navigator.mediaDevices.getUserMedia.mockImplementation(async (constraints) => {
+      if (constraints.audio) return new FakeMediaStream([fakeTrack('audio', 'mic-1')]);
+      throw Object.assign(new Error('no camera'), { name: 'NotFoundError' });
+    });
+
+    const { result } = mount();
+
+    await waitFor(() => expect(result.current.hasMic).toBe(true));
+    expect(result.current.hasCamera).toBe(false);
+    expect(result.current.permissionDenied).toBe(false);
+  });
 });
