@@ -31,6 +31,7 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
         }}
       />
       <Box
+        data-testid="chat-panel"
         sx={{
           // Mobile: bottom sheet. Desktop: in-flow side column.
           position: { xs: 'fixed', sm: 'relative' },
