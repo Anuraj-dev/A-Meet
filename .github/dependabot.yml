@@ -1,0 +1,29 @@
+# Dependabot keeps dependencies fresh by opening reviewable update PRs, so the
+# project's bleeding-edge majors don't silently rot. One npm entry per package
+# in this monorepo (client/ and server/). A future shared/ workspace (#53) will
+# get its own entry then — it doesn't exist yet.
+#
+# Conventions: weekly cadence; minor + patch updates grouped into a single PR
+# per package to cut noise; PRs target the default branch. No auto-merge — every
+# update is reviewed.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/client"
+    schedule:
+      interval: "weekly"
+    groups:
+      client-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+    groups:
+      server-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
