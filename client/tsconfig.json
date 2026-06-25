@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": []
+  },
+  // Leaf-up migration: today only the contract-check module is type-checked.
+  // As `src/` modules are converted to TypeScript, add "src" here so the
+  // strict checker covers them too. JavaScript keeps building untouched via Vite.
+  "include": ["typecheck"]
+}
