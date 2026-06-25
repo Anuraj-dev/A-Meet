@@ -14,11 +14,18 @@ import { createLifecycle } from './lifecycle.js';
 async function start() {
   try {
     await connectDB();
-    await createWorkers();
-    // Resolve the IP mediasoup advertises to browsers before serving traffic —
-    // on a private/loopback value this auto-detects the EC2 public IPv4, else
-    // warns loudly (a wrong announced IP = peers can never connect media).
-    await resolveAnnouncedIp();
+    // The SFU is skippable for E2E (SFU_DISABLED=1): it needs the native
+    // mediasoup worker binary, which the landing/auth smoke test doesn't
+    // exercise. Production always runs with the SFU on.
+    if (!env.sfuDisabled) {
+      await createWorkers();
+      // Resolve the IP mediasoup advertises to browsers before serving traffic —
+      // on a private/loopback value this auto-detects the EC2 public IPv4, else
+      // warns loudly (a wrong announced IP = peers can never connect media).
+      await resolveAnnouncedIp();
+    } else {
+      logger.warn('SFU_DISABLED=1 — starting without mediasoup workers (E2E mode)');
+    }
     const app = createApp();
     const httpServer = http.createServer(app);
     const io = initSocket(httpServer);

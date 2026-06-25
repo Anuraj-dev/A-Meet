@@ -1,0 +1,50 @@
+name: E2E smoke
+
+# Runs the Playwright harness smoke test on every PR and on pushes to main, so
+# the harness itself stays green. The full feature E2E suite (#35) is NOT wired
+# here yet — this only proves the shared harness boots and signs in.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  e2e:
+    name: Playwright smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The harness builds the client and boots the server, so both need their
+      # deps. --ignore-scripts on the server skips mediasoup's native build —
+      # the harness runs with SFU_DISABLED=1, so the worker binary is never used.
+      - name: Install server deps
+        run: npm ci --ignore-scripts
+        working-directory: server
+      - name: Install client deps
+        run: npm ci
+        working-directory: client
+      - name: Install harness deps
+        run: npm ci
+        working-directory: e2e
+
+      # Chromium + its OS libraries. Cached by setup-node's npm cache only for
+      # the npm packages; the browser binary download is the main cost here.
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: e2e
+
+      - name: Run E2E smoke
+        run: npx playwright test
+        working-directory: e2e
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7
