@@ -4,9 +4,11 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import pinoHttp from 'pino-http';
+import mongoose from 'mongoose';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import passport from './config/passport.js';
+import { areWorkersAlive } from './sfu/workers.js';
 import authRoutes from './routes/auth.routes.js';
 import roomRoutes from './routes/room.routes.js';
 import logRoutes from './routes/log.routes.js';
@@ -28,7 +30,24 @@ export function createApp() {
   app.use(passport.initialize());
   app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/api/health' || req.url.startsWith('/api/logs') } }));
 
+  // Liveness — always 200 if the process is up. Must NOT touch dependencies, so
+  // a transient Mongo/worker blip never makes an orchestrator kill a healthy
+  // process. Readiness (below) is the dependency-aware gate.
   app.get('/api/health', (req, res) => res.json({ ok: true, env: env.nodeEnv }));
+
+  // Readiness — 200 only when MongoDB is connected AND every mediasoup worker is
+  // alive; otherwise 503 with the failing dependency so the deploy gate and the
+  // EC2 auto-recovery alarm can act on a real signal. readyState === 1 means
+  // 'connected' (0/2/3 are disconnected/connecting/disconnecting).
+  app.get('/api/health/ready', (req, res) => {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ ok: false, reason: 'db' });
+    }
+    if (!areWorkersAlive()) {
+      return res.status(503).json({ ok: false, reason: 'workers' });
+    }
+    return res.json({ ok: true });
+  });
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/rooms', roomLimiter, roomRoutes);
   app.use('/api/logs', logRoutes);
