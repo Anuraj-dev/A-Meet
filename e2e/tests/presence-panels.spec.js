@@ -37,10 +37,18 @@ test.describe('two-peer presence', () => {
   test('a joining peer appears in the other peer’s roster, and leaving removes them', async ({ browser }) => {
     const { contextB, pageA, pageB, close } = await createPeers(browser, { users: [userA, userB] });
 
+    // Scope avatar assertions to the top-overlay roster. The join/leave toasts
+    // (role=status) render the *same* avatar + name, so an unscoped img lookup
+    // would match two elements (strict-mode violation). The chat system message
+    // shares the toast's exact text too, so scope that to the chat panel.
+    const rosterA = pageA.getByTestId('participant-roster');
+    const rosterB = pageB.getByTestId('participant-roster');
+    const chatPanelA = pageA.getByTestId('chat-panel');
+
     // Peer A starts the meeting and is alone — only their own avatar is present.
     const roomId = await createRoomAsHost(pageA);
-    await expect(pageA.getByRole('img', { name: userA.name })).toBeVisible({ timeout: 15_000 });
-    await expect(pageA.getByRole('img', { name: userB.name })).toHaveCount(0);
+    await expect(rosterA.getByRole('img', { name: userA.name })).toBeVisible({ timeout: 15_000 });
+    await expect(rosterA.getByRole('img', { name: userB.name })).toHaveCount(0);
 
     // Peer B joins the same room through the lobby preview.
     await pageB.goto(`/lobby/${roomId}`);
@@ -48,20 +56,20 @@ test.describe('two-peer presence', () => {
     await pageB.waitForURL(new RegExp(`/room/${roomId}$`));
 
     // Presence propagates both ways: each peer's roster now shows the other.
-    await expect(pageA.getByRole('img', { name: userB.name })).toBeVisible({ timeout: 15_000 });
-    await expect(pageB.getByRole('img', { name: userA.name })).toBeVisible({ timeout: 15_000 });
+    await expect(rosterA.getByRole('img', { name: userB.name })).toBeVisible({ timeout: 15_000 });
+    await expect(rosterB.getByRole('img', { name: userA.name })).toBeVisible({ timeout: 15_000 });
 
     // The same socket event is also surfaced as a chat system message for A.
-    await pageA.locator('button:has([data-testid="ChatOutlinedIcon"])').click();
-    await expect(pageA.getByText(`${userB.name} joined`)).toBeVisible({ timeout: 15_000 });
+    await pageA.getByRole('button', { name: /chat/i }).click();
+    await expect(chatPanelA.getByText(`${userB.name} joined`)).toBeVisible({ timeout: 15_000 });
 
     // Peer B leaves deliberately (immediate leave-room, no disconnect grace).
-    await pageB.locator('button:has([data-testid="CallEndIcon"])').first().click();
+    await pageB.getByRole('button', { name: 'Leave call' }).first().click();
     await pageB.waitForURL((url) => !url.pathname.startsWith('/room/'));
 
     // A's roster returns to just themselves, and the leave is announced.
-    await expect(pageA.getByRole('img', { name: userB.name })).toHaveCount(0, { timeout: 15_000 });
-    await expect(pageA.getByText(`${userB.name} left`)).toBeVisible({ timeout: 15_000 });
+    await expect(rosterA.getByRole('img', { name: userB.name })).toHaveCount(0, { timeout: 15_000 });
+    await expect(chatPanelA.getByText(`${userB.name} left`)).toBeVisible({ timeout: 15_000 });
 
     await close();
   });
@@ -74,8 +82,11 @@ test.describe('right-rail panel switching', () => {
     const page = await context.newPage();
     await createRoomAsHost(page);
 
-    const chatToggle = page.locator('button:has([data-testid="ChatOutlinedIcon"])');
-    const peopleToggle = page.locator('button:has([data-testid="PeopleAltIcon"])');
+    // Toggle by accessible name (MUI strips icon data-testids in prod builds, so
+    // CSS icon selectors find nothing). The button label flips Show/Hide, hence
+    // the case-insensitive regex matches either state.
+    const chatToggle = page.getByRole('button', { name: /chat/i });
+    const peopleToggle = page.getByRole('button', { name: /people/i });
     const chatPanel = page.getByText('In-call messages');
     const peoplePanel = page.getByPlaceholder('Search people');
 

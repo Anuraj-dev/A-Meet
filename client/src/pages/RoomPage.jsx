@@ -1309,7 +1309,7 @@ export default function RoomPage() {
               }}
             >
               {!isMobile && users.length > 0 && (
-                <AvatarGroup max={4} sx={{ '& .MuiAvatar-root': { width: 28, height: 28, fontSize: 12, borderColor: 'background.default' } }}>
+                <AvatarGroup data-testid="participant-roster" max={4} sx={{ '& .MuiAvatar-root': { width: 28, height: 28, fontSize: 12, borderColor: 'background.default' } }}>
                   {users.map((u) => (
                     <Avatar key={u.id} src={u.avatar} alt={u.name}>{u.name?.[0]}</Avatar>
                   ))}
