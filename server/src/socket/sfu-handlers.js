@@ -13,6 +13,7 @@ import {
 } from '../sfu/sfu-rooms.js';
 import { Room } from '../models/Room.js';
 import { isRoomAdmin } from '../rooms/room-admin.js';
+import { getUserRoom } from './room-manager.js';
 import { logger } from '../config/logger.js';
 
 // socketId → roomId, established on get-rtp-capabilities. SFU-scoped (independent
@@ -290,7 +291,11 @@ export function registerSfuHandlers(io, socket) {
   // 11) Emoji reaction: ephemeral relay only, no persistence. Use io.in so the
   //     sender also receives the event (for local feedback).
   socket.on('sfu-reaction', ({ emoji } = {}) => {
-    const roomId = socketRoom.get(socket.id);
+    // A reaction is a pure room broadcast, not a media operation. Resolve the
+    // room from canonical presence (room-manager) with the SFU map as a fast
+    // path, so a reaction still relays before the SFU handshake completes — and
+    // on the SFU-off E2E harness, where `socketRoom` is never populated.
+    const roomId = socketRoom.get(socket.id) ?? getUserRoom(socket.id);
     if (!roomId || typeof emoji !== 'string') return;
     io.in(roomId).emit('sfu-reaction', { emoji, socketId: socket.id });
   });
