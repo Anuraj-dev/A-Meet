@@ -19,6 +19,7 @@ import { useMediasoup } from '../hooks/useMediasoup';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { isPcmCaptureSupported, usePcmCapture } from '../hooks/usePcmCapture';
 import { useReactions } from '../hooks/useReactions';
+import { useHostModeration } from '../hooks/useHostModeration';
 import { useScreenShare } from '../hooks/useScreenShare';
 import VideoTile from '../components/VideoTile';
 import RemoteAudio from '../components/RemoteAudio';
@@ -90,7 +91,6 @@ export default function RoomPage() {
   // Focus model: a LOCAL pin (just for me, any participant) and a host SPOTLIGHT
   // (server-relayed, applies to everyone). Spotlight wins when both are set.
   const [pinnedKey, setPinnedKey] = useState(null);
-  const [spotlightKey, setSpotlightKey] = useState(null);
   // Layout chooser: 'auto' keeps the smart alone/solo/grid behaviour.
   const [layoutMode, setLayoutMode] = useState('auto'); // auto | tiled | spotlight | sidebar
   const [gridPage, setGridPage] = useState(0); // grid pagination for large calls
@@ -242,6 +242,11 @@ export default function RoomPage() {
     remoteScreens, isScreenSharing, localScreenStream, localScreenSurface,
     peerStates, localName: user?.name ?? 'You',
   });
+
+  // Host-moderation concern (spotlight state + host-action emitters).
+  const {
+    spotlightKey, handleSpotlight, handleHostMute, handleHostRemove,
+  } = useHostModeration({ socket });
 
   // Composite every camera tile into a Picture-in-Picture "mini player" so
   // participants stay visible after switching tabs.
@@ -414,16 +419,13 @@ export default function RoomPage() {
       setMeetingEndedSnack(false);
       navigate('/', { state: { removed: true } });
     };
-    const onSpotlight = ({ socketId } = {}) => setSpotlightKey(socketId ?? null);
     socket.on('sfu-force-muted', onForceMuted);
     socket.on('sfu-unmute-request', onUnmuteRequest);
     socket.on('sfu-removed', onRemoved);
-    socket.on('sfu-spotlight', onSpotlight);
     return () => {
       socket.off('sfu-force-muted', onForceMuted);
       socket.off('sfu-unmute-request', onUnmuteRequest);
       socket.off('sfu-removed', onRemoved);
-      socket.off('sfu-spotlight', onSpotlight);
     };
   }, [localAudioOn, toggleAudio, navigate, pushNote]);
 
@@ -1114,9 +1116,6 @@ export default function RoomPage() {
   ];
 
   const handlePin = (person) => setPinnedKey((k) => (k === person.id ? null : person.id));
-  const handleSpotlight = (person) =>
-    socket.emit('sfu-spotlight', { socketId: spotlightKey === person.id ? null : person.id });
-  const handleHostMute = (person) => socket.emit('sfu-host-mute', { socketId: person.id });
   const handleAskUnmute = (person) => socket.emit('sfu-request-unmute', { socketId: person.id });
   const handleMuteAll = () => {
     socket.emit('sfu-mute-all');
@@ -1126,7 +1125,6 @@ export default function RoomPage() {
     socket.emit('sfu-request-unmute-all');
     pushNote({ kind: 'event', variant: 'info', text: 'Asked everyone to unmute' });
   };
-  const handleHostRemove = (person) => socket.emit('sfu-host-remove', { socketId: person.id });
 
   // A focus key is only valid if that person is still present.
   const keyPresent = (k) => k && (k === socket.id || Boolean(remoteStreams[k]));
