@@ -207,11 +207,13 @@ Run everything CI gates in one command:
 # One-time: download Playwright browsers (not part of npm ci)
 npm run test:e2e:install
 
-# typecheck → unit tests with coverage ratchet → E2E smoke
+# server lint → npm audit (server + client) → typecheck → unit/coverage → client build → E2E smoke
 npm run verify
 ```
 
-`verify` fails fast — the first failing phase stops the run. A green `verify` locally
+`verify` fails fast — the first failing phase stops the run. It mirrors the blocking CI
+jobs: `Server lint`, `npm audit (high)`, `Workspaces typecheck`, `Client tests + build`,
+`Server tests` (coverage ratchet), and the `Playwright smoke`. A green `verify` locally
 means the same gates that block merges in CI are satisfied.
 
 ---
