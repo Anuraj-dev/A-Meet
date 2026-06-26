@@ -48,7 +48,7 @@ import {
   getTranscriptSnapshot, startTranscript, stopTranscript,
 } from '../src/socket/transcript-manager.js';
 import {
-  transcriptionConfigured, stopContributor, stopRoomContributors,
+  transcriptionConfigured, stopRoomContributors,
 } from '../src/transcription/meeting-transcription.js';
 
 const USER = { id: 'user-1', name: 'Alice' };
@@ -244,15 +244,13 @@ describe('disconnect grace window', () => {
   });
 
   it('cancels the deferred leave when the user rejoins within the grace window', () => {
-    const { handlers, ioEmits, socketEmits } = setup();
+    const { handlers, ioEmits } = setup();
     removeUser.mockReturnValue({ roomId: ROOM, user: USER });
     isUserInRoom.mockReturnValue(false);
 
     handlers['disconnect']();
 
-    // Rejoin before the timer fires — join-room cancels the pending leave.
-    // Also make isUserInRoom return false initially for the join, then
-    // the join sets alreadyPresent = false before the pendingLeaves check.
+    // Rejoin before the 4s timer fires — join-room cancels the pending leave.
     handlers['join-room'](ROOM);
 
     vi.advanceTimersByTime(4000);
