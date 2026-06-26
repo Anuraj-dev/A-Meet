@@ -47,6 +47,24 @@ jobs:
       # vitest.config.js) gates every PR — a coverage drop fails this check.
       - run: npm run test:coverage
 
+  audit:
+    name: npm audit (high)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # --ignore-scripts keeps installs fast (no native builds needed for audit).
+      - run: npm ci --ignore-scripts
+        working-directory: server
+      - run: npm audit --audit-level=high
+        working-directory: server
+      - run: npm ci --ignore-scripts
+        working-directory: client
+      - run: npm audit --audit-level=high
+        working-directory: client
+
   client:
     name: Client tests + build
     runs-on: ubuntu-latest
