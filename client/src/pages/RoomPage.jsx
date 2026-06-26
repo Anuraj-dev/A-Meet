@@ -19,6 +19,7 @@ import { useMediasoup } from '../hooks/useMediasoup';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { isPcmCaptureSupported, usePcmCapture } from '../hooks/usePcmCapture';
 import { useReactions } from '../hooks/useReactions';
+import { useScreenShare } from '../hooks/useScreenShare';
 import VideoTile from '../components/VideoTile';
 import RemoteAudio from '../components/RemoteAudio';
 import RtcStatsOverlay from '../components/RtcStatsOverlay';
@@ -105,7 +106,6 @@ export default function RoomPage() {
   const [soundEnabled, setSoundEnabled] = useState(() => isSoundEnabled());
   const [isHost, setIsHost] = useState(false);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
-  const [showScreenAnyway, setShowScreenAnyway] = useState(false);
   // Bottom-left transient flashes: join/leave, chat previews, copy confirmation.
   const [notes, setNotes] = useState([]);
   const noteIdRef = useRef(0);
@@ -232,37 +232,16 @@ export default function RoomPage() {
   const remoteScreenEntries = Object.entries(remoteScreens);
   const isSoloCall = remoteEntries.length === 1 && remoteScreenEntries.length === 0 && !isScreenSharing;
   const isAlone = remoteEntries.length === 0 && !isScreenSharing;
-  const hasScreen = isScreenSharing || remoteScreenEntries.length > 0;
 
-  // Reset "show anyway" whenever a new screen share starts/stops.
-  useEffect(() => {
-    if (!isScreenSharing) setShowScreenAnyway(false);
-  }, [isScreenSharing]);
-
-  // Unified shares model — avoids self-mirror loop and supports multi-share
-  const shares = [
-    ...remoteScreenEntries.map(([sid, stream]) => ({
-      key: sid, stream, isLocal: false,
-      name: peerStates[sid]?.name ?? 'Participant', surface: null,
-    })),
-    ...(isScreenSharing && localScreenStream
-      ? [{ key: 'local', stream: localScreenStream, isLocal: true,
-           name: user?.name ?? 'You', surface: localScreenSurface }]
-      : []),
-  ];
-  const [pinnedShareKey, setPinnedShareKey] = useState(null);
-  const pinnedShare = shares.find((s) => s.key === pinnedShareKey)
-    ?? shares.find((s) => !s.isLocal)
-    ?? shares[0]
-    ?? null;
-
-  // Keep pinnedShareKey valid when shares list changes
-  useEffect(() => {
-    if (pinnedShareKey && !shares.find((s) => s.key === pinnedShareKey)) {
-      setPinnedShareKey(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shares.map((s) => s.key).join(',')]);
+  // Screen-share / presentation concern (unified shares model, pinned-share
+  // selection, infinity-mirror reveal) lives in useScreenShare.
+  const {
+    shares, pinnedShare, setPinnedShareKey, hasScreen,
+    showScreenAnyway, setShowScreenAnyway,
+  } = useScreenShare({
+    remoteScreens, isScreenSharing, localScreenStream, localScreenSurface,
+    peerStates, localName: user?.name ?? 'You',
+  });
 
   // Composite every camera tile into a Picture-in-Picture "mini player" so
   // participants stay visible after switching tabs.
