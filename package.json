@@ -27,7 +27,8 @@
     "typecheck": "npm run typecheck:shared && npm run typecheck:server && npm run typecheck:client",
     "typecheck:shared": "npm --prefix shared run typecheck",
     "typecheck:server": "npm --prefix server run typecheck",
-    "typecheck:client": "npm --prefix client run typecheck"
+    "typecheck:client": "npm --prefix client run typecheck",
+    "verify": "npm run typecheck && npm run coverage && npm run test:e2e"
   },
   "devDependencies": {
     "concurrently": "^10.0.0",

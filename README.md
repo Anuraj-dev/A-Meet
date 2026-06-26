@@ -199,6 +199,21 @@ Vitest globals for `test/**`, and ignores generated/dependency dirs
 (`node_modules`, `logs`, `coverage`, `dist`). `npm --prefix server run lint` exits zero
 on a clean checkout and runs as a CI gate.
 
+### Full pre-merge suite
+
+Run everything CI gates in one command:
+
+```bash
+# One-time: download Playwright browsers (not part of npm ci)
+npm run test:e2e:install
+
+# typecheck → unit tests with coverage ratchet → E2E smoke
+npm run verify
+```
+
+`verify` fails fast — the first failing phase stops the run. A green `verify` locally
+means the same gates that block merges in CI are satisfied.
+
 ---
 
 ## Project Structure
