@@ -58,7 +58,7 @@ One command runs the every-PR CI gates, failing fast on the first failing phase:
 # One-time: download Playwright browsers (not part of `npm ci`)
 npm run test:e2e:install
 
-# lint (server + client) → npm audit (high) → typecheck → unit/coverage → client build → E2E smoke
+# lint (shared + server + client) → npm audit (high) → typecheck → unit/coverage → client build → E2E smoke
 npm run verify
 ```
 
