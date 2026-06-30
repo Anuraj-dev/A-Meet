@@ -7,7 +7,10 @@ import { shouldRedirectToLobby } from '../utils/room-entry';
 
 // Room metadata (title, scheduledFor, …) fetched by RoomGuard and made available
 // to child pages so lobby and room can show scheduled-meeting info without a
-// second API call.
+// second API call. Context is co-located with the guard that provides it;
+// only-export-components is a fast-refresh DX guard, not correctness, so a
+// narrow opt-out is fine here.
+// eslint-disable-next-line react-refresh/only-export-components
 export const RoomMetaContext = createContext(null);
 
 // Validates the :roomId in the URL against the server before rendering the

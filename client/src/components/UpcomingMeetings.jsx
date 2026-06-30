@@ -56,6 +56,10 @@ export default function UpcomingMeetings({ refreshKey, onEdit }) {
     }
   }, []);
 
+  // Fetch the meeting list on mount and whenever refreshKey changes. load()
+  // toggles the loading flag — that's the intended fetch-and-show-spinner
+  // pattern for this data-loading effect, not accidental cascading renders.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load, refreshKey]);
 
   function openMenu(e, meeting) {

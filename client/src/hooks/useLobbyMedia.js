@@ -72,7 +72,6 @@ export function useLobbyMedia() {
 
     init();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setVideoDevice = useCallback(async (deviceId) => {
