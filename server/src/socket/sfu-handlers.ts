@@ -16,6 +16,7 @@ import { isRoomAdmin } from '../rooms/room-admin.js';
 import { getUserRoom } from './room-manager.js';
 import { logger } from '../config/logger.js';
 import type { Server, Socket } from 'socket.io';
+import type { SfuHandRaiseUpdatePayload } from '@a-meet/contracts';
 
 // socketId → roomId, established on get-rtp-capabilities. SFU-scoped (independent
 // of M1's room-manager) and set before any transport work, so it never races
@@ -288,7 +289,8 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
     const peer = getPeer(roomId, socket.id);
     if (!peer) return;
     peer.handRaised = !!raised;
-    socket.to(roomId!).emit('sfu-hand-raise-update', { socketId: socket.id, raised: peer.handRaised });
+    const payload: SfuHandRaiseUpdatePayload = { socketId: socket.id, raised: peer.handRaised };
+    socket.to(roomId!).emit('sfu-hand-raise-update', payload);
     callback?.({ ok: true });
   });
 

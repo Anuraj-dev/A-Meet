@@ -9,6 +9,8 @@
 export const SocketEvent = {
   /** A participant raised or lowered their hand (M5 raise-hand feature). */
   HandRaised: 'hand:raised',
+  /** SFU broadcast when a peer toggles their raised-hand state. */
+  SfuHandRaiseUpdate: 'sfu-hand-raise-update',
 } as const;
 
 /** Union of the known Socket event names, derived from {@link SocketEvent}. */
@@ -27,4 +29,12 @@ export interface HandRaisedPayload {
   raised: boolean;
   /** Epoch milliseconds at which the change occurred. */
   at: number;
+}
+
+/** Broadcast to room peers when an SFU participant toggles raise-hand. */
+export interface SfuHandRaiseUpdatePayload {
+  /** Socket id whose hand state changed. */
+  socketId: string;
+  /** `true` when the hand was raised, `false` when lowered. */
+  raised: boolean;
 }
