@@ -52,10 +52,16 @@ export interface AuthMeResponse {
   user: AuthUserDto | null;
 }
 
+export interface RoomIdentityDto {
+  _id: string;
+  name?: string;
+  avatar?: string;
+}
+
 export interface RoomMetadataDto {
   roomId: string;
-  host?: AuthUserDto | null;
-  admin?: AuthUserDto | null;
+  host?: RoomIdentityDto | null;
+  admin?: RoomIdentityDto | null;
   active: boolean;
   title?: string;
   description?: string;
