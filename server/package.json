@@ -18,6 +18,7 @@
   "type": "module",
   "dependencies": {
     "@a-meet/contracts": "file:../shared",
+    "@aws-sdk/client-ssm": "^3.1076.0",
     "@deepgram/sdk": "^4.11.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",

@@ -32,8 +32,9 @@ NEVER add any Claude / Anthropic / AI attribution anywhere:
 - **Validation:** Joi (API request layer) + Mongoose (DB schema layer).
 - **Ports:** server `5000` · client (Vite) `5173` · MongoDB `27017` · mongo-express `8081`.
 - **Layout:** monorepo — `client/` + `server/` + root `docker-compose.yml` + root `package.json`.
-- **Secrets:** `.env` (git-ignored) holds real values pasted by Anuraj; `.env.example` documents keys.
-  Claude never fills real secrets.
+- **Secrets:** local development uses git-ignored `.env`; production resolves SecureStrings
+  from SSM through the instance role before the server boots. `.env.example` documents keys.
+  Never commit or bake secret values.
 - **Naming:** files `kebab-case`, React components `PascalCase.jsx`, Mongoose models `PascalCase` singular.
 - **Commits:** only when Anuraj explicitly asks.
 
