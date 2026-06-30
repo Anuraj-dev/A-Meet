@@ -1,6 +1,21 @@
 import { Avatar, Box, Typography } from '@mui/material';
 
-export default function LiveCaptions({ entry, interim }) {
+interface CaptionSpeaker {
+  name?: string;
+  avatar?: string;
+}
+
+interface CaptionEntry {
+  speaker?: CaptionSpeaker | null;
+  text?: string;
+}
+
+interface LiveCaptionsProps {
+  entry?: CaptionEntry | null;
+  interim?: CaptionEntry | null;
+}
+
+export default function LiveCaptions({ entry, interim }: LiveCaptionsProps) {
   const speaker = interim?.text ? interim.speaker : entry?.speaker;
   const text = interim?.text || entry?.text;
   if (!text) return null;

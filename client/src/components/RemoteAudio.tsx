@@ -6,9 +6,15 @@ import { appLogger } from '../utils/logger';
 // .volume is unreliable for WebRTC streams on Linux/PipeWire — the same reason
 // the mic uses a GainNode on the send side. `volume` is the already-resolved
 // per-peer level (master × peer override); see RemoteAudio below.
-function PeerAudio({ socketId, stream, volume = 1 }) {
-  const ctxRef = useRef(null);
-  const gainRef = useRef(null);
+interface PeerAudioProps {
+  socketId: string;
+  stream?: MediaStream | null;
+  volume?: number;
+}
+
+function PeerAudio({ socketId, stream, volume = 1 }: PeerAudioProps) {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
   const volumeRef = useRef(volume);
 
   useEffect(() => {
@@ -52,7 +58,13 @@ function PeerAudio({ socketId, stream, volume = 1 }) {
 // masterVolume: global speaker slider (0–1).
 // peerVolumes: per-peer overrides keyed by socketId (0–1, default 1).
 // Final per-peer gain = clamp(masterVolume × peerVolume, 0, 1).
-export default function RemoteAudio({ streams, masterVolume = 1, peerVolumes = {} }) {
+interface RemoteAudioProps {
+  streams: Record<string, MediaStream>;
+  masterVolume?: number;
+  peerVolumes?: Record<string, number>;
+}
+
+export default function RemoteAudio({ streams, masterVolume = 1, peerVolumes = {} }: RemoteAudioProps) {
   return (
     <>
       {Object.entries(streams).map(([socketId, stream]) => {

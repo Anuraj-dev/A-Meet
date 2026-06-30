@@ -2,7 +2,18 @@ import { Avatar, Box, Typography } from '@mui/material';
 
 // Bottom-left floating emoji stream, Google Meet style.
 // Each entry: { id, emoji, name, avatar }
-export default function ReactionsOverlay({ reactions = [] }) {
+interface FloatingReaction {
+  id: number;
+  emoji: string;
+  name?: string;
+  avatar?: string;
+}
+
+interface ReactionsOverlayProps {
+  reactions?: FloatingReaction[];
+}
+
+export default function ReactionsOverlay({ reactions = [] }: ReactionsOverlayProps) {
   if (reactions.length === 0) return null;
   return (
     <Box
