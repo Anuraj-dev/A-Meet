@@ -9,7 +9,7 @@
 // the host vs non-host branch is driven by stubbing `Room.findOne` (the real,
 // already-tested `isRoomAdmin` runs against it).
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../src/sfu/sfu-rooms.js', () => ({
   getOrCreateRoom: vi.fn(),
@@ -29,6 +29,7 @@ vi.mock('../src/config/logger.js', () => ({
 
 import { registerSfuHandlers } from '../src/socket/sfu-handlers.js';
 import { getOrCreateRoom, getRoom, getPeer } from '../src/sfu/sfu-rooms.js';
+import { addUser, removeUser } from '../src/socket/room-manager.js';
 import { Room } from '../src/models/Room.js';
 
 const ROOM = 'room-1';
@@ -36,13 +37,13 @@ const HOST_ID = 'host-user';
 const TARGET = 'target-sock';
 
 // Build a fake io/socket pair that records every emit with its target channel.
-function setup({ userId } = {}) {
+function setup({ userId, socketId = 'caller-sock' } = {}) {
   const handlers = {};
   const ioEmits = [];
   const socketEmits = [];
 
   const socket = {
-    id: 'caller-sock',
+    id: socketId,
     user: { id: userId, name: 'Caller' },
     on: vi.fn((event, cb) => { handlers[event] = cb; }),
     join: vi.fn(),
@@ -250,6 +251,52 @@ describe('SFU host-moderation authorization', () => {
 
       await handlers['sfu-spotlight']({ socketId: TARGET });
 
+      expect(emittedTo(ioEmits, ROOM, 'sfu-spotlight')).toBe(false);
+    });
+  });
+
+  // With the SFU disabled (E2E harness, or before the media handshake), the SFU
+  // `socketRoom` map is never populated. Moderation must still resolve the
+  // caller's room from canonical presence (room-manager) so host-relayed actions
+  // — spotlight + remove — work without any media. Mute is excluded here: it is
+  // an enforced producer pause, which genuinely requires the SFU.
+  describe('host moderation on the SFU-off path (presence room fallback)', () => {
+    const PRESENCE_SOCK = 'presence-only-sock';
+
+    // Seed ONLY room-manager presence (no sfu-get-rtp-capabilities), so the SFU
+    // socketRoom stays empty and callerIsHost must fall back to getUserRoom.
+    beforeEach(() => addUser(ROOM, PRESENCE_SOCK, { id: HOST_ID, name: 'Host' }));
+    afterEach(() => removeUser(PRESENCE_SOCK));
+
+    it('host-remove ejects the target via presence even with the SFU off', async () => {
+      const { handlers, io, ioEmits } = setup({ userId: HOST_ID, socketId: PRESENCE_SOCK });
+      asHost();
+      const targetSocket = { disconnect: vi.fn() };
+      io.sockets.sockets.get.mockReturnValue(targetSocket);
+
+      await handlers['sfu-host-remove']({ socketId: TARGET });
+
+      expect(emittedTo(ioEmits, TARGET, 'sfu-removed')).toBe(true);
+    });
+
+    it('host-spotlight relays to the room via presence even with the SFU off', async () => {
+      const { handlers, ioEmits } = setup({ userId: HOST_ID, socketId: PRESENCE_SOCK });
+      asHost();
+
+      await handlers['sfu-spotlight']({ socketId: TARGET });
+
+      const evt = ioEmits.find((e) => e.target === ROOM && e.event === 'sfu-spotlight');
+      expect(evt?.payload).toEqual({ socketId: TARGET });
+    });
+
+    it('non-host on the SFU-off path still cannot moderate', async () => {
+      const { handlers, ioEmits } = setup({ userId: 'rando', socketId: PRESENCE_SOCK });
+      asNonHost();
+
+      await handlers['sfu-host-remove']({ socketId: TARGET });
+      await handlers['sfu-spotlight']({ socketId: TARGET });
+
+      expect(emittedTo(ioEmits, TARGET, 'sfu-removed')).toBe(false);
       expect(emittedTo(ioEmits, ROOM, 'sfu-spotlight')).toBe(false);
     });
   });

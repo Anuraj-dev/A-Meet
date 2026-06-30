@@ -70,7 +70,9 @@ export function registerHandlers(io) {
         configured: transcriptionConfigured(),
       });
       if (!alreadyPresent && !rejoinedInGrace) {
-        socket.to(roomId).emit('user-joined', socket.user);
+        // Tag the join with the socketId so peers can target this socket for host
+        // moderation even with the SFU media path off (matches getRoomUsers).
+        socket.to(roomId).emit('user-joined', { ...socket.user, socketId: socket.id });
       }
     });
 

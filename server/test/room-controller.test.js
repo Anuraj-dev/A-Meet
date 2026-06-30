@@ -178,6 +178,19 @@ describe('GET /api/rooms/:roomId (getRoom)', () => {
     expect(res.body.roomId).toBe('lmn-opqr-stu');
   });
 
+  it('reports the admin/host id even when no User profile document exists', async () => {
+    const owner = makeUser();
+    await seedScheduledRoom(owner, { roomId: 'mod-erat-ion' });
+
+    const res = await authed('get', '/api/rooms/mod-erat-ion', owner);
+    expect(res.status).toBe(200);
+    // Auth is JWT-only here (no persisted User doc), so populate finds no
+    // profile — but the room must still report WHO its admin/host is, by id, so
+    // the client can resolve host-only UI. Also covers a deleted admin account.
+    expect(res.body.admin?._id).toBe(owner.id);
+    expect(res.body.host?._id).toBe(owner.id);
+  });
+
   it('404s on an unknown room id', async () => {
     const user = makeUser();
     const res = await authed('get', '/api/rooms/non-exis-tnt', user);

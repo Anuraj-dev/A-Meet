@@ -321,9 +321,12 @@ export function registerSfuHandlers(io, socket) {
   // live mic without consent; instead the host can only *request* an unmute,
   // which the target accepts with one tap (Google-Meet behaviour).
 
-  // Resolve+verify the caller as host once per action (small DB read).
+  // Resolve+verify the caller as host once per action (small DB read). Resolve
+  // the room from the SFU map as a fast path, falling back to canonical presence
+  // (room-manager) — so host moderation works before the SFU handshake completes
+  // and on the SFU-off E2E harness, where `socketRoom` is never populated.
   async function callerIsHost() {
-    const roomId = socketRoom.get(socket.id);
+    const roomId = socketRoom.get(socket.id) ?? getUserRoom(socket.id);
     if (!roomId) return null;
     try {
       const room = await Room.findOne({ roomId });

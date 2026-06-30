@@ -23,10 +23,15 @@ export function removeUser(socketId) {
 export function getRoomUsers(roomId) {
   const seen = new Set();
   const result = [];
-  for (const user of (rooms.get(roomId)?.values() ?? [])) {
+  // Deduplicate by user.id (one row per person even across multiple tabs),
+  // keeping the first socket seen. Each row carries that `socketId` so the
+  // client can target a specific socket for host moderation (mute/remove/
+  // spotlight) even when the SFU media path — the usual source of socket ids —
+  // is absent.
+  for (const [socketId, user] of (rooms.get(roomId)?.entries() ?? [])) {
     if (!seen.has(user.id)) {
       seen.add(user.id);
-      result.push(user);
+      result.push({ ...user, socketId });
     }
   }
   return result;

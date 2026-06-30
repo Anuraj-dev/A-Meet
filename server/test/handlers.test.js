@@ -160,13 +160,17 @@ describe('join-room', () => {
     expect(socketEmits.some((e) => e.event === 'transcript-snapshot')).toBe(true);
   });
 
-  it('emits user-joined to peers when the user was not already present', () => {
-    const { handlers, socketEmits } = setup();
+  it('emits user-joined to peers (tagged with the socketId) when the user was not already present', () => {
+    const { handlers, socket, socketEmits } = setup();
     isUserInRoom.mockReturnValue(false);
 
     handlers['join-room'](ROOM);
 
-    expect(socketEmits.some((e) => e.event === 'user-joined')).toBe(true);
+    const joined = socketEmits.find((e) => e.event === 'user-joined');
+    expect(joined).toBeTruthy();
+    // The socketId rides along so peers can target this socket for moderation
+    // even with the SFU media path off.
+    expect(joined.payload).toMatchObject({ ...USER, socketId: socket.id });
   });
 
   it('does NOT emit user-joined when the user was already present (multi-tab)', () => {
