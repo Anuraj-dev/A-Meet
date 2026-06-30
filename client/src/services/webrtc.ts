@@ -4,6 +4,6 @@ import { ICE_SERVERS } from './ice-config';
 
 export { ICE_SERVERS };
 
-export function createPeerConnection() {
+export function createPeerConnection(): RTCPeerConnection {
   return new RTCPeerConnection({ iceServers: ICE_SERVERS });
 }

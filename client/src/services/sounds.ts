@@ -18,12 +18,41 @@
 
 const STORAGE_KEY = 'ameet:sfx';
 
-let ctx = null;
-let master = null;
-let enabled = readEnabled();
-let idleTimer = null;
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
 
-function readEnabled() {
+type SoundName =
+  | 'join'
+  | 'leave'
+  | 'message'
+  | 'reaction'
+  | 'raiseHand'
+  | 'toggleOn'
+  | 'toggleOff'
+  | 'shareStart'
+  | 'shareStop'
+  | 'callEnd';
+
+interface VoiceOptions {
+  freq: number;
+  type?: OscillatorType;
+  start?: number;
+  duration?: number;
+  peak?: number;
+  attack?: number;
+  release?: number;
+  glideTo?: number;
+}
+
+let ctx: AudioContext | null = null;
+let master: GainNode | null = null;
+let enabled = readEnabled();
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function readEnabled(): boolean {
   try {
     return localStorage.getItem(STORAGE_KEY) !== 'off';
   } catch {
@@ -31,11 +60,11 @@ function readEnabled() {
   }
 }
 
-function audioSupported() {
-  return typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
+function audioSupported(): boolean {
+  return Boolean(typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext));
 }
 
-function getCtx() {
+function getCtx(): AudioContext | null {
   if (ctx) return ctx;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
@@ -64,8 +93,8 @@ function getCtx() {
 // the device there, so we fully close() the context shortly after the last cue
 // and recreate it lazily for the next one. The 1.2s debounce lets a burst of
 // cues reuse one context before it's torn down.
-function scheduleIdleClose() {
-  clearTimeout(idleTimer);
+function scheduleIdleClose(): void {
+  if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
     if (ctx) {
       const dying = ctx;
@@ -77,7 +106,7 @@ function scheduleIdleClose() {
 }
 
 // Schedule one enveloped voice. `glideTo` sweeps the pitch over the note.
-function voice(c, {
+function voice(c: AudioContext, {
   freq,
   type = 'sine',
   start = 0,
@@ -86,7 +115,7 @@ function voice(c, {
   attack = 0.008,
   release,
   glideTo,
-}) {
+}: VoiceOptions): void {
   const t0 = c.currentTime + start;
   const rel = release ?? duration * 0.7;
   const osc = c.createOscillator();
@@ -102,7 +131,7 @@ function voice(c, {
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
 
   osc.connect(gain);
-  gain.connect(master);
+  gain.connect(master!);
   osc.start(t0);
   osc.stop(t0 + duration + 0.02);
   // Disconnect nodes once the oscillator ends so they are garbage-collected.
@@ -119,7 +148,7 @@ const N = {
 };
 
 // Each recipe schedules a short sequence of voices.
-const RECIPES = {
+const RECIPES: Record<SoundName, (context: AudioContext) => void> = {
   // Warm ascending chime — someone joined (Meet-like). A clean rising fifth
   // (C5 → G5) with a faint octave shimmer (C6, triangle) layered on the upper
   // note so it reads as a soft bell rather than a plain beep.
@@ -162,7 +191,7 @@ const RECIPES = {
 };
 
 /** Play a named cue. No-op when sounds are off or audio is unsupported. */
-export function playSound(name) {
+export function playSound(name: SoundName): void {
   if (!enabled || !audioSupported()) return;
   const recipe = RECIPES[name];
   if (!recipe) return;
@@ -177,11 +206,11 @@ export function playSound(name) {
   }
 }
 
-export function isSoundEnabled() {
+export function isSoundEnabled(): boolean {
   return enabled;
 }
 
-export function setSoundEnabled(value) {
+export function setSoundEnabled(value: boolean): boolean {
   enabled = !!value;
   try {
     localStorage.setItem(STORAGE_KEY, enabled ? 'on' : 'off');
@@ -193,7 +222,7 @@ export function setSoundEnabled(value) {
   return enabled;
 }
 
-export function toggleSound() {
+export function toggleSound(): boolean {
   return setSoundEnabled(!enabled);
 }
 

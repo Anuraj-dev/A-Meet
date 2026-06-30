@@ -16,3 +16,27 @@ export interface RoomDto {
   /** Whether the room currently has an active session. */
   active: boolean;
 }
+
+/** Request body for reserving a scheduled meeting. */
+export interface ScheduleMeetingRequest {
+  title: string;
+  scheduledFor: string;
+  description?: string;
+}
+
+/** Editable fields on an existing scheduled meeting. */
+export type UpdateScheduledMeetingRequest = Partial<ScheduleMeetingRequest>;
+
+/** A scheduled meeting returned by the room REST endpoints. */
+export interface ScheduledMeetingDto {
+  roomId: string;
+  title: string;
+  description?: string;
+  scheduledFor: string;
+  createdAt: string;
+}
+
+/** Response body for the signed-in user's scheduled meetings. */
+export interface MeetingsResponse {
+  meetings: ScheduledMeetingDto[];
+}
