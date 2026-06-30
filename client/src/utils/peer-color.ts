@@ -7,7 +7,7 @@ export const PEER_COLORS = [
   '#9334e6', '#d01884', '#129eaf', '#c5221f',
 ];
 
-export function getPeerColor(name) {
+export function getPeerColor(name?: string | null): string {
   if (!name) return PEER_COLORS[0];
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
