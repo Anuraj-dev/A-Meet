@@ -201,7 +201,7 @@ on a clean checkout and runs as a CI gate.
 
 ### Full pre-merge suite
 
-Run everything CI gates in one command:
+Run the CI gates that fire on every PR in one command:
 
 ```bash
 # One-time: download Playwright browsers (not part of npm ci)
@@ -211,10 +211,12 @@ npm run test:e2e:install
 npm run verify
 ```
 
-`verify` fails fast — the first failing phase stops the run. It mirrors the blocking CI
-jobs: `Server lint`, `npm audit (high)`, `Workspaces typecheck`, `Client tests + build`,
-`Server tests` (coverage ratchet), and the `Playwright smoke`. A green `verify` locally
-means the same gates that block merges in CI are satisfied.
+`verify` fails fast — the first failing phase stops the run. It mirrors the CI jobs that
+run on every PR: `Server lint`, `npm audit (high)`, `Workspaces typecheck`, `Client tests +
+build`, `Server tests` (coverage ratchet), and the `Playwright smoke`. It does **not** run
+the path-scoped `Server image smoke` (a ~15-min Docker build that spawns a real mediasoup
+worker), which CI runs only when server-image files change. A green `verify` locally means
+those every-PR gates are satisfied.
 
 ---
 

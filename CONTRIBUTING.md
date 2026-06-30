@@ -62,7 +62,10 @@ npm run test:e2e:install
 npm run verify
 ```
 
-`verify` mirrors the blocking CI jobs (`Server lint`, `npm audit (high)`, `Workspaces
-typecheck`, `Client tests + build`, `Server tests` coverage ratchet, and the `Playwright
-smoke`). A green `verify` means the same gates that block merges in CI are satisfied.
+`verify` mirrors the CI jobs that run on every PR (`Server lint`, `npm audit (high)`,
+`Workspaces typecheck`, `Client tests + build`, `Server tests` coverage ratchet, and the
+`Playwright smoke`). A green `verify` means those gates are satisfied. It does **not** run
+the path-scoped `Server image smoke` job (a ~15-min Docker build of the production image
+that spawns a real mediasoup worker) — CI only runs that when server-image files change
+(`server/src/**`, `server/Dockerfile`, `server/package*.json`, `docker-compose.prod.yml`).
 The `test:e2e:install` step is a one-time prerequisite — it is *not* part of `npm ci`.
