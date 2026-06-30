@@ -199,6 +199,25 @@ Vitest globals for `test/**`, and ignores generated/dependency dirs
 (`node_modules`, `logs`, `coverage`, `dist`). `npm --prefix server run lint` exits zero
 on a clean checkout and runs as a CI gate.
 
+### Full pre-merge suite
+
+Run the CI gates that fire on every PR in one command:
+
+```bash
+# One-time: download Playwright browsers (not part of npm ci)
+npm run test:e2e:install
+
+# server lint → npm audit (server + client) → typecheck → unit/coverage → client build → E2E smoke
+npm run verify
+```
+
+`verify` fails fast — the first failing phase stops the run. It mirrors the CI jobs that
+run on every PR: `Server lint`, `npm audit (high)`, `Workspaces typecheck`, `Client tests +
+build`, `Server tests` (coverage ratchet), and the `Playwright smoke`. It does **not** run
+the path-scoped `Server image smoke` (a ~15-min Docker build that spawns a real mediasoup
+worker), which CI runs only when server-image files change. A green `verify` locally means
+those every-PR gates are satisfied.
+
 ---
 
 ## Project Structure
