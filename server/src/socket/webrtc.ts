@@ -7,18 +7,20 @@
 // "Ready" is tracked at the socketId level (a logged-in user can have several
 // tabs = several peers), independent of M1's userId-deduped room map.
 
-// roomId → Set<socketId> of peers ready to negotiate media
-const readyRooms = new Map();
-// socketId → roomId  (reverse index for fast disconnect cleanup)
-const socketReadyRoom = new Map();
+import type { Server, Socket } from 'socket.io';
 
-function addReady(roomId, socketId) {
+// roomId → Set<socketId> of peers ready to negotiate media
+const readyRooms = new Map<string, Set<string>>();
+// socketId → roomId  (reverse index for fast disconnect cleanup)
+const socketReadyRoom = new Map<string, string>();
+
+function addReady(roomId: string, socketId: string) {
   if (!readyRooms.has(roomId)) readyRooms.set(roomId, new Set());
-  readyRooms.get(roomId).add(socketId);
+  readyRooms.get(roomId)!.add(socketId);
   socketReadyRoom.set(socketId, roomId);
 }
 
-function removeReady(socketId) {
+function removeReady(socketId: string) {
   const roomId = socketReadyRoom.get(socketId);
   if (!roomId) return null;
   const peers = readyRooms.get(roomId);
@@ -28,7 +30,7 @@ function removeReady(socketId) {
   return { roomId };
 }
 
-export function registerWebrtcHandlers(io, socket) {
+export function registerWebrtcHandlers(io: Server, socket: Socket) {
   // Newcomer announces it has local media and is ready to negotiate.
   // We reply with the peers ALREADY ready (self excluded — we add after), and
   // the newcomer initiates an offer to each (newcomer-initiates → no glare).

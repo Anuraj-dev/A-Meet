@@ -2,7 +2,7 @@
 // with the SFU disabled (SFU_DISABLED=1) so no native mediasoup binary is
 // needed. Playwright starts this as one of its `webServer` processes.
 //
-// Env is set HERE (before importing the server) because server/src/config/env.js
+// Env is set HERE (before importing the server) because server/src/config/env.ts
 // reads process.env at import time. The in-memory mongod URI isn't known until
 // runtime, so it can't live in a static .env.
 import { MongoMemoryServer } from 'mongodb-memory-server';
@@ -36,4 +36,4 @@ process.on('SIGINT', shutdown);
 
 // Importing the server module runs its self-invoking start(): connect Mongo,
 // (SFU skipped), create the HTTP/socket server, listen on SERVER_PORT.
-await import('../server/src/server.js');
+await import('../server/src/server.ts');

@@ -15,8 +15,9 @@ export const env = {
   isProd: process.env.NODE_ENV === 'production',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
   serverUrl: process.env.SERVER_URL || 'http://localhost:5000',
-  mongoUri: process.env.MONGO_URI,
-  jwtSecret: process.env.JWT_SECRET,
+  // Non-null: the `required` guard above exits the process if either is unset.
+  mongoUri: process.env.MONGO_URI!,
+  jwtSecret: process.env.JWT_SECRET!,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   // Boot the HTTP/auth/socket server WITHOUT the mediasoup SFU. Used by the E2E
   // harness so a landing/auth smoke test can run without compiling the native

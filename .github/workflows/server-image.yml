@@ -13,17 +13,21 @@ on:
     paths:
       - 'server/src/**'
       - 'server/Dockerfile'
-      - 'server/.dockerignore'
+      - '.dockerignore'
       - 'server/package.json'
-      - 'server/package-lock.json'
+      - 'shared/**'
+      - 'package.json'
+      - 'package-lock.json'
       - 'docker-compose.prod.yml'
   pull_request:
     paths:
       - 'server/src/**'
       - 'server/Dockerfile'
-      - 'server/.dockerignore'
+      - '.dockerignore'
       - 'server/package.json'
-      - 'server/package-lock.json'
+      - 'shared/**'
+      - 'package.json'
+      - 'package-lock.json'
       - 'docker-compose.prod.yml'
 
 jobs:
@@ -39,7 +43,7 @@ jobs:
       - name: Build and run smoke target
         uses: docker/build-push-action@v6
         with:
-          context: ./server
+          context: .
           file: ./server/Dockerfile
           target: smoke
           push: false

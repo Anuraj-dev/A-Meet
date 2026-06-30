@@ -7,7 +7,7 @@ const SAMPLE_RATE = 16000;
 const MIN_AUDIO_BYTES = Math.round(SAMPLE_RATE * 2 * 0.45);
 const MAX_CONTEXT_CHARS = 700;
 
-export function buildPcm16Wav(pcm) {
+export function buildPcm16Wav(pcm: Buffer) {
   const header = Buffer.alloc(44);
   header.write('RIFF', 0);
   header.writeUInt32LE(36 + pcm.length, 4);
@@ -25,7 +25,7 @@ export function buildPcm16Wav(pcm) {
   return Buffer.concat([header, pcm]);
 }
 
-function cleanTranscript(text) {
+function cleanTranscript(text: unknown) {
   if (typeof text !== 'string') return '';
   return text
     .replace(/\s*(?:thank you for watching|thanks for watching|please subscribe)[.!?\s]*$/i, '')
@@ -35,11 +35,11 @@ function cleanTranscript(text) {
     .slice(0, 1000);
 }
 
-function lexicalForm(text) {
+function lexicalForm(text: string) {
   return text.toLocaleLowerCase('en-US').replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
 }
 
-function levenshtein(a, b) {
+function levenshtein(a: string, b: string): number {
   if (!a.length) return b.length;
   if (!b.length) return a.length;
   let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
@@ -57,7 +57,7 @@ function levenshtein(a, b) {
   return previous[b.length];
 }
 
-function shouldMerge(groqText, deepgramText) {
+function shouldMerge(groqText: string, deepgramText: string) {
   const a = lexicalForm(groqText);
   const b = lexicalForm(deepgramText);
   if (a === b) return false;
@@ -66,12 +66,15 @@ function shouldMerge(groqText, deepgramText) {
 }
 
 export class GroqTranscriptRefiner {
+  enabled: boolean;
+  client: Groq | null;
+
   constructor() {
     this.enabled = !!env.transcription.groqApiKey;
     this.client = this.enabled ? new Groq({ apiKey: env.transcription.groqApiKey }) : null;
   }
 
-  async refine({ pcm, deepgramText, context = '' }) {
+  async refine({ pcm, deepgramText, context = '' }: { pcm: Buffer; deepgramText: string; context?: string }): Promise<{ text: string; provider: string }> {
     if (!this.client || !Buffer.isBuffer(pcm) || pcm.length < MIN_AUDIO_BYTES) {
       return { text: deepgramText, provider: 'deepgram' };
     }
@@ -120,7 +123,7 @@ export class GroqTranscriptRefiner {
             provider = 'deepgram+groq+merge';
           }
         } catch (error) {
-          logger.warn({ event: 'transcript.mergeFailed', err: error.message }, 'transcript merge fell back to Groq');
+          logger.warn({ event: 'transcript.mergeFailed', err: error instanceof Error ? error.message : String(error) }, 'transcript merge fell back to Groq');
         }
       }
 
@@ -133,7 +136,7 @@ export class GroqTranscriptRefiner {
       }, 'meeting transcript turn refined');
       return { text, provider };
     } catch (error) {
-      logger.warn({ event: 'transcript.refineFailed', err: error.message }, 'Groq refinement failed; keeping Deepgram text');
+      logger.warn({ event: 'transcript.refineFailed', err: error instanceof Error ? error.message : String(error) }, 'Groq refinement failed; keeping Deepgram text');
       return { text: deepgramText, provider: 'deepgram' };
     }
   }

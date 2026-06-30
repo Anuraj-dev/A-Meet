@@ -12,6 +12,10 @@ on:
     branches: [main]
     paths:
       - 'server/**'
+      - 'shared/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.dockerignore'
       - 'docker-compose.prod.yml'
       - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
@@ -66,7 +70,7 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: ./server
+          context: .
           file: ./server/Dockerfile
           target: runtime
           push: true

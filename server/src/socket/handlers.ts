@@ -18,6 +18,7 @@ import {
   transcriptionConfigured,
 } from '../transcription/meeting-transcription.js';
 import { logger } from '../config/logger.js';
+import type { Server } from 'socket.io';
 
 // A dropped connection (network blip, reload, server restart) makes Socket.IO
 // reconnect with a brand-new socket: the old socket fires `disconnect` (→
@@ -33,10 +34,10 @@ import { logger } from '../config/logger.js';
 // (reload, tab close, crash, network loss). Multi-tab overlap is handled
 // separately by isUserInRoom — only the user's last socket ever leaves.
 const LEAVE_GRACE_MS = 4000;
-const pendingLeaves = new Map(); // `${roomId}::${userId}` → timeout handle
-const leaveKey = (roomId, userId) => `${roomId}::${userId}`;
+const pendingLeaves = new Map<string, ReturnType<typeof setTimeout>>(); // `${roomId}::${userId}` → timeout handle
+const leaveKey = (roomId: string, userId: string) => `${roomId}::${userId}`;
 
-export function registerHandlers(io) {
+export function registerHandlers(io: Server) {
   io.on('connection', (socket) => {
     logger.debug({ event: 'socket.connected', socketId: socket.id, userId: socket.user?.id }, 'socket connected');
 
@@ -131,7 +132,7 @@ export function registerHandlers(io) {
         logger.info({ event: 'transcript.started', roomId, userId: socket.user.id }, 'shared transcript started');
         return callback?.({ ok: true, state });
       } catch (err) {
-        return callback?.({ error: err.message });
+        return callback?.({ error: err instanceof Error ? err.message : 'Failed to start transcript' });
       }
     });
 
@@ -149,7 +150,7 @@ export function registerHandlers(io) {
         logger.info({ event: 'transcript.stopped', roomId, userId: socket.user.id }, 'shared transcript stopped');
         return callback?.({ ok: true, state });
       } catch (err) {
-        return callback?.({ error: err.message });
+        return callback?.({ error: err instanceof Error ? err.message : 'Failed to stop transcript' });
       }
     });
 
@@ -161,7 +162,7 @@ export function registerHandlers(io) {
         await startContributor({ io, socket, roomId });
         return callback?.({ ok: true });
       } catch (error) {
-        logger.warn({ event: 'transcript.contributorFailed', roomId, userId: socket.user.id, err: error.message }, 'could not start transcription contributor');
+        logger.warn({ event: 'transcript.contributorFailed', roomId, userId: socket.user.id, err: error instanceof Error ? error.message : String(error) }, 'could not start transcription contributor');
         return callback?.({ error: 'Could not connect to the transcription provider' });
       }
     });

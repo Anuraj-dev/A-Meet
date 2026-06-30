@@ -1,4 +1,5 @@
 import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -57,7 +58,7 @@ export function createApp() {
 
   // Central error handler
   // eslint-disable-next-line no-unused-vars
-  app.use((err, req, res, next) => {
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     logger.error({ err, url: req.url, method: req.method }, err.message || 'Server error');
     res.status(err.status || 500).json({ error: err.message || 'Server error' });
   });

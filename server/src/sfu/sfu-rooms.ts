@@ -6,15 +6,34 @@
 // for a room and closed when the last peer leaves (closeRoomIfEmpty), freeing
 // its Worker resources.
 
+import type { types as MediasoupTypes } from 'mediasoup';
 import { getWorker } from './workers.js';
 import { mediaCodecs } from './config.js';
+import type { AuthUser } from '../types.js';
 
-// roomId → { router, peers: Map<socketId, Peer> }
-//   Peer = { socketId, user, transports, producers, consumers } (all Maps keyed by id)
-const rooms = new Map();
+// Per-peer mediasoup bookkeeping (all Maps keyed by the mediasoup object id).
+export interface Peer {
+  socketId: string;
+  user: AuthUser;
+  handRaised: boolean;
+  transports: Map<string, MediasoupTypes.WebRtcTransport>;
+  producers: Map<string, MediasoupTypes.Producer>;
+  consumers: Map<string, MediasoupTypes.Consumer>;
+}
+
+export interface Room {
+  router: MediasoupTypes.Router;
+  peers: Map<string, Peer>;
+  // Created lazily on first peer join (sfu-handlers); absent until then.
+  audioLevelObserver?: MediasoupTypes.AudioLevelObserver;
+  audioProducerToSocket?: Map<string, string>; // producerId → socketId
+}
+
+// roomId → Room
+const rooms = new Map<string, Room>();
 
 // Lazily create the room's Router on a round-robin Worker.
-export async function getOrCreateRoom(roomId) {
+export async function getOrCreateRoom(roomId: string): Promise<Room> {
   let room = rooms.get(roomId);
   if (room) return room;
 
@@ -26,11 +45,12 @@ export async function getOrCreateRoom(roomId) {
   return room;
 }
 
-export function getRoom(roomId) {
+export function getRoom(roomId: string | undefined) {
+  if (roomId == null) return null;
   return rooms.get(roomId) ?? null;
 }
 
-export function addPeer(roomId, socketId, user) {
+export function addPeer(roomId: string, socketId: string, user: AuthUser) {
   const room = rooms.get(roomId);
   if (!room) return null;
   let peer = room.peers.get(socketId);
@@ -47,16 +67,24 @@ export function addPeer(roomId, socketId, user) {
   return peer;
 }
 
-export function getPeer(roomId, socketId) {
+export function getPeer(roomId: string | undefined, socketId: string) {
+  if (roomId == null) return null;
   return rooms.get(roomId)?.peers.get(socketId) ?? null;
 }
 
 // Every producer currently in the room except `exceptSocketId`'s own — what a
 // newcomer needs to consume on join (and what we hand back for `sfu-get-producers`).
-export function listOtherProducers(roomId, exceptSocketId) {
-  const room = rooms.get(roomId);
+export function listOtherProducers(roomId: string | undefined, exceptSocketId: string) {
+  const room = roomId == null ? undefined : rooms.get(roomId);
   if (!room) return [];
-  const result = [];
+  const result: Array<{
+    producerId: string;
+    socketId: string;
+    user: AuthUser;
+    kind: MediasoupTypes.MediaKind;
+    paused: boolean;
+    appData: MediasoupTypes.AppData;
+  }> = [];
   for (const peer of room.peers.values()) {
     if (peer.socketId === exceptSocketId) continue;
     for (const producer of peer.producers.values()) {
@@ -75,7 +103,7 @@ export function listOtherProducers(roomId, exceptSocketId) {
 
 // Close a peer's transports — mediasoup cascades this to close every Producer
 // and Consumer that lived on them — then drop the peer from the room.
-export function removePeer(roomId, socketId) {
+export function removePeer(roomId: string, socketId: string) {
   const room = rooms.get(roomId);
   if (!room) return;
   const peer = room.peers.get(socketId);
@@ -87,7 +115,7 @@ export function removePeer(roomId, socketId) {
 }
 
 // Free the Router (and its Worker resources) once the room empties out.
-export function closeRoomIfEmpty(roomId) {
+export function closeRoomIfEmpty(roomId: string) {
   const room = rooms.get(roomId);
   if (!room) return;
   if (room.peers.size > 0) return;

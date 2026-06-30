@@ -7,8 +7,40 @@ const MAX_CONNECT_BUFFER_CHUNKS = 100;
 const MAX_UTTERANCE_BYTES = 16000 * 2 * 45;
 const PRE_ROLL_CHUNKS = 6;
 
+/** Status pushed to the contributor's own socket as the provider connects. */
+export interface ContributorStatus {
+  status: 'connecting' | 'listening' | 'error';
+  provider?: string;
+  message?: string;
+}
+
+export interface DeepgramSessionOptions {
+  socketId: string;
+  onInterim: (arg: { utteranceId: string; text: string }) => void;
+  onFinal: (arg: { utteranceId: string; text: string; audio: Buffer }) => void;
+  onStatus: (state: ContributorStatus) => void;
+}
+
 export class DeepgramMeetingSession {
-  constructor({ socketId, onInterim, onFinal, onStatus }) {
+  socketId: string;
+  sessionId: string;
+  onInterim: DeepgramSessionOptions['onInterim'];
+  onFinal: DeepgramSessionOptions['onFinal'];
+  onStatus: DeepgramSessionOptions['onStatus'];
+  // The Deepgram live connection is an SDK object with loosely-typed event
+  // payloads; kept `any` rather than chasing the SDK's internal shapes.
+  connection: any;
+  connected: boolean;
+  stopping: boolean;
+  connectBuffer: Buffer[];
+  preRoll: Buffer[];
+  utteranceChunks: Buffer[];
+  utteranceByteLength: number;
+  finalParts: string[];
+  speechActive: boolean;
+  utteranceNumber: number;
+
+  constructor({ socketId, onInterim, onFinal, onStatus }: DeepgramSessionOptions) {
     this.socketId = socketId;
     this.sessionId = randomUUID();
     this.onInterim = onInterim;
@@ -55,8 +87,8 @@ export class DeepgramMeetingSession {
       this.connectBuffer = [];
     });
     this.connection.on(LiveTranscriptionEvents.SpeechStarted, () => this.beginSpeech());
-    this.connection.on(LiveTranscriptionEvents.Transcript, (data) => this.handleTranscript(data));
-    this.connection.on(LiveTranscriptionEvents.Error, (error) => {
+    this.connection.on(LiveTranscriptionEvents.Transcript, (data: any) => this.handleTranscript(data));
+    this.connection.on(LiveTranscriptionEvents.Error, (error: any) => {
       logger.warn({ event: 'transcript.deepgramError', socketId: this.socketId, err: error?.message }, 'Deepgram meeting stream failed');
       this.onStatus({ status: 'error', message: 'Live transcription provider disconnected.' });
     });
@@ -75,7 +107,7 @@ export class DeepgramMeetingSession {
     this.finalParts = [];
   }
 
-  handleTranscript(data) {
+  handleTranscript(data: any) {
     const text = data.channel?.alternatives?.[0]?.transcript?.trim() || '';
     if (text && !this.speechActive) this.beginSpeech();
 
@@ -101,12 +133,12 @@ export class DeepgramMeetingSession {
     }
   }
 
-  sendToProvider(chunk) {
+  sendToProvider(chunk: Buffer) {
     const arrayBuffer = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
     this.connection?.send(arrayBuffer);
   }
 
-  send(chunk) {
+  send(chunk: Buffer) {
     if (this.stopping || !Buffer.isBuffer(chunk) || chunk.length === 0) return;
     this.preRoll.push(chunk);
     if (this.preRoll.length > PRE_ROLL_CHUNKS) this.preRoll.shift();
@@ -114,7 +146,7 @@ export class DeepgramMeetingSession {
       this.utteranceChunks.push(chunk);
       this.utteranceByteLength += chunk.length;
       while (this.utteranceByteLength > MAX_UTTERANCE_BYTES && this.utteranceChunks.length > 1) {
-        this.utteranceByteLength -= this.utteranceChunks.shift().length;
+        this.utteranceByteLength -= this.utteranceChunks.shift()!.length;
       }
     }
 
@@ -128,7 +160,7 @@ export class DeepgramMeetingSession {
     if (!this.connection) return;
     try {
       this.connection.finalize();
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      await new Promise<void>((resolve) => setTimeout(resolve, 450));
       this.connection.requestClose();
     } catch { /* best-effort close */ }
     this.connection.removeAllListeners();

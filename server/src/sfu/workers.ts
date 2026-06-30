@@ -4,11 +4,12 @@
 
 import os from 'os';
 import * as mediasoup from 'mediasoup';
+import type { types as MediasoupTypes } from 'mediasoup';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { workerSettings } from './config.js';
 
-const workers = [];
+const workers: MediasoupTypes.Worker[] = [];
 let nextWorkerIdx = 0;
 // Latched true once any worker emits 'died'. The process exits 2s later, but in
 // that window the readiness probe must already report not-ready so the deploy

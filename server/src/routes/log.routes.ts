@@ -21,7 +21,7 @@ router.post('/client', clientLogLimiter, (req, res) => {
   if (!Array.isArray(logs)) return res.status(400).json({ error: 'logs array required' });
   for (const entry of logs.slice(0, 50)) {
     const { level = 'info', msg = '', ...rest } = entry;
-    const fn = ALLOWED_LEVELS.has(level) ? logger[level] : logger.info;
+    const fn = ALLOWED_LEVELS.has(level) ? (logger as unknown as Record<string, typeof logger.info>)[level] : logger.info;
     fn.call(logger, { src: 'client', ...rest }, msg);
   }
   res.json({ ok: true });
