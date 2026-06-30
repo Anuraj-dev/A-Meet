@@ -370,6 +370,7 @@ Provision the production observability path once:
 
 ```bash
 export AWS_REGION=ap-south-1
+export ROUTE53_ALARM_REGION=us-east-1
 export ENVIRONMENT=prod
 export INSTANCE_ID=i-0abc123...
 export READINESS_HOST=api.example.com
@@ -381,6 +382,10 @@ The script idempotently creates `/a-meet/prod/server` with 14-day retention, an 
 the Telegram Lambda, log metric filters, a Route53 health check against
 `https://$READINESS_HOST/api/health/ready`, and alarms for process-down readiness,
 instance health, fatal logs, sustained Mongo disconnects, and a five-minute error count.
+Route53 health-check metrics are emitted in US East (N. Virginia), so the process-down
+alarm path defaults to `ROUTE53_ALARM_REGION=us-east-1` with its own SNS topic and
+Telegram Lambda there; that Lambda reads Telegram SSM parameters from the primary
+`AWS_REGION`.
 CloudWatch sends SNS only when alarm state changes, so an alarm produces one Telegram
 notification on `OK → ALARM` and does not repeat until it returns to `OK` and alarms again.
 The Lambda message contains the alarm name, environment, state, and reason.

@@ -1,7 +1,7 @@
 import { GetParametersCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { formatAlarmMessage, parseSnsAlarm } from './formatter.mjs';
 
-const ssm = new SSMClient({});
+const ssm = new SSMClient({ region: process.env.SSM_REGION });
 
 async function readTelegramConfig() {
   const names = [

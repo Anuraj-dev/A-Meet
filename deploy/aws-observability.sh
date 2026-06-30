@@ -11,10 +11,13 @@ set -euo pipefail
 ENVIRONMENT="${ENVIRONMENT:-prod}"
 LOG_GROUP="${CLOUDWATCH_LOG_GROUP:-/a-meet/${ENVIRONMENT}/server}"
 SNS_TOPIC_NAME="${SNS_TOPIC_NAME:-a-meet-${ENVIRONMENT}-alerts}"
+PROCESS_SNS_TOPIC_NAME="${PROCESS_SNS_TOPIC_NAME:-a-meet-${ENVIRONMENT}-process-alerts}"
 FUNCTION_NAME="${FUNCTION_NAME:-a-meet-${ENVIRONMENT}-telegram-alert}"
+PROCESS_FUNCTION_NAME="${PROCESS_FUNCTION_NAME:-a-meet-${ENVIRONMENT}-telegram-alert-route53}"
 TELEGRAM_TOKEN_PARAMETER="${TELEGRAM_TOKEN_PARAMETER:-/a-meet/${ENVIRONMENT}/telegram/token}"
 TELEGRAM_CHAT_ID_PARAMETER="${TELEGRAM_CHAT_ID_PARAMETER:-/a-meet/${ENVIRONMENT}/telegram/chat-id}"
 NAMESPACE="${NAMESPACE:-A-Meet/${ENVIRONMENT}}"
+ROUTE53_ALARM_REGION="${ROUTE53_ALARM_REGION:-us-east-1}"
 READINESS_HOST="${READINESS_HOST:?set READINESS_HOST to the public API host, for example api.example.com}"
 READINESS_PROTOCOL="${READINESS_PROTOCOL:-HTTPS}"
 READINESS_PATH="${READINESS_PATH:-/api/health/ready}"
@@ -41,58 +44,74 @@ TOPIC_ARN=$(aws sns create-topic \
   --region "$AWS_REGION" \
   --name "$SNS_TOPIC_NAME" \
   --query TopicArn --output text)
+PROCESS_TOPIC_ARN=$(aws sns create-topic \
+  --region "$ROUTE53_ALARM_REGION" \
+  --name "$PROCESS_SNS_TOPIC_NAME" \
+  --query TopicArn --output text)
 
 bundle=$(mktemp -d)
 trap 'rm -rf "$bundle"' EXIT
 cp deploy/telegram-notifier/index.mjs deploy/telegram-notifier/formatter.mjs "$bundle/"
 (cd "$bundle" && zip -q notifier.zip index.mjs formatter.mjs)
 
-if aws lambda get-function --region "$AWS_REGION" --function-name "$FUNCTION_NAME" >/dev/null 2>&1; then
-  aws lambda update-function-code \
-    --region "$AWS_REGION" \
-    --function-name "$FUNCTION_NAME" \
-    --zip-file "fileb://${bundle}/notifier.zip" >/dev/null
-  aws lambda wait function-updated \
-    --region "$AWS_REGION" --function-name "$FUNCTION_NAME"
-  aws lambda update-function-configuration \
-    --region "$AWS_REGION" \
-    --function-name "$FUNCTION_NAME" \
-    --role "$LAMBDA_ROLE_ARN" \
-    --runtime nodejs22.x \
-    --handler index.handler \
-    --environment "Variables={ENVIRONMENT=${ENVIRONMENT},TELEGRAM_TOKEN_PARAMETER=${TELEGRAM_TOKEN_PARAMETER},TELEGRAM_CHAT_ID_PARAMETER=${TELEGRAM_CHAT_ID_PARAMETER}}" >/dev/null
-else
-  aws lambda create-function \
-    --region "$AWS_REGION" \
-    --function-name "$FUNCTION_NAME" \
-    --role "$LAMBDA_ROLE_ARN" \
-    --runtime nodejs22.x \
-    --handler index.handler \
-    --zip-file "fileb://${bundle}/notifier.zip" \
-    --environment "Variables={ENVIRONMENT=${ENVIRONMENT},TELEGRAM_TOKEN_PARAMETER=${TELEGRAM_TOKEN_PARAMETER},TELEGRAM_CHAT_ID_PARAMETER=${TELEGRAM_CHAT_ID_PARAMETER}}" >/dev/null
-fi
+deploy_notifier_lambda() {
+  local region="$1"
+  local function_name="$2"
+  local topic_arn="$3"
 
-FUNCTION_ARN=$(aws lambda get-function \
-  --region "$AWS_REGION" --function-name "$FUNCTION_NAME" \
-  --query Configuration.FunctionArn --output text)
-aws lambda add-permission \
-  --region "$AWS_REGION" \
-  --function-name "$FUNCTION_NAME" \
-  --statement-id AllowSnsInvoke \
-  --action lambda:InvokeFunction \
-  --principal sns.amazonaws.com \
-  --source-arn "$TOPIC_ARN" >/dev/null 2>&1 || true
+  if aws lambda get-function --region "$region" --function-name "$function_name" >/dev/null 2>&1; then
+    aws lambda update-function-code \
+      --region "$region" \
+      --function-name "$function_name" \
+      --zip-file "fileb://${bundle}/notifier.zip" >/dev/null
+    aws lambda wait function-updated \
+      --region "$region" --function-name "$function_name"
+    aws lambda update-function-configuration \
+      --region "$region" \
+      --function-name "$function_name" \
+      --role "$LAMBDA_ROLE_ARN" \
+      --runtime nodejs22.x \
+      --handler index.handler \
+      --environment "Variables={ENVIRONMENT=${ENVIRONMENT},SSM_REGION=${AWS_REGION},TELEGRAM_TOKEN_PARAMETER=${TELEGRAM_TOKEN_PARAMETER},TELEGRAM_CHAT_ID_PARAMETER=${TELEGRAM_CHAT_ID_PARAMETER}}" >/dev/null
+  else
+    aws lambda create-function \
+      --region "$region" \
+      --function-name "$function_name" \
+      --role "$LAMBDA_ROLE_ARN" \
+      --runtime nodejs22.x \
+      --handler index.handler \
+      --zip-file "fileb://${bundle}/notifier.zip" \
+      --environment "Variables={ENVIRONMENT=${ENVIRONMENT},SSM_REGION=${AWS_REGION},TELEGRAM_TOKEN_PARAMETER=${TELEGRAM_TOKEN_PARAMETER},TELEGRAM_CHAT_ID_PARAMETER=${TELEGRAM_CHAT_ID_PARAMETER}}" >/dev/null
+  fi
 
-if ! aws sns list-subscriptions-by-topic \
-  --region "$AWS_REGION" --topic-arn "$TOPIC_ARN" \
-  --query "Subscriptions[?Endpoint=='${FUNCTION_ARN}'] | [0].SubscriptionArn" \
-  --output text | grep -q '^arn:'; then
-  aws sns subscribe \
-    --region "$AWS_REGION" \
-    --topic-arn "$TOPIC_ARN" \
-    --protocol lambda \
-    --notification-endpoint "$FUNCTION_ARN" >/dev/null
-fi
+  local function_arn
+  function_arn=$(aws lambda get-function \
+    --region "$region" --function-name "$function_name" \
+    --query Configuration.FunctionArn --output text)
+  aws lambda add-permission \
+    --region "$region" \
+    --function-name "$function_name" \
+    --statement-id AllowSnsInvoke \
+    --action lambda:InvokeFunction \
+    --principal sns.amazonaws.com \
+    --source-arn "$topic_arn" >/dev/null 2>&1 || true
+
+  if ! aws sns list-subscriptions-by-topic \
+    --region "$region" --topic-arn "$topic_arn" \
+    --query "Subscriptions[?Endpoint=='${function_arn}'] | [0].SubscriptionArn" \
+    --output text | grep -q '^arn:'; then
+    aws sns subscribe \
+      --region "$region" \
+      --topic-arn "$topic_arn" \
+      --protocol lambda \
+      --notification-endpoint "$function_arn" >/dev/null
+  fi
+
+  printf '%s' "$function_arn"
+}
+
+FUNCTION_ARN=$(deploy_notifier_lambda "$AWS_REGION" "$FUNCTION_NAME" "$TOPIC_ARN")
+PROCESS_FUNCTION_ARN=$(deploy_notifier_lambda "$ROUTE53_ALARM_REGION" "$PROCESS_FUNCTION_NAME" "$PROCESS_TOPIC_ARN")
 
 put_filter() {
   aws logs put-metric-filter \
@@ -142,7 +161,7 @@ if [ "$HEALTH_CHECK_ID" = "None" ]; then
 fi
 
 aws cloudwatch put-metric-alarm \
-  --region "$AWS_REGION" \
+  --region "$ROUTE53_ALARM_REGION" \
   --alarm-name "a-meet-${ENVIRONMENT}-process-down" \
   --namespace AWS/Route53 \
   --metric-name HealthCheckStatus \
@@ -154,7 +173,7 @@ aws cloudwatch put-metric-alarm \
   --threshold 1 \
   --comparison-operator LessThanThreshold \
   --treat-missing-data breaching \
-  --alarm-actions "$TOPIC_ARN"
+  --alarm-actions "$PROCESS_TOPIC_ARN"
 
 # Instance health complements process health by detecting host-level failure.
 if [ -n "${INSTANCE_ID:-}" ]; then
@@ -173,5 +192,5 @@ if [ -n "${INSTANCE_ID:-}" ]; then
     --alarm-actions "$TOPIC_ARN"
 fi
 
-printf 'Log group: %s (14 days)\nSNS topic: %s\nLambda: %s\n' \
-  "$LOG_GROUP" "$TOPIC_ARN" "$FUNCTION_ARN"
+printf 'Log group: %s (14 days)\nSNS topic: %s\nLambda: %s\nRoute53 alarm region: %s\nRoute53 SNS topic: %s\nRoute53 Lambda: %s\n' \
+  "$LOG_GROUP" "$TOPIC_ARN" "$FUNCTION_ARN" "$ROUTE53_ALARM_REGION" "$PROCESS_TOPIC_ARN" "$PROCESS_FUNCTION_ARN"
