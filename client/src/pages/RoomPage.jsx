@@ -20,6 +20,7 @@ import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { isPcmCaptureSupported, usePcmCapture } from '../hooks/usePcmCapture';
 import { useReactions } from '../hooks/useReactions';
 import { useHostModeration } from '../hooks/useHostModeration';
+import { useRoomLayout } from '../hooks/useRoomLayout';
 import { useScreenShare } from '../hooks/useScreenShare';
 import VideoTile from '../components/VideoTile';
 import RemoteAudio from '../components/RemoteAudio';
@@ -88,12 +89,6 @@ export default function RoomPage() {
   const [latestCaption, setLatestCaption] = useState(null);
   const captionTimerRef = useRef(null);
   const [unreadCount, setUnreadCount] = useState(0);
-  // Focus model: a LOCAL pin (just for me, any participant) and a host SPOTLIGHT
-  // (server-relayed, applies to everyone). Spotlight wins when both are set.
-  const [pinnedKey, setPinnedKey] = useState(null);
-  // Layout chooser: 'auto' keeps the smart alone/solo/grid behaviour.
-  const [layoutMode, setLayoutMode] = useState('auto'); // auto | tiled | spotlight | sidebar
-  const [gridPage, setGridPage] = useState(0); // grid pagination for large calls
   // Host asked us to unmute — surfaced as a one-tap prompt (never forced).
   const [unmuteRequestFrom, setUnmuteRequestFrom] = useState(null);
   const [reactionAnchor, setReactionAnchor] = useState(null);
@@ -247,6 +242,23 @@ export default function RoomPage() {
   const {
     spotlightKey, handleSpotlight, handleHostMute, handleHostRemove,
   } = useHostModeration({ socket });
+
+  // Layout / focus concern (local pin, layout-mode chooser, grid pagination)
+  // plus the derived stage descriptor that decides which layout to render.
+  const {
+    pinnedKey, handlePin,
+    layoutMode, setLayoutMode,
+    gridPage, setGridPage,
+    stage: stageLayout,
+  } = useRoomLayout({
+    selfKey: socket.id,
+    remoteKeys: Object.keys(remoteStreams),
+    activeSpeaker,
+    spotlightKey,
+    hasScreen,
+    isAlone,
+    isSoloCall,
+  });
 
   // Composite every camera tile into a Picture-in-Picture "mini player" so
   // participants stay visible after switching tabs.
@@ -1119,7 +1131,6 @@ export default function RoomPage() {
     }),
   ];
 
-  const handlePin = (person) => setPinnedKey((k) => (k === person.id ? null : person.id));
   const handleAskUnmute = (person) => socket.emit('sfu-request-unmute', { socketId: person.id });
   const handleMuteAll = () => {
     socket.emit('sfu-mute-all');
@@ -1130,25 +1141,15 @@ export default function RoomPage() {
     pushNote({ kind: 'event', variant: 'info', text: 'Asked everyone to unmute' });
   };
 
-  // A focus key is only valid if that person is still present.
-  const keyPresent = (k) => k && (k === socket.id || Boolean(remoteStreams[k]));
-  const explicitFocus = keyPresent(spotlightKey) ? spotlightKey : keyPresent(pinnedKey) ? pinnedKey : null;
-  // Layout chooser forcing spotlight/sidebar with no explicit pick → follow the
-  // active speaker, else the first remote, else self.
-  const fallbackFocus = keyPresent(activeSpeaker)
-    ? activeSpeaker
-    : (remoteEntries[0]?.[0] ?? socket.id);
-  const wantsFocus = explicitFocus || layoutMode === 'spotlight' || layoutMode === 'sidebar';
-  const displayFocus = explicitFocus ?? fallbackFocus;
-
-  // Decide the active stage layout (screen share always wins).
+  // Map the derived stage descriptor (from useRoomLayout) to a rendered layout.
   let stage;
-  if (hasScreen) stage = renderPresentationLayout();
-  else if (wantsFocus) stage = renderFocusLayout(displayFocus, { showRail: layoutMode !== 'spotlight' });
-  else if (layoutMode === 'tiled') stage = renderGridLayout();
-  else if (isAlone) stage = renderAloneLayout();
-  else if (isSoloCall) stage = renderSoloLayout();
-  else stage = renderGridLayout();
+  switch (stageLayout.kind) {
+    case 'presentation': stage = renderPresentationLayout(); break;
+    case 'focus': stage = renderFocusLayout(stageLayout.focusKey, { showRail: stageLayout.showRail }); break;
+    case 'alone': stage = renderAloneLayout(); break;
+    case 'solo': stage = renderSoloLayout(); break;
+    default: stage = renderGridLayout();
+  }
 
   return (
     <Box
