@@ -11,6 +11,8 @@
   "include": [
     "typecheck",
     "src/utils/peer-color.ts",
+    "src/utils/room-entry.ts",
+    "src/utils/transcript.ts",
     "src/utils/pending-producers.ts",
     "src/services/socket.ts",
     "src/services/mediasoup-signal.ts",

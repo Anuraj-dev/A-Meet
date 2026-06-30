@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldRedirectToLobby } from './room-entry.js';
+import { shouldRedirectToLobby } from './room-entry';
 
 // The lobby/preview gate. A /room/:id URL may only be entered "directly" when it
 // carries a deliberate-entry marker in the navigation state: `fromCreate` (the
