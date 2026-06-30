@@ -7,35 +7,20 @@
 // hidden <video> per stream, wait briefly for a frame, draw, then tear down.
 
 import { drawCell, drawComposite, roundRectPath, syncSources } from './video-composite';
+import type { CompositeSource, CompositeTile } from './video-composite';
 
 const OUT_W = 1280;
 const OUT_H = 720;
 // How long to wait for a freshly-attached <video> to produce a drawable frame.
 const FRAME_TIMEOUT_MS = 700;
 
-type ScreenshotTile = {
-  key: string;
-  stream?: MediaStream | null;
-  name?: string;
-  videoOn?: boolean;
-  audioOn?: boolean;
-  mirror?: boolean;
-};
+type ScreenshotTile = CompositeTile;
 
-type ScreenshotShare = {
-  key: string;
-  stream?: MediaStream | null;
-  name?: string;
-};
+type ScreenshotShare = Pick<CompositeTile, 'key' | 'stream' | 'name'>;
 
 type ScreenshotOptions = {
   tiles?: ScreenshotTile[];
   share?: ScreenshotShare | null;
-};
-
-type SourceEntry = {
-  video: HTMLVideoElement;
-  stream: MediaStream | null;
 };
 
 // Resolve once the video has a frame ready to draw (readyState >= 2), or after a
@@ -61,7 +46,7 @@ function drawShareLayout(
   canvas: HTMLCanvasElement,
   share: ScreenshotShare,
   tiles: ScreenshotTile[],
-  sources: Map<string, SourceEntry>,
+  sources: Map<string, CompositeSource>,
 ): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -120,7 +105,7 @@ export async function captureMeetingScreenshot({
     'position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1';
   document.body.appendChild(host);
 
-  const sources = new Map<string, SourceEntry>();
+  const sources = new Map<string, CompositeSource>();
   try {
     const shareTile = share ? { key: share.key, stream: share.stream } : null;
     const allTiles = shareTile ? [shareTile, ...tiles] : tiles;
