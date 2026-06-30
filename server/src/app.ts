@@ -57,7 +57,7 @@ export function createApp() {
   app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
   // Central error handler
-  // eslint-disable-next-line no-unused-vars
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     logger.error({ err, url: req.url, method: req.method }, err.message || 'Server error');
     res.status(err.status || 500).json({ error: err.message || 'Server error' });
