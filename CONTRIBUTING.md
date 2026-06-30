@@ -52,7 +52,7 @@ npm run test:e2e   # Playwright two-context E2E
 
 ### Full pre-merge suite
 
-One command runs everything CI gates, failing fast on the first failing phase:
+One command runs the every-PR CI gates, failing fast on the first failing phase:
 
 ```bash
 # One-time: download Playwright browsers (not part of `npm ci`)
@@ -67,5 +67,6 @@ npm run verify
 `Playwright smoke`). A green `verify` means those gates are satisfied. It does **not** run
 the path-scoped `Server image smoke` job (a ~15-min Docker build of the production image
 that spawns a real mediasoup worker) — CI only runs that when server-image files change
-(`server/src/**`, `server/Dockerfile`, `server/package*.json`, `docker-compose.prod.yml`).
+(`server/src/**`, `server/Dockerfile`, `server/.dockerignore`, `server/package*.json`,
+`docker-compose.prod.yml`).
 The `test:e2e:install` step is a one-time prerequisite — it is *not* part of `npm ci`.
