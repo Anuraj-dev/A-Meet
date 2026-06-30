@@ -16,4 +16,13 @@ describe('deploy/aws-observability.sh', () => {
     expect(script).toContain('--comparison-operator LessThanThreshold');
     expect(script).toContain('--alarm-name "a-meet-${ENVIRONMENT}-process-down"');
   });
+
+  it('trips the mongo-disconnect alarm on a single datapoint, since the event is logged once', async () => {
+    const script = await readFile(new URL('../../deploy/aws-observability.sh', import.meta.url), 'utf8');
+
+    // put_alarm <name> <metric> <period> <evaluation-periods/datapoints> <threshold>:
+    // a single breaching period must fire, otherwise a real sustained outage (logged
+    // only once) would never accumulate the consecutive datapoints to alarm.
+    expect(script).toContain('put_alarm mongo-disconnect MongoDisconnectCount 60 1 1');
+  });
 });

@@ -143,7 +143,10 @@ put_filter fatal-log '{ $.level = 60 }' FatalCount
 put_filter mongo-disconnect '{ $.msg = "MongoDB disconnected" }' MongoDisconnectCount
 put_filter error-rate '{ $.level >= 50 }' ErrorCount
 put_alarm fatal-log FatalCount 60 1 1
-put_alarm mongo-disconnect MongoDisconnectCount 60 3 1
+# "MongoDB disconnected" is logged once per disconnect event, not every minute it
+# stays down, so a single datapoint must trip the alarm. Requiring multiple
+# consecutive breaching periods would never fire for a real sustained outage.
+put_alarm mongo-disconnect MongoDisconnectCount 60 1 1
 put_alarm error-rate-5m ErrorCount 300 1 5
 
 # App process health checks the public readiness endpoint and alarms through
