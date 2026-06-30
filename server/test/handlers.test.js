@@ -278,6 +278,26 @@ describe('disconnect grace window', () => {
     // user-joined should be suppressed since rejoinedInGrace is true
     expect(socketEmits.some((e) => e.event === 'user-joined')).toBe(false);
   });
+
+  it('pushes peers an updated roster when a peer rejoins within the grace window', () => {
+    const { handlers, socketEmits } = setup();
+    removeUser.mockReturnValue({ roomId: ROOM, user: USER });
+    isUserInRoom.mockReturnValue(false);
+    getRoomUsers.mockReturnValue([{ ...USER, socketId: 'sock-1' }]);
+
+    handlers['disconnect']();
+    socketEmits.length = 0; // ignore emits from the original join
+
+    handlers['join-room'](ROOM);
+
+    // Peers (socket.to(roomId)) get a fresh room-users so their moderation
+    // targets follow the reconnected peer's new socket id — even though the
+    // user-joined toast/chime stays suppressed for a grace reconnect.
+    const toPeers = socketEmits.find((e) => e.event === 'room-users' && e.target === ROOM);
+    expect(toPeers).toBeTruthy();
+    expect(toPeers.payload).toEqual([{ ...USER, socketId: 'sock-1' }]);
+    expect(socketEmits.some((e) => e.event === 'user-joined')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
