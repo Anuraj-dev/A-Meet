@@ -3,7 +3,26 @@ import { Box } from '@mui/material';
 // Dev-only WebRTC stats overlay (top-left). Renders nothing in production.
 // Reads the `rtcStats` polled by useMediasoup so we can confirm audio is
 // flowing cleanly: bitrate rising, packet loss ~0, stable jitter, FEC active.
-export default function RtcStatsOverlay({ stats }) {
+interface RtcConsumerStat {
+  id: string;
+  kind: string;
+  source: string;
+  kbps: number;
+  packetsLost: number;
+  jitter: number | null;
+  fec: number | null;
+}
+
+interface RtcStats {
+  transport: string;
+  consumers?: RtcConsumerStat[];
+}
+
+interface RtcStatsOverlayProps {
+  stats?: RtcStats | null;
+}
+
+export default function RtcStatsOverlay({ stats }: RtcStatsOverlayProps) {
   if (!import.meta.env.DEV || !stats) return null;
 
   const consumers = stats.consumers ?? [];

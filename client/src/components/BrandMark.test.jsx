@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import BrandMark from './BrandMark.jsx';
+import BrandMark from './BrandMark';
 
 // Smoke test that proves the jsdom + Testing Library + MUI pipeline works, so
 // component tests can grow from here.

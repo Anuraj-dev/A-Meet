@@ -1,5 +1,5 @@
-import { useRef, useId, useEffect } from 'react';
-import { animate, useMotionValue } from 'framer-motion';
+import { useRef, useId, useEffect, type CSSProperties } from 'react';
+import { animate, useMotionValue, type AnimationPlaybackControls } from 'framer-motion';
 
 /*
  * EtherealShadow — a slow, smoky full-bleed backdrop.
@@ -17,7 +17,26 @@ import { animate, useMotionValue } from 'framer-motion';
 const MASK_URL = 'https://framerusercontent.com/images/ceBGguIpUU8luwByxuQz79t7To.png';
 const NOISE_URL = 'https://framerusercontent.com/images/g0QcWrxr87K0ufOxIUFBakwYA8.png';
 
-function mapRange(value, fromLow, fromHigh, toLow, toHigh) {
+interface EtherealAnimation {
+  scale: number;
+  speed: number;
+}
+
+interface EtherealNoise {
+  opacity: number;
+  scale: number;
+}
+
+interface EtherealShadowProps {
+  sizing?: 'fill' | 'stretch';
+  color?: string;
+  animation?: EtherealAnimation;
+  noise?: EtherealNoise;
+  style?: CSSProperties;
+  className?: string;
+}
+
+function mapRange(value: number, fromLow: number, fromHigh: number, toLow: number, toHigh: number) {
   if (fromLow === fromHigh) return toLow;
   const pct = (value - fromLow) / (fromHigh - fromLow);
   return toLow + pct * (toHigh - toLow);
@@ -35,12 +54,12 @@ export default function EtherealShadow({
   noise,
   style,
   className,
-}) {
+}: EtherealShadowProps) {
   const id = useInstanceId();
   const animationEnabled = animation && animation.scale > 0;
-  const feColorMatrixRef = useRef(null);
+  const feColorMatrixRef = useRef<SVGFEColorMatrixElement | null>(null);
   const hueRotate = useMotionValue(180);
-  const hueRotateAnimation = useRef(null);
+  const hueRotateAnimation = useRef<AnimationPlaybackControls | null>(null);
 
   const displacementScale = animation ? mapRange(animation.scale, 1, 100, 20, 100) : 0;
   const animationDuration = animation ? mapRange(animation.speed, 1, 100, 1000, 50) : 1;
@@ -81,7 +100,7 @@ export default function EtherealShadow({
           filter: animationEnabled ? `url(#${id}) blur(4px)` : 'none',
         }}
       >
-        {animationEnabled && (
+        {animationEnabled && animation && (
           <svg style={{ position: 'absolute' }}>
             <defs>
               <filter id={id}>

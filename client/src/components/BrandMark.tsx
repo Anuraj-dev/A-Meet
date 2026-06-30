@@ -3,7 +3,11 @@ import VideocamRoundedIcon from '@mui/icons-material/VideocamRounded';
 
 const EASE = 'cubic-bezier(0.23,1,0.32,1)';
 
-export default function BrandMark({ size = 'md' }) {
+interface BrandMarkProps {
+  size?: 'md' | 'lg';
+}
+
+export default function BrandMark({ size = 'md' }: BrandMarkProps) {
   const s = size === 'lg'
     ? { box: 42, icon: 26, radius: 13, text: 22 }
     : { box: 34, icon: 21, radius: 11, text: 20 };

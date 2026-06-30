@@ -10,6 +10,12 @@
   // As `src/` finishes migrating, this can collapse to a "src" glob.
   "include": [
     "typecheck",
+    "src/components/BrandMark.tsx",
+    "src/components/EtherealShadow.tsx",
+    "src/components/LiveCaptions.tsx",
+    "src/components/ReactionsOverlay.tsx",
+    "src/components/RemoteAudio.tsx",
+    "src/components/RtcStatsOverlay.tsx",
     "src/utils/capture-screenshot.ts",
     "src/utils/peer-color.ts",
     "src/utils/room-entry.ts",
