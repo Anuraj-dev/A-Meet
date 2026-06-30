@@ -372,16 +372,18 @@ Provision the production observability path once:
 export AWS_REGION=ap-south-1
 export ENVIRONMENT=prod
 export INSTANCE_ID=i-0abc123...
+export READINESS_HOST=api.example.com
 export LAMBDA_ROLE_ARN=arn:aws:iam::<account>:role/a-meet-telegram-lambda
 deploy/aws-observability.sh
 ```
 
 The script idempotently creates `/a-meet/prod/server` with 14-day retention, an SNS topic,
-the Telegram Lambda, log metric filters, and alarms for instance health, fatal logs,
-sustained Mongo disconnects, and a five-minute error count. CloudWatch sends SNS only when
-alarm state changes, so an alarm produces one Telegram notification on `OK → ALARM` and
-does not repeat until it returns to `OK` and alarms again. The Lambda message contains the
-alarm name, environment, state, and reason.
+the Telegram Lambda, log metric filters, a Route53 health check against
+`https://$READINESS_HOST/api/health/ready`, and alarms for process-down readiness,
+instance health, fatal logs, sustained Mongo disconnects, and a five-minute error count.
+CloudWatch sends SNS only when alarm state changes, so an alarm produces one Telegram
+notification on `OK → ALARM` and does not repeat until it returns to `OK` and alarms again.
+The Lambda message contains the alarm name, environment, state, and reason.
 
 Attach `deploy/iam-instance-policy.json` to the EC2 instance role. Attach
 `deploy/iam-telegram-lambda-policy.json` to the Lambda role. Replace wildcard account/region
@@ -419,7 +421,7 @@ fields @timestamp, level, msg, roomId, socketId, reqId
 
 Staging smoke:
 
-1. Run `deploy/aws-observability.sh`, deploy the container, and confirm `/api/ready` is healthy.
+1. Run `deploy/aws-observability.sh`, deploy the container, and confirm `/api/health/ready` is healthy.
 2. Emit one structured `logger.info({ roomId, socketId, reqId }, ...)` and one
    `logger.error({ roomId, socketId, reqId }, ...)` event through the staging application.
 3. Confirm both appear in `/a-meet/staging/server` and the fields are queryable.

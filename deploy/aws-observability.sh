@@ -15,6 +15,19 @@ FUNCTION_NAME="${FUNCTION_NAME:-a-meet-${ENVIRONMENT}-telegram-alert}"
 TELEGRAM_TOKEN_PARAMETER="${TELEGRAM_TOKEN_PARAMETER:-/a-meet/${ENVIRONMENT}/telegram/token}"
 TELEGRAM_CHAT_ID_PARAMETER="${TELEGRAM_CHAT_ID_PARAMETER:-/a-meet/${ENVIRONMENT}/telegram/chat-id}"
 NAMESPACE="${NAMESPACE:-A-Meet/${ENVIRONMENT}}"
+READINESS_HOST="${READINESS_HOST:?set READINESS_HOST to the public API host, for example api.example.com}"
+READINESS_PROTOCOL="${READINESS_PROTOCOL:-HTTPS}"
+READINESS_PATH="${READINESS_PATH:-/api/health/ready}"
+READINESS_PORT="${READINESS_PORT:-}"
+READINESS_CALLER_REFERENCE="${READINESS_CALLER_REFERENCE:-a-meet-${ENVIRONMENT}-readiness}"
+
+if [ -z "$READINESS_PORT" ]; then
+  if [ "$READINESS_PROTOCOL" = "HTTP" ]; then
+    READINESS_PORT=80
+  else
+    READINESS_PORT=443
+  fi
+fi
 
 aws logs create-log-group \
   --region "$AWS_REGION" \
@@ -114,7 +127,36 @@ put_alarm fatal-log FatalCount 60 1 1
 put_alarm mongo-disconnect MongoDisconnectCount 60 3 1
 put_alarm error-rate-5m ErrorCount 300 1 5
 
-# Host/process health uses the EC2 status metric and the same SNS route.
+# App process health checks the public readiness endpoint and alarms through
+# the same SNS route. This catches process/container downtime while EC2 itself
+# is still healthy.
+HEALTH_CHECK_ID=$(aws route53 list-health-checks \
+  --query "HealthChecks[?CallerReference=='${READINESS_CALLER_REFERENCE}'].Id | [0]" \
+  --output text)
+if [ "$HEALTH_CHECK_ID" = "None" ]; then
+  HEALTH_CHECK_ID=$(aws route53 create-health-check \
+    --caller-reference "$READINESS_CALLER_REFERENCE" \
+    --health-check-config "FullyQualifiedDomainName=${READINESS_HOST},Port=${READINESS_PORT},Type=${READINESS_PROTOCOL},ResourcePath=${READINESS_PATH},RequestInterval=30,FailureThreshold=3,MeasureLatency=true" \
+    --query HealthCheck.Id \
+    --output text)
+fi
+
+aws cloudwatch put-metric-alarm \
+  --region "$AWS_REGION" \
+  --alarm-name "a-meet-${ENVIRONMENT}-process-down" \
+  --namespace AWS/Route53 \
+  --metric-name HealthCheckStatus \
+  --dimensions "Name=HealthCheckId,Value=${HEALTH_CHECK_ID}" \
+  --statistic Minimum \
+  --period 60 \
+  --evaluation-periods 3 \
+  --datapoints-to-alarm 3 \
+  --threshold 1 \
+  --comparison-operator LessThanThreshold \
+  --treat-missing-data breaching \
+  --alarm-actions "$TOPIC_ARN"
+
+# Instance health complements process health by detecting host-level failure.
 if [ -n "${INSTANCE_ID:-}" ]; then
   aws cloudwatch put-metric-alarm \
     --region "$AWS_REGION" \
