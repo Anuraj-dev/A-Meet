@@ -9,7 +9,12 @@
 //
 // Identity is deliberately NOT used here: the host opening their own link in a
 // second browser should still see the preview, exactly like Google Meet.
-export function shouldRedirectToLobby(pathname, navState) {
+type RoomEntryNavigationState = {
+  fromCreate?: unknown;
+  fromLobby?: unknown;
+} | null | undefined;
+
+export function shouldRedirectToLobby(pathname: string, navState: RoomEntryNavigationState): boolean {
   if (!pathname.startsWith('/room/')) return false;
   return !(navState?.fromCreate || navState?.fromLobby);
 }
