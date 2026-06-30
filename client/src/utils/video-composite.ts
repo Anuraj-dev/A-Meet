@@ -8,7 +8,35 @@
 
 import { getPeerColor } from './peer-color';
 
-export function roundRectPath(ctx, x, y, w, h, r) {
+export type CompositeTile = {
+  key: string;
+  stream?: MediaStream | null;
+  name?: string;
+  videoOn?: boolean;
+  audioOn?: boolean;
+  mirror?: boolean;
+};
+
+export type CompositeSource = {
+  video: HTMLVideoElement;
+  stream: MediaStream | null;
+};
+
+type DrawCellOptions = {
+  objectFit?: 'cover' | 'contain';
+  radius?: number;
+};
+
+type DrawCellTile = Pick<CompositeTile, 'name' | 'videoOn' | 'audioOn' | 'mirror'>;
+
+export function roundRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
@@ -19,7 +47,7 @@ export function roundRectPath(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-export function truncate(ctx, text, maxW) {
+export function truncate(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
   if (ctx.measureText(text).width <= maxW) return text;
   let s = text;
   while (s.length > 1 && ctx.measureText(`${s}…`).width > maxW) s = s.slice(0, -1);
@@ -27,7 +55,12 @@ export function truncate(ctx, text, maxW) {
 }
 
 // A small crossed-mic glyph drawn by hand (avoids platform emoji inconsistency).
-export function drawMutedBadge(ctx, cx, cy, r) {
+export function drawMutedBadge(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+): void {
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.beginPath();
@@ -49,7 +82,11 @@ export function drawMutedBadge(ctx, cx, cy, r) {
 }
 
 // Keep one hidden <video> per stream so we have frames to draw to the canvas.
-export function syncSources(tiles, sources, host) {
+export function syncSources(
+  tiles: CompositeTile[] | null | undefined,
+  sources: Map<string, CompositeSource>,
+  host: HTMLElement | null | undefined,
+): void {
   if (!tiles || !host) return;
   const live = new Set();
   for (const t of tiles) {
@@ -85,7 +122,16 @@ export function syncSources(tiles, sources, host) {
 // avatar placeholder, plus a name label + muted badge when wide enough.
 // `objectFit` controls how a live frame is fitted — 'cover' (default) crops to
 // fill, 'contain' letterboxes the whole frame (used for screen shares).
-export function drawCell(ctx, t, video, x, y, w, h, { objectFit = 'cover', radius = 10 } = {}) {
+export function drawCell(
+  ctx: CanvasRenderingContext2D,
+  t: DrawCellTile,
+  video: HTMLVideoElement | undefined,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  { objectFit = 'cover', radius = 10 }: DrawCellOptions = {},
+): void {
   ctx.save();
   roundRectPath(ctx, x, y, w, h, radius);
   ctx.clip();
@@ -150,7 +196,11 @@ export function drawCell(ctx, t, video, x, y, w, h, { objectFit = 'cover', radiu
 }
 
 // Composite every camera tile onto the canvas in a centered grid.
-export function drawComposite(canvas, tiles, sources) {
+export function drawComposite(
+  canvas: HTMLCanvasElement,
+  tiles: CompositeTile[] | null | undefined,
+  sources: Map<string, CompositeSource>,
+): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const W = canvas.width;
