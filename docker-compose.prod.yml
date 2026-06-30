@@ -38,13 +38,19 @@ services:
     # Auto-restart on crash/reboot; the server drains gracefully on the SIGTERM
     # Docker sends, so restarts don't drop in-flight media abruptly.
     restart: unless-stopped
-    # Environment contract is the same server/.env used everywhere else. In prod,
-    # MONGO_URI points at Atlas and MEDIASOUP_ANNOUNCED_IP is the public IPv4.
-    env_file:
-      - ./server/.env
     environment:
       NODE_ENV: production
-    # No logs volume: in production the logger emits structured JSON to stdout
-    # only (it does not write logs/server.log), so logs are collected from the
-    # container's stdout via `docker compose logs` or the host's Docker log
-    # driver / collector — not a bind-mounted file.
+      AWS_REGION: ${AWS_REGION:?set AWS_REGION}
+      # Every SecureString below this path is loaded before env.ts/server.ts.
+      # Explicit compose values still win, which supports emergency overrides.
+      SSM_PARAMETER_PREFIX: ${SSM_PARAMETER_PREFIX:-/a-meet/prod/server}
+    # Production JSON stdout goes directly to CloudWatch. The log group is
+    # provisioned with retention by deploy/aws-observability.sh; Compose must
+    # not create an unretained group implicitly.
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set AWS_REGION}
+        awslogs-group: ${CLOUDWATCH_LOG_GROUP:-/a-meet/prod/server}
+        awslogs-stream: ${DEPLOY_ENVIRONMENT:-prod}/server
+        awslogs-create-group: "false"

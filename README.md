@@ -66,7 +66,7 @@ You can self-host it, read every line, break it, and understand why it broke. Th
 - **Docker Compose** — MongoDB, Promtail, Loki, Grafana all in one command
 - **TURN server** support (coturn config included)
 - **EC2-aware announced IP** — auto-detects public IPv4 via IMDSv2 on deploy; actionable error off-EC2
-- **Structured logging** — Winston JSON logs → Promtail → Loki → Grafana dashboard
+- **Structured logging** — Pino JSON; local → Promtail/Loki/Grafana, production → CloudWatch
 
 ---
 
@@ -80,7 +80,7 @@ You can self-host it, read every line, break it, and understand why it broke. Th
 | Media | mediasoup (SFU) |
 | Auth | Passport `google-oauth20` → JWT (httpOnly cookie) |
 | Validation | Joi (API) + Mongoose (schema) |
-| Observability | Grafana + Loki + Promtail |
+| Observability | Local: Grafana + Loki + Promtail · Production: CloudWatch + SNS/Telegram |
 | Infra | Docker Compose + coturn |
 
 ---
@@ -263,7 +263,7 @@ Every participant **produces** one video track (simulcast: 3 quality layers) and
 
 ## Observability
 
-Logs flow: **Winston (server)** → JSON files → **Promtail** → **Loki** → **Grafana**.
+Local logs flow: **Pino (server)** → JSON files → **Promtail** → **Loki** → **Grafana**.
 
 Open Grafana at `http://localhost:3000`, go to Explore → Loki, and query:
 ```
@@ -271,6 +271,10 @@ Open Grafana at `http://localhost:3000`, go to Explore → Loki, and query:
 ```
 
 You can watch SFU `produce` / `consume` / `close-producer` events in real time while a call is live.
+
+Production does not depend on this local stack. The container's structured JSON stdout uses
+Docker's `awslogs` driver and is sent to `/a-meet/prod/server` with 14-day retention. See
+[Production logs, alerts, and secrets](#production-logs-alerts-and-secrets).
 
 ---
 
@@ -283,18 +287,16 @@ port range is reachable, and the server's SIGTERM graceful-drain handles clean r
 Releases are **image-based**: CI builds the server image, publishes an immutable tag to
 **Amazon ECR**, and the EC2 node **pulls that tag** and restarts the container — it never
 rebuilds mediasoup on the box. Docker's `restart: unless-stopped` is the supervisor. In
-production the server logs **structured JSON to stdout only**, so logs are collected from the
-container's stdout (`docker compose logs` or the host's Docker log driver / collector) rather
-than a bind-mounted file. (The local `docker-compose.yml` dev stack still uses the
-Loki/Promtail/Grafana file tail.)
+production the server logs **structured JSON to stdout only** and Docker's `awslogs` driver
+forwards it to CloudWatch rather than a bind-mounted file. (The local `docker-compose.yml`
+dev stack still uses the Loki/Promtail/Grafana file tail.)
 
 ```bash
 # On the EC2 node (Docker + Docker Compose plugin + AWS CLI installed)
 git clone ... && cd A-Meet   # the node keeps a checkout for config (compose file + env)
 
-# server/.env carries the runtime contract (same keys as everywhere else). In prod:
-#   MEDIASOUP_ANNOUNCED_IP = the box's public IPv4
-#   MONGO_URI              = Atlas connection string
+# Runtime secrets are loaded from SSM by the container entrypoint. No production
+# server/.env is required or copied into the image.
 # Open UDP ports 10000–59999 in the security group (mediasoup RTP range), plus 5000 (API).
 
 # Pull the published image tag and start (this is what CI automates on each deploy):
@@ -337,7 +339,8 @@ cleanly, so merges to `main` stay green. To enable it:
 | `EC2_SSH_KEY` | SSH private key for the `ubuntu` user |
 
 **On the EC2 node:** Docker + Compose plugin + AWS CLI, and an **IAM instance role with ECR
-pull** permissions (so `aws ecr get-login-password` works without static keys).
+pull**, SSM read, and CloudWatch Logs write permissions. `deploy/iam-instance-policy.json`
+contains the application-specific SSM/log permissions; no static AWS keys are used.
 
 **Image-tag contract:** every build is pushed as both `:latest` and an **immutable `:<git-sha>`**
 tag; deploys pull the specific `:<git-sha>` so a release maps to exact bytes and can be rolled
@@ -354,11 +357,76 @@ services). The local `docker-compose.yml` Mongo stack is for development only.
    (the same value you set for `MEDIASOUP_ANNOUNCED_IP`) so the EC2 box can reach the cluster.
    On a fixed-IP node prefer that exact `/32`; if the IP can change, an Elastic IP keeps the
    allowlist stable. (`0.0.0.0/0` works but is not recommended.)
-3. Set `MONGO_URI` in `server/.env` on the node to the Atlas SRV connection string, e.g.
+3. Store `MONGO_URI` at `/a-meet/prod/server/MONGO_URI` in SSM as the Atlas SRV
+   connection string, e.g.
    `mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/ameet?retryWrites=true&w=majority`.
 
 `MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD` are local-Docker-Mongo credentials only and are
 not used in production.
+
+### Production logs, alerts, and secrets
+
+Provision the production observability path once:
+
+```bash
+export AWS_REGION=ap-south-1
+export ENVIRONMENT=prod
+export INSTANCE_ID=i-0abc123...
+export LAMBDA_ROLE_ARN=arn:aws:iam::<account>:role/a-meet-telegram-lambda
+deploy/aws-observability.sh
+```
+
+The script idempotently creates `/a-meet/prod/server` with 14-day retention, an SNS topic,
+the Telegram Lambda, log metric filters, and alarms for instance health, fatal logs,
+sustained Mongo disconnects, and a five-minute error count. CloudWatch sends SNS only when
+alarm state changes, so an alarm produces one Telegram notification on `OK → ALARM` and
+does not repeat until it returns to `OK` and alarms again. The Lambda message contains the
+alarm name, environment, state, and reason.
+
+Attach `deploy/iam-instance-policy.json` to the EC2 instance role. Attach
+`deploy/iam-telegram-lambda-policy.json` to the Lambda role. Replace wildcard account/region
+segments with narrower values if your IAM deployment requires them.
+
+Store application configuration as SecureStrings. Only parameter names are committed:
+
+```bash
+aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
+  --name /a-meet/prod/server/MONGO_URI --value '<Atlas URI>'
+aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
+  --name /a-meet/prod/server/JWT_SECRET --value '<secret>'
+# Repeat for GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, CLIENT_URL, SERVER_URL,
+# MEDIASOUP_ANNOUNCED_IP, DEEPGRAM_API_KEY, and GROQ_API_KEY as applicable.
+
+aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
+  --name /a-meet/prod/telegram/token --value '<bot token>'
+aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
+  --name /a-meet/prod/telegram/chat-id --value '<chat id>'
+```
+
+`SSM_PARAMETER_PREFIX` defaults to `/a-meet/prod/server`. The entrypoint decrypts that
+one-level path before importing `config/env.ts`; an explicit Compose environment value wins
+for emergency overrides. Local development still uses `server/.env` because the prefix is
+unset outside `docker-compose.prod.yml`.
+
+Query production logs with CloudWatch Logs Insights:
+
+```text
+fields @timestamp, level, msg, roomId, socketId, reqId
+| filter ispresent(roomId) or ispresent(socketId) or ispresent(reqId)
+| sort @timestamp desc
+| limit 100
+```
+
+Staging smoke:
+
+1. Run `deploy/aws-observability.sh`, deploy the container, and confirm `/api/ready` is healthy.
+2. Emit one structured `logger.info({ roomId, socketId, reqId }, ...)` and one
+   `logger.error({ roomId, socketId, reqId }, ...)` event through the staging application.
+3. Confirm both appear in `/a-meet/staging/server` and the fields are queryable.
+4. Set a test alarm to `ALARM` with `aws cloudwatch set-alarm-state`; confirm one Telegram
+   message. Set `ALARM` again and confirm no second state-transition notification; set `OK`,
+   then `ALARM`, and confirm a new notification.
+5. Confirm local `docker-compose.yml` still runs Loki/Grafana/Promtail without AWS settings.
 
 ### Host identity & automatic recovery
 
@@ -369,7 +437,8 @@ that address.
 
 - **The EIP is the canonical address** for all three of:
   - the `api.<domain>` **DNS A record**,
-  - **`MEDIASOUP_ANNOUNCED_IP`** in `server/.env` (the IP browsers send media to), and
+  - **`MEDIASOUP_ANNOUNCED_IP`** in `/a-meet/prod/server/MEDIASOUP_ANNOUNCED_IP`
+    (the IP browsers send media to), and
   - the **MongoDB Atlas Network Access** allowlist entry.
 
   Because the EIP is reassociated on recovery, none of these need to change after a recovery event.
