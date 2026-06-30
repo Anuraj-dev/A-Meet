@@ -121,4 +121,8 @@ export type ClientToServerEvents = {
   ) => void;
 } & {
   'sfu-raise-hand': (payload: { raised: boolean }) => void;
+  'sfu-reaction': (payload: { emoji: string }) => void;
+  'sfu-host-mute': (payload: { socketId: string }) => void;
+  'sfu-host-remove': (payload: { socketId: string }) => void;
+  'sfu-spotlight': (payload: { socketId: string | null }) => void;
 } & import('./webrtc').WebRtcClientToServerEvents;

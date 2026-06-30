@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,18 +11,18 @@ import { playSound } from '../services/sounds';
 // Minimal socket.io-style fake: records handlers so tests can invoke an incoming
 // `sfu-reaction`, and records on/off/emit calls for lifecycle assertions.
 function makeSocket(id = 'me') {
-  const handlers = {};
+  const handlers: Record<string, Array<(payload: any) => void>> = {};
   return {
     id,
-    on: vi.fn((event, fn) => { (handlers[event] ||= []).push(fn); }),
+    on: vi.fn((event: string, fn: (payload: any) => void) => { (handlers[event] ||= []).push(fn); }),
     off: vi.fn(),
     emit: vi.fn(),
     // test helper: dispatch an incoming event to all registered handlers
-    _emitIncoming(event, payload) { (handlers[event] || []).forEach((fn) => fn(payload)); },
+    _emitIncoming(event: string, payload: any) { (handlers[event] || []).forEach((fn) => fn(payload)); },
   };
 }
 
-function setup(socket) {
+function setup(socket: any) {
   const userRef = { current: { name: 'Me', avatar: 'me.png' } };
   const peerStatesRef = { current: { peer1: { name: 'Peer One', avatar: 'p1.png' } } };
   const view = renderHook(() => useReactions({ socket, userRef, peerStatesRef }));
@@ -99,7 +100,7 @@ describe('useReactions', () => {
 
     unmount();
 
-    expect(socket.off).toHaveBeenCalledWith('sfu-reaction', registered[1]);
+    expect(socket.off).toHaveBeenCalledWith('sfu-reaction', registered![1]);
   });
 
   it('clears pending floating + per-tile expiry timers on unmount so none fire after teardown', () => {

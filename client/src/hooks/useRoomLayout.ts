@@ -1,5 +1,24 @@
 import { useCallback, useMemo, useState } from 'react';
 
+export type LayoutMode = 'auto' | 'tiled' | 'spotlight' | 'sidebar';
+export type StageKind = 'presentation' | 'focus' | 'grid' | 'alone' | 'solo';
+
+export interface RoomLayoutOptions {
+  selfKey: string;
+  remoteKeys: string[];
+  activeSpeaker: string | null;
+  spotlightKey: string | null;
+  hasScreen: boolean;
+  isAlone: boolean;
+  isSoloCall: boolean;
+}
+
+interface LayoutStage {
+  kind: StageKind;
+  focusKey?: string;
+  showRail?: boolean;
+}
+
 // Owns the layout / focus concern extracted from RoomPage:
 //   • pinnedKey   — a LOCAL per-viewer pin (any participant); just for me.
 //   • layoutMode  — the layout chooser: 'auto' | 'tiled' | 'spotlight' | 'sidebar'.
@@ -42,19 +61,19 @@ export function useRoomLayout({
   hasScreen,
   isAlone,
   isSoloCall,
-}) {
-  const [pinnedKey, setPinnedKey] = useState(null);
-  const [layoutMode, setLayoutMode] = useState('auto'); // auto | tiled | spotlight | sidebar
+}: RoomLayoutOptions) {
+  const [pinnedKey, setPinnedKey] = useState<string | null>(null);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('auto'); // auto | tiled | spotlight | sidebar
   const [gridPage, setGridPage] = useState(0); // grid pagination for large calls
 
   const handlePin = useCallback(
-    (person) => setPinnedKey((k) => (k === person.id ? null : person.id)),
+    (person: { id: string }) => setPinnedKey((k) => (k === person.id ? null : person.id)),
     [],
   );
 
-  const stage = useMemo(() => {
+  const stage = useMemo<LayoutStage>(() => {
     // A focus key is only valid if that person is still present.
-    const keyPresent = (k) => Boolean(k) && (k === selfKey || remoteKeys.includes(k));
+    const keyPresent = (k: string | null): k is string => Boolean(k) && (k === selfKey || remoteKeys.includes(k!));
     const explicitFocus = keyPresent(spotlightKey)
       ? spotlightKey
       : keyPresent(pinnedKey) ? pinnedKey : null;

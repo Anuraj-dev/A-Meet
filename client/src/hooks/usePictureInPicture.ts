@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { drawComposite, syncSources } from '../utils/video-composite';
+import type { CompositeSource, CompositeTile } from '../utils/video-composite';
+
+interface PictureInPictureOptions { auto?: boolean }
+interface PictureInPictureController {
+  toggle: () => Promise<void>;
+  enter: () => Promise<void>;
+  exit: () => Promise<void>;
+  warmUp: () => void;
+}
 
 // Picture-in-Picture "mini player" — keeps participants visible in a small
 // always-on-top window when the user switches tabs/apps (like Google Meet).
@@ -24,7 +33,7 @@ const FPS = 15;
 // (background tabs clamp timers to ~1fps regardless, which is fine here).
 const TICK_MS = Math.round(1000 / FPS);
 
-function detectSupport() {
+function detectSupport(): boolean {
   return (
     typeof document !== 'undefined' &&
     !!document.pictureInPictureEnabled &&
@@ -33,7 +42,7 @@ function detectSupport() {
   );
 }
 
-export function usePictureInPicture(tiles, { auto = true } = {}) {
+export function usePictureInPicture(tiles: CompositeTile[], { auto = true }: PictureInPictureOptions = {}) {
   const [supported] = useState(detectSupport);
   const [active, setActive] = useState(false);
 
@@ -47,7 +56,7 @@ export function usePictureInPicture(tiles, { auto = true } = {}) {
 
   // The imperative controller lives in a mount-only effect and is reached
   // through this ref; everything dynamic is read via refs, so no stale state.
-  const ctrlRef = useRef(null);
+  const ctrlRef = useRef<PictureInPictureController | null>(null);
 
   useEffect(() => {
     if (!supported) return undefined;
@@ -66,9 +75,9 @@ export function usePictureInPicture(tiles, { auto = true } = {}) {
     host.appendChild(pipVideo);
     document.body.appendChild(host);
 
-    const sources = new Map();
+    const sources = new Map<string, CompositeSource>();
     let loop = 0;
-    let capture = null;
+    let capture: MediaStream | null = null;
 
     const tick = () => {
       syncSources(tilesRef.current, sources, host);
@@ -97,8 +106,8 @@ export function usePictureInPicture(tiles, { auto = true } = {}) {
       warmUp(); // ensure loop + video are running before the PiP request
       try {
         if (pipVideo.readyState < HTMLMediaElement.HAVE_METADATA) {
-          await new Promise((resolve) => {
-            pipVideo.addEventListener('loadedmetadata', resolve, { once: true });
+          await new Promise<void>((resolve) => {
+            pipVideo.addEventListener('loadedmetadata', () => resolve(), { once: true });
           });
         }
         await pipVideo.requestPictureInPicture();

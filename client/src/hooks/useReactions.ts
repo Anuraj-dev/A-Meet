@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { playSound } from '../services/sounds';
+import type { RefObject } from 'react';
+import type { AppSocket } from '../services/socket';
+
+interface ReactionUser { name?: string; avatar?: string }
+interface FloatingReaction extends ReactionUser { id: number; emoji: string }
+interface ReactionsOptions {
+  socket: AppSocket;
+  userRef: RefObject<ReactionUser>;
+  peerStatesRef: RefObject<Record<string, ReactionUser>>;
+}
 
 // Owns the meeting reaction feature, extracted from RoomPage so it can be tested
 // in isolation:
@@ -16,17 +26,17 @@ import { playSound } from '../services/sounds';
 // @param {import('socket.io-client').Socket} opts.socket
 // @param {{ current: { name?: string, avatar?: string } }} opts.userRef
 // @param {{ current: Record<string, { name?: string, avatar?: string }> }} opts.peerStatesRef
-export function useReactions({ socket, userRef, peerStatesRef }) {
-  const [activeReactions, setActiveReactions] = useState({});
-  const [floatingReactions, setFloatingReactions] = useState([]);
-  const reactionTimers = useRef({});
+export function useReactions({ socket, userRef, peerStatesRef }: ReactionsOptions) {
+  const [activeReactions, setActiveReactions] = useState<Record<string, string>>({});
+  const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
+  const reactionTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Pending floating-reaction expiry timers, keyed by float id, so they can be
   // cleared on unmount and can't call setFloatingReactions after teardown.
-  const floatTimers = useRef({});
+  const floatTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const floatIdRef = useRef(0);
 
   useEffect(() => {
-    const onReaction = ({ emoji, socketId }) => {
+    const onReaction = ({ emoji, socketId }: { emoji: string; socketId: string }) => {
       setActiveReactions((prev) => ({ ...prev, [socketId]: emoji }));
       playSound('reaction');
       clearTimeout(reactionTimers.current[socketId]);
@@ -62,7 +72,7 @@ export function useReactions({ socket, userRef, peerStatesRef }) {
 
   // Emit a reaction; the server echoes it back via io.in, so the local user's
   // own reaction renders and plays the sound through the same `sfu-reaction` path.
-  const sendReaction = useCallback((emoji) => {
+  const sendReaction = useCallback((emoji: string) => {
     socket.emit('sfu-reaction', { emoji });
   }, [socket]);
 
