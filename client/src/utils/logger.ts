@@ -5,7 +5,7 @@
 const FLUSH_INTERVAL_MS = 5000;
 const MAX_BUFFER = 20;
 
-export function resolveClientLogEndpoint(serverUrl = import.meta.env.VITE_SERVER_URL) {
+export function resolveClientLogEndpoint(serverUrl = import.meta.env.VITE_SERVER_URL): string {
   if (!serverUrl) return '/api/logs/client';
   return `${serverUrl.replace(/\/$/, '')}/api/logs/client`;
 }
@@ -22,10 +22,20 @@ const sessionId = (() => {
   } catch { return 'unknown'; }
 })();
 
-let buffer = [];
-let flushTimer = null;
+type LogData = Record<string, unknown>;
 
-function sendBatch(entries) {
+interface ClientLogEntry extends LogData {
+  level: string;
+  msg: string;
+  sessionId: string;
+  ts: string;
+  url: string;
+}
+
+const buffer: ClientLogEntry[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function sendBatch(entries: ClientLogEntry[]): void {
   const payload = JSON.stringify({ logs: entries });
   try {
     if (navigator.sendBeacon) {
@@ -36,17 +46,17 @@ function sendBatch(entries) {
   } catch { /* never throw from logger */ }
 }
 
-function flush() {
+function flush(): void {
   if (buffer.length === 0) return;
   sendBatch(buffer.splice(0));
 }
 
-function scheduleFlush() {
+function scheduleFlush(): void {
   if (flushTimer) return;
   flushTimer = setTimeout(() => { flushTimer = null; flush(); }, FLUSH_INTERVAL_MS);
 }
 
-function log(level, msg, data = {}) {
+function log(level: string, msg: string, data: LogData = {}): void {
   buffer.push({ level, msg, sessionId, ts: new Date().toISOString(), url: location.pathname, ...data });
   if (buffer.length >= MAX_BUFFER) flush();
   else scheduleFlush();
@@ -65,8 +75,8 @@ window.onunhandledrejection = (event) => {
 };
 
 export const appLogger = {
-  debug: (msg, data) => log('debug', msg, data),
-  info:  (msg, data) => log('info',  msg, data),
-  warn:  (msg, data) => log('warn',  msg, data),
-  error: (msg, data) => log('error', msg, data),
+  debug: (msg: string, data?: LogData) => log('debug', msg, data),
+  info:  (msg: string, data?: LogData) => log('info',  msg, data),
+  warn:  (msg: string, data?: LogData) => log('warn',  msg, data),
+  error: (msg: string, data?: LogData) => log('error', msg, data),
 };

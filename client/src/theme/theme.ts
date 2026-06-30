@@ -1,5 +1,25 @@
 import { createTheme } from '@mui/material/styles';
 
+declare module '@mui/material/styles' {
+  interface Palette {
+    brand: { gradient: string; gradText: string };
+    control: { idle: string; idleHover: string; surface: string };
+    tile: { bg: string };
+    glass: { surface: string; surface2: string; border: string; border2: string };
+    ember: { main: string; dark: string; soft: string };
+    sage: { main: string; soft: string };
+  }
+
+  interface PaletteOptions {
+    brand?: { gradient: string; gradText: string };
+    control?: { idle: string; idleHover: string; surface: string };
+    tile?: { bg: string };
+    glass?: { surface: string; surface2: string; border: string; border2: string };
+    ember?: { main: string; dark: string; soft: string };
+    sage?: { main: string; soft: string };
+  }
+}
+
 // Ember / smoke design system — the SAME warm graphite + ember/sage language the
 // landing and lobby use (their local `DK` object). The room used to wear a cold
 // blue/purple skin, so the whole visual language flipped the moment you joined a

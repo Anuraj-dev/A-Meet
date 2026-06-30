@@ -22,8 +22,17 @@
     "src/utils/transcript.ts",
     "src/utils/video-composite.ts",
     "src/utils/pending-producers.ts",
+    "src/utils/calendar-invite.ts",
+    "src/utils/format-time.ts",
+    "src/utils/logger.ts",
+    "src/utils/logger.test.ts",
+    "src/api/axios.ts",
+    "src/api/meetings.ts",
     "src/services/socket.ts",
     "src/services/mediasoup-signal.ts",
-    "src/services/ice-config.ts"
+    "src/services/ice-config.ts",
+    "src/services/sounds.ts",
+    "src/services/webrtc.ts",
+    "src/theme/theme.ts"
   ]
 }
