@@ -399,6 +399,11 @@ export function registerSfuHandlers(io, socket) {
   socket.on('sfu-host-remove', async ({ socketId: targetSocketId } = {}) => {
     const roomId = await callerIsHost();
     if (!roomId || !targetSocketId || targetSocketId === socket.id) return;
+    // The target must be in the host's OWN room. This emits straight at a socket
+    // id (unlike mute, which is scoped by getPeer(roomId, …)), so without this a
+    // host of one room could disconnect a socket in another room by passing its
+    // id. Presence (room-manager) covers both SFU-on and SFU-off members.
+    if (getUserRoom(targetSocketId) !== roomId) return;
     io.to(targetSocketId).emit('sfu-removed');
     const target = io.sockets.sockets.get(targetSocketId);
     if (target) setTimeout(() => { try { target.disconnect(true); } catch { /* gone */ } }, 250);

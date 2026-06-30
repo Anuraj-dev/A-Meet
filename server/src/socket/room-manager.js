@@ -21,20 +21,17 @@ export function removeUser(socketId) {
 }
 
 export function getRoomUsers(roomId) {
-  const seen = new Set();
-  const result = [];
   // Deduplicate by user.id (one row per person even across multiple tabs),
-  // keeping the first socket seen. Each row carries that `socketId` so the
-  // client can target a specific socket for host moderation (mute/remove/
-  // spotlight) even when the SFU media path — the usual source of socket ids —
-  // is absent.
+  // keeping the user's MOST RECENT socket — so after a reconnect the roster
+  // points at the live socket, not a stale one pending the leave grace window.
+  // Each row carries that `socketId` so the client can target a specific socket
+  // for host moderation (mute/remove/spotlight) even when the SFU media path —
+  // the usual source of socket ids — is absent. First-seen user order is kept.
+  const byUser = new Map();
   for (const [socketId, user] of (rooms.get(roomId)?.entries() ?? [])) {
-    if (!seen.has(user.id)) {
-      seen.add(user.id);
-      result.push({ ...user, socketId });
-    }
+    byUser.set(user.id, { ...user, socketId });
   }
-  return result;
+  return [...byUser.values()];
 }
 
 export function isUserInRoom(roomId, userId) {

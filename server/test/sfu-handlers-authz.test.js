@@ -192,6 +192,10 @@ describe('SFU host-moderation authorization', () => {
   });
 
   describe('sfu-host-remove', () => {
+    // The target must be a presence member of the host's room. Seed/clean it.
+    beforeEach(() => addUser(ROOM, TARGET, { id: 'target-user', name: 'Target' }));
+    afterEach(() => removeUser(TARGET));
+
     it('host: notifies the target and disconnects their socket', async () => {
       vi.useFakeTimers();
       const { handlers, io, ioEmits } = setup({ userId: HOST_ID });
@@ -207,6 +211,20 @@ describe('SFU host-moderation authorization', () => {
       expect(targetSocket.disconnect).not.toHaveBeenCalled();
       vi.advanceTimersByTime(250);
       expect(targetSocket.disconnect).toHaveBeenCalledWith(true);
+    });
+
+    it('host: cannot remove a socket that belongs to another room', async () => {
+      const { handlers, io, ioEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers); // caller hosts ROOM
+      asHost();
+      // Move the target into a DIFFERENT room's presence.
+      removeUser(TARGET);
+      addUser('other-room', TARGET, { id: 'target-user', name: 'Target' });
+
+      await handlers['sfu-host-remove']({ socketId: TARGET });
+
+      expect(emittedTo(ioEmits, TARGET, 'sfu-removed')).toBe(false);
+      expect(io.sockets.sockets.get).not.toHaveBeenCalled();
     });
 
     it('non-host: neither notifies nor disconnects', async () => {
@@ -269,6 +287,7 @@ describe('SFU host-moderation authorization', () => {
     afterEach(() => removeUser(PRESENCE_SOCK));
 
     it('host-remove ejects the target via presence even with the SFU off', async () => {
+      addUser(ROOM, TARGET, { id: 'target-user', name: 'Target' });
       const { handlers, io, ioEmits } = setup({ userId: HOST_ID, socketId: PRESENCE_SOCK });
       asHost();
       const targetSocket = { disconnect: vi.fn() };
@@ -277,6 +296,7 @@ describe('SFU host-moderation authorization', () => {
       await handlers['sfu-host-remove']({ socketId: TARGET });
 
       expect(emittedTo(ioEmits, TARGET, 'sfu-removed')).toBe(true);
+      removeUser(TARGET);
     });
 
     it('host-spotlight relays to the room via presence even with the SFU off', async () => {

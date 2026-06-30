@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { io } from 'socket.io-client';
 import { createPeers } from '../helpers/peers.js';
+import { makeToken } from '../helpers/auth.js';
+import { SERVER_URL, AUTH_COOKIE } from '../helpers/constants.js';
 
 // Two-peer host-moderation propagation (epic stories 10 & 11): the host's
 // People-panel actions reach the target peer's own context, server-relayed.
@@ -87,6 +90,42 @@ test.describe('host moderation propagation', () => {
     await expect(pageB.getByRole('menuitem', { name: /^mute$/i })).toHaveCount(0);
     await expect(pageB.getByRole('menuitem', { name: /spotlight for everyone/i })).toHaveCount(0);
 
+    await close();
+  });
+
+  test('the server rejects a forged host action from a non-host', async ({ browser }) => {
+    // Hiding the UI is not the trust boundary — the server is. Drive a raw
+    // socket as the (non-host) guest, bypassing the client entirely, and forge a
+    // host-remove against the host. The server must ignore it (caller is not the
+    // room admin), so the host stays in the room.
+    const { pageA, close } = await createPeers(browser, { users: [host] });
+    const roomId = await createRoomAsHost(pageA);
+    const rosterA = pageA.getByTestId('participant-roster');
+    await expect(rosterA.getByRole('img', { name: host.name })).toBeVisible({ timeout: 15_000 });
+
+    const guestSocket = io(SERVER_URL, {
+      extraHeaders: { Cookie: `${AUTH_COOKIE}=${makeToken(guest)}` },
+      transports: ['websocket'],
+    });
+    // Join as the guest and learn the host's socketId from the presence roster
+    // (now tagged with socketId), so the forged event targets the real host.
+    const hostSocketId = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('did not receive room-users')), 10_000);
+      guestSocket.on('connect', () => guestSocket.emit('join-room', roomId));
+      guestSocket.on('connect_error', reject);
+      guestSocket.on('room-users', (list) => {
+        const h = list.find((u) => u.id === host.id);
+        if (h?.socketId) { clearTimeout(timer); resolve(h.socketId); }
+      });
+    });
+
+    guestSocket.emit('sfu-host-remove', { socketId: hostSocketId });
+
+    // Give the (rejected) action time to round-trip; the host is NOT redirected.
+    await pageA.waitForTimeout(1500);
+    await expect(pageA).toHaveURL(new RegExp(`/room/${roomId}$`));
+
+    guestSocket.disconnect();
     await close();
   });
 });

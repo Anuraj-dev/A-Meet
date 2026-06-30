@@ -20,13 +20,14 @@ describe('room-manager', () => {
     expect(getUserRoom('sock-1')).toBe('room-add');
   });
 
-  it('deduplicates a user joined from two sockets (e.g. two tabs), keeping the first socket', () => {
+  it('deduplicates a user joined from two sockets (e.g. two tabs), keeping the latest socket', () => {
     addUser('room-dup', 'sock-a', user('u2', 'Bob'));
-    addUser('room-dup', 'sock-b', user('u2', 'Bob')); // same user.id, new socket
+    addUser('room-dup', 'sock-b', user('u2', 'Bob')); // same user.id, new socket (reconnect / 2nd tab)
     const users = getRoomUsers('room-dup');
     expect(users).toHaveLength(1);
     expect(users[0].id).toBe('u2');
-    expect(users[0].socketId).toBe('sock-a');
+    // The most recent socket wins, so a reconnect's fresh socket is the target.
+    expect(users[0].socketId).toBe('sock-b');
   });
 
   it('reports membership via isUserInRoom', () => {
