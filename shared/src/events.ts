@@ -50,4 +50,6 @@ export interface ServerToClientEvents extends WebRtcServerToClientEvents {
   'sfu-producer-paused': (payload: import('./sfu').SfuProducerStatePayload) => void;
   'sfu-producer-resumed': (payload: import('./sfu').SfuProducerStatePayload) => void;
   'sfu-active-speaker': (payload: import('./sfu').SfuActiveSpeakerPayload) => void;
+  'sfu-reaction': (payload: { emoji: string; socketId: string }) => void;
+  'sfu-spotlight': (payload: { socketId: string | null }) => void;
 }

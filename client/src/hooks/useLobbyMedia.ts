@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function useLobbyMedia() {
-  const [previewStream, setPreviewStream] = useState(null);
-  const [videoDevices, setVideoDevices] = useState([]);
-  const [audioDevices, setAudioDevices] = useState([]);
+  const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedVideoId, setSelectedVideoId] = useState('');
   const [selectedAudioId, setSelectedAudioId] = useState('');
   const [videoOn, setVideoOn] = useState(false);
   const [audioOn, setAudioOn] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
-  const streamRef = useRef(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  async function enumerateAndUpdate(stream) {
+  async function enumerateAndUpdate(stream: MediaStream) {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const vDevs = devices.filter((d) => d.kind === 'videoinput');
     const aDevs = devices.filter((d) => d.kind === 'audioinput');
@@ -47,14 +47,16 @@ export function useLobbyMedia() {
       try {
         const a = await navigator.mediaDevices.getUserMedia({ audio: true });
         a.getAudioTracks().forEach((t) => stream.addTrack(t));
-      } catch (err) {
-        if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') deniedCount++;
+      } catch (err: unknown) {
+        const name = err instanceof Error ? err.name : '';
+        if (name === 'NotAllowedError' || name === 'NotFoundError') deniedCount++;
       }
       try {
         const v = await navigator.mediaDevices.getUserMedia({ video: true });
         v.getVideoTracks().forEach((t) => stream.addTrack(t));
-      } catch (err) {
-        if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') deniedCount++;
+      } catch (err: unknown) {
+        const name = err instanceof Error ? err.name : '';
+        if (name === 'NotAllowedError' || name === 'NotFoundError') deniedCount++;
       }
       if (deniedCount === 2) setPermissionDenied(true);
 
@@ -74,26 +76,26 @@ export function useLobbyMedia() {
     return () => { cancelled = true; };
   }, []);
 
-  const setVideoDevice = useCallback(async (deviceId) => {
+  const setVideoDevice = useCallback(async (deviceId: string) => {
     setSelectedVideoId(deviceId);
     // Stop old video tracks.
-    streamRef.current?.getVideoTracks().forEach((t) => { t.stop(); streamRef.current.removeTrack(t); });
+    streamRef.current?.getVideoTracks().forEach((t) => { t.stop(); streamRef.current!.removeTrack(t); });
     try {
       const v = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
-      v.getVideoTracks().forEach((t) => streamRef.current.addTrack(t));
+      v.getVideoTracks().forEach((t) => streamRef.current!.addTrack(t));
       setVideoOn(true);
     } catch {
       setVideoOn(false);
     }
-    setPreviewStream(new MediaStream(streamRef.current.getTracks()));
+    setPreviewStream(new MediaStream(streamRef.current!.getTracks()));
   }, []);
 
-  const setAudioDevice = useCallback(async (deviceId) => {
+  const setAudioDevice = useCallback(async (deviceId: string) => {
     setSelectedAudioId(deviceId);
-    streamRef.current?.getAudioTracks().forEach((t) => { t.stop(); streamRef.current.removeTrack(t); });
+    streamRef.current?.getAudioTracks().forEach((t) => { t.stop(); streamRef.current!.removeTrack(t); });
     try {
       const a = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
-      a.getAudioTracks().forEach((t) => streamRef.current.addTrack(t));
+      a.getAudioTracks().forEach((t) => streamRef.current!.addTrack(t));
       setAudioOn(true);
     } catch {
       setAudioOn(false);

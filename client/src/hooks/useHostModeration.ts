@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { AppSocket } from '../services/socket';
+
+interface PersonRef { id: string }
+interface HostModerationOptions { socket: AppSocket }
 
 // Owns the host-moderation concern extracted from RoomPage:
 //   • spotlightKey    — the socket id currently spotlighted by the host (or null).
@@ -14,11 +18,11 @@ import { useCallback, useEffect, useState } from 'react';
 //
 // @param {object} opts
 // @param {import('socket.io-client').Socket} opts.socket
-export function useHostModeration({ socket }) {
-  const [spotlightKey, setSpotlightKey] = useState(null);
+export function useHostModeration({ socket }: HostModerationOptions) {
+  const [spotlightKey, setSpotlightKey] = useState<string | null>(null);
 
   useEffect(() => {
-    const onSpotlight = ({ socketId } = {}) => setSpotlightKey(socketId ?? null);
+    const onSpotlight = (payload?: { socketId: string | null }) => setSpotlightKey(payload?.socketId ?? null);
     socket.on('sfu-spotlight', onSpotlight);
     return () => {
       socket.off('sfu-spotlight', onSpotlight);
@@ -27,17 +31,17 @@ export function useHostModeration({ socket }) {
 
   // Toggle: spotlighting an already-spotlighted peer clears the spotlight.
   const handleSpotlight = useCallback(
-    (person) => socket.emit('sfu-spotlight', { socketId: spotlightKey === person.id ? null : person.id }),
+    (person: PersonRef) => socket.emit('sfu-spotlight', { socketId: spotlightKey === person.id ? null : person.id }),
     [socket, spotlightKey],
   );
 
   const handleHostMute = useCallback(
-    (person) => socket.emit('sfu-host-mute', { socketId: person.id }),
+    (person: PersonRef) => socket.emit('sfu-host-mute', { socketId: person.id }),
     [socket],
   );
 
   const handleHostRemove = useCallback(
-    (person) => socket.emit('sfu-host-remove', { socketId: person.id }),
+    (person: PersonRef) => socket.emit('sfu-host-remove', { socketId: person.id }),
     [socket],
   );
 

@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useRoomLayout } from './useRoomLayout';
+import { useRoomLayout, type RoomLayoutOptions } from './useRoomLayout';
 
 // Characterization tests for the layout/focus concern extracted from RoomPage.
 // They pin the observable contract so the extraction verifiably changes nothing:
@@ -18,8 +18,8 @@ import { useRoomLayout } from './useRoomLayout';
 
 const SELF = 'self-sock';
 
-function setup(overrides = {}) {
-  const props = {
+function setup(overrides: Partial<RoomLayoutOptions> = {}) {
+  const props: RoomLayoutOptions = {
     selfKey: SELF,
     remoteKeys: [],
     activeSpeaker: null,

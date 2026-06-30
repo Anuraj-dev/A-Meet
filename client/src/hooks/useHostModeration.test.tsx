@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,15 +11,15 @@ import { useHostModeration } from './useHostModeration';
 //   • handleHostMute / handleHostRemove emit the right events
 //   • sfu-spotlight listener is cleaned up on unmount (no leak)
 
-function makeSocket() {
-  const handlers = {};
+function makeSocket(): any {
+  const handlers: Record<string, Array<(payload: any) => void>> = {};
   return {
-    on: vi.fn((event, cb) => { (handlers[event] ??= []).push(cb); }),
-    off: vi.fn((event, cb) => {
+    on: vi.fn((event: string, cb: (payload: any) => void) => { (handlers[event] ??= []).push(cb); }),
+    off: vi.fn((event: string, cb: (payload: any) => void) => {
       handlers[event] = (handlers[event] ?? []).filter((h) => h !== cb);
     }),
     emit: vi.fn(),
-    _emitIncoming(event, payload) {
+    _emitIncoming(event: string, payload: any) {
       (handlers[event] ?? []).forEach((fn) => fn(payload));
     },
   };

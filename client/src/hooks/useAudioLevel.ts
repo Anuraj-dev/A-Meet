@@ -1,17 +1,19 @@
 import { useEffect, useRef } from 'react';
 
 // Shared AudioContext for all analysers — never connected to destination.
-let sharedCtx;
-function getCtx() {
-  if (!sharedCtx) sharedCtx = new (window.AudioContext || window.webkitAudioContext)();
+let sharedCtx: AudioContext | undefined;
+function getCtx(): AudioContext {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) throw new Error('AudioContext is unavailable.');
+  if (!sharedCtx) sharedCtx = new AudioContextClass();
   if (sharedCtx.state === 'suspended') sharedCtx.resume().catch(() => {});
   return sharedCtx;
 }
 
 // Sets `--lvl` (0..1) on the returned ref element via rAF.
 // Analyser-only — never wired to ctx.destination (would crackle on PipeWire).
-export function useAudioLevel(stream, enabled = true) {
-  const ref = useRef(null);
+export function useAudioLevel<T extends HTMLElement = HTMLElement>(stream: MediaStream | null | undefined, enabled = true) {
+  const ref = useRef<T | null>(null);
   useEffect(() => {
     const el = ref.current;
     const track = stream?.getAudioTracks?.()[0];
@@ -20,21 +22,22 @@ export function useAudioLevel(stream, enabled = true) {
       return undefined;
     }
     let raf = 0;
-    let src;
-    let analyser;
+    let src: MediaStreamAudioSourceNode | undefined;
+    let analyser: AnalyserNode | undefined;
     let smoothed = 0;
     let disposed = false;
     try {
       const ctx = getCtx();
       src = ctx.createMediaStreamSource(stream);
-      analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.6;
-      src.connect(analyser);
-      const data = new Uint8Array(analyser.fftSize);
+      const activeAnalyser = ctx.createAnalyser();
+      analyser = activeAnalyser;
+      activeAnalyser.fftSize = 256;
+      activeAnalyser.smoothingTimeConstant = 0.6;
+      src.connect(activeAnalyser);
+      const data = new Uint8Array(activeAnalyser.fftSize);
       const tick = () => {
         if (disposed) return;
-        analyser.getByteTimeDomainData(data);
+        activeAnalyser.getByteTimeDomainData(data);
         let sum = 0;
         for (let i = 0; i < data.length; i++) {
           const v = (data[i] - 128) / 128;

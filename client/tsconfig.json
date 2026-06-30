@@ -40,6 +40,15 @@
     "src/hooks/useScreenShare.test.tsx",
     "src/hooks/usePcmCapture.ts",
     "src/hooks/usePcmCapture.test.tsx",
+    "src/hooks/useHostModeration.ts",
+    "src/hooks/useHostModeration.test.tsx",
+    "src/hooks/useRoomLayout.ts",
+    "src/hooks/useRoomLayout.test.tsx",
+    "src/hooks/useReactions.ts",
+    "src/hooks/useReactions.test.ts",
+    "src/hooks/useLobbyMedia.ts",
+    "src/hooks/usePictureInPicture.ts",
+    "src/hooks/useAudioLevel.ts",
     "src/theme/theme.ts"
   ]
 }
