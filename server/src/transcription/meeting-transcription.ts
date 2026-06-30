@@ -1,13 +1,21 @@
+import type { Server, Socket } from 'socket.io';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { appendTranscriptSegment, getTranscriptSnapshot, reviseTranscriptSegment } from '../socket/transcript-manager.js';
 import { DeepgramMeetingSession } from './deepgram-session.js';
 import { GroqTranscriptRefiner } from './groq-refiner.js';
 
-const sessions = new Map();
+interface ActiveContributor {
+  roomId: string;
+  session: DeepgramMeetingSession;
+  audioWindowStartedAt: number;
+  audioWindowBytes: number;
+}
+
+const sessions = new Map<string, ActiveContributor>();
 const refiner = new GroqTranscriptRefiner();
 
-function contextForRoom(roomId) {
+function contextForRoom(roomId: string) {
   return getTranscriptSnapshot(roomId).entries.slice(-4).map((entry) => entry.text).join(' ');
 }
 
@@ -15,7 +23,7 @@ export function transcriptionConfigured() {
   return !!env.transcription.deepgramApiKey;
 }
 
-export async function startContributor({ io, socket, roomId }) {
+export async function startContributor({ io, socket, roomId }: { io: Server; socket: Socket; roomId: string }) {
   if (!transcriptionConfigured()) throw new Error('Transcription providers are not configured');
   if (sessions.has(socket.id)) return;
 
@@ -39,12 +47,13 @@ export async function startContributor({ io, socket, roomId }) {
         provisional: refiner.enabled,
       });
       if (!appended.entry) return;
-      io.to(roomId).emit('transcript-segment', appended.entry);
+      const entry = appended.entry;
+      io.to(roomId).emit('transcript-segment', entry);
 
       if (!refiner.enabled) return;
       const context = contextForRoom(roomId);
       void refiner.refine({ pcm: audio, deepgramText: text, context }).then((refined) => {
-        const revised = reviseTranscriptSegment(roomId, appended.entry.id, refined.text, {
+        const revised = reviseTranscriptSegment(roomId, entry.id, refined.text, {
           provider: refined.provider,
         });
         if (revised) io.to(roomId).emit('transcript-segment', revised);
@@ -66,7 +75,7 @@ export async function startContributor({ io, socket, roomId }) {
   logger.info({ event: 'transcript.contributorStarted', roomId, userId: user.id }, 'meeting transcription contributor started');
 }
 
-export function sendContributorAudio(socketId, audio) {
+export function sendContributorAudio(socketId: string, audio: any) {
   const active = sessions.get(socketId);
   if (!active) return false;
   const buffer = Buffer.isBuffer(audio) ? audio : Buffer.from(audio);
@@ -84,14 +93,14 @@ export function sendContributorAudio(socketId, audio) {
   return true;
 }
 
-export async function stopContributor(socketId) {
+export async function stopContributor(socketId: string) {
   const active = sessions.get(socketId);
   if (!active) return;
   sessions.delete(socketId);
   await active.session.stop();
 }
 
-export async function stopRoomContributors(roomId) {
+export async function stopRoomContributors(roomId: string) {
   const matching = [...sessions.entries()].filter(([, active]) => active.roomId === roomId);
   await Promise.all(matching.map(([socketId]) => stopContributor(socketId)));
 }

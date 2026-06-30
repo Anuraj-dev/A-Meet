@@ -1,4 +1,5 @@
 import { customAlphabet } from 'nanoid';
+import type { Request, Response, NextFunction } from 'express';
 import { Room } from '../models/Room.js';
 import { User } from '../models/User.js';
 import { isRoomAdmin } from '../rooms/room-admin.js';
@@ -6,20 +7,20 @@ import { isRoomAdmin } from '../rooms/room-admin.js';
 // Generates a Google Meet-style code: xxx-xxxx-xxx (lowercase letters only).
 const segment = customAlphabet('abcdefghijklmnopqrstuvwxyz', 1);
 function generateRoomId() {
-  const block = (n) => Array.from({ length: n }, () => segment()).join('');
+  const block = (n: number) => Array.from({ length: n }, () => segment()).join('');
   return `${block(3)}-${block(4)}-${block(3)}`;
 }
 
 // Creates a Room with a freshly minted unique code, retrying a few times in the
 // (very unlikely) event of a collision. `fields` carries any extra data (host,
 // scheduling metadata, …). Returns the created doc, or null if all retries lost.
-async function createUniqueRoom(fields) {
+async function createUniqueRoom(fields: Record<string, unknown>) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const roomId = generateRoomId();
     try {
       return await Room.create({ roomId, participants: [], ...fields });
     } catch (err) {
-      if (err.code === 11000) continue; // duplicate roomId, retry
+      if ((err as { code?: number }).code === 11000) continue; // duplicate roomId, retry
       throw err;
     }
   }
@@ -27,7 +28,8 @@ async function createUniqueRoom(fields) {
 }
 
 // Shape a scheduled-meeting doc for the client (omit internals like participants).
-function toMeetingDto(room) {
+// `room` is a Mongoose document or lean object, indexed dynamically.
+function toMeetingDto(room: any) {
   return {
     roomId: room.roomId,
     title: room.title,
@@ -38,9 +40,9 @@ function toMeetingDto(room) {
 }
 
 // POST /api/rooms — create a new instant room (host = current user).
-export async function createRoom(req, res, next) {
+export async function createRoom(req: Request, res: Response, next: NextFunction) {
   try {
-    const room = await createUniqueRoom({ host: req.user.id, admin: req.user.id });
+    const room = await createUniqueRoom({ host: req.user!.id, admin: req.user!.id });
     if (!room) return res.status(500).json({ error: 'Could not generate a unique room code' });
     res.status(201).json({ roomId: room.roomId });
   } catch (err) {
@@ -50,12 +52,12 @@ export async function createRoom(req, res, next) {
 
 // POST /api/rooms/scheduled — reserve a room for later (title + time + notes).
 // The link is joinable any time; `scheduledFor` is display-only metadata.
-export async function createScheduledRoom(req, res, next) {
+export async function createScheduledRoom(req: Request, res: Response, next: NextFunction) {
   try {
     const { title, scheduledFor, description } = req.body;
     const room = await createUniqueRoom({
-      host: req.user.id,
-      admin: req.user.id,
+      host: req.user!.id,
+      admin: req.user!.id,
       title,
       scheduledFor,
       description,
@@ -69,10 +71,10 @@ export async function createScheduledRoom(req, res, next) {
 
 // GET /api/rooms/mine — the signed-in user's upcoming (not-yet-ended) scheduled
 // meetings, soonest first.
-export async function listMyMeetings(req, res, next) {
+export async function listMyMeetings(req: Request, res: Response, next: NextFunction) {
   try {
     const rooms = await Room.find({
-      host: req.user.id,
+      host: req.user!.id,
       scheduledFor: { $ne: null },
       active: true,
     })
@@ -86,14 +88,14 @@ export async function listMyMeetings(req, res, next) {
 
 // Loads a scheduled meeting and asserts the caller hosts it. Returns the doc, or
 // sends the appropriate error response and returns null.
-async function loadOwnedMeeting(req, res) {
+async function loadOwnedMeeting(req: Request, res: Response) {
   const roomId = String(req.params.roomId || '').toLowerCase();
   const room = await Room.findOne({ roomId });
   if (!room || !room.scheduledFor || !room.active) {
     res.status(404).json({ error: 'Meeting not found' });
     return null;
   }
-  if (!isRoomAdmin(room, req.user.id)) {
+  if (!isRoomAdmin(room, req.user!.id)) {
     res.status(403).json({ error: 'Only the host can change this meeting' });
     return null;
   }
@@ -101,7 +103,7 @@ async function loadOwnedMeeting(req, res) {
 }
 
 // PATCH /api/rooms/scheduled/:roomId — host edits title / time / description.
-export async function updateScheduledRoom(req, res, next) {
+export async function updateScheduledRoom(req: Request, res: Response, next: NextFunction) {
   try {
     const room = await loadOwnedMeeting(req, res);
     if (!room) return undefined;
@@ -118,7 +120,7 @@ export async function updateScheduledRoom(req, res, next) {
 
 // DELETE /api/rooms/scheduled/:roomId — host cancels. Soft-cancel via active:false
 // so a stale invite link lands on the "meeting has ended" screen (getRoom → 410).
-export async function cancelScheduledRoom(req, res, next) {
+export async function cancelScheduledRoom(req: Request, res: Response, next: NextFunction) {
   try {
     const room = await loadOwnedMeeting(req, res);
     if (!room) return undefined;
@@ -131,7 +133,7 @@ export async function cancelScheduledRoom(req, res, next) {
 }
 
 // GET /api/rooms/:roomId — validate a room exists and is active.
-export async function getRoom(req, res, next) {
+export async function getRoom(req: Request, res: Response, next: NextFunction) {
   try {
     // Codes are generated lowercase; lowercase the lookup so an uppercase param
     // (mobile autocapitalize, manual URL edit) still matches.
@@ -159,7 +161,7 @@ export async function getRoom(req, res, next) {
     // Best-effort profile lookup for display (name/avatar); the id stands alone
     // if the profile is gone. Build `{ _id, ...profile }` so the client can
     // always resolve identity (host-only UI) by id.
-    const profileFor = async (id) => {
+    const profileFor = async (id: any) => {
       if (!id) return null;
       const profile = await User.findById(id).select('name avatar').lean().catch(() => null);
       return { _id: String(id), ...(profile ?? {}) };

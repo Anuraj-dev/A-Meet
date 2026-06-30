@@ -1,5 +1,5 @@
 import passport from 'passport';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import { Strategy as GoogleStrategy, type Profile, type VerifyCallback } from 'passport-google-oauth20';
 import { env } from './env.js';
 import { User } from '../models/User.js';
 
@@ -7,7 +7,7 @@ import { User } from '../models/User.js';
 // then hand the resulting doc to Passport. Exported so it can be unit-tested
 // directly — the strategy below is only registered when OAuth credentials are
 // configured, so the seam would otherwise be untestable in CI.
-export async function googleVerify(accessToken, refreshToken, profile, done) {
+export async function googleVerify(accessToken: string, refreshToken: string, profile: Profile, done: VerifyCallback) {
   try {
     const user = await User.findOneAndUpdate(
       { googleId: profile.id },

@@ -15,6 +15,20 @@ import { logger as defaultLogger } from './config/logger.js';
 // How long graceful drain gets before we stop waiting and force-exit.
 export const DEFAULT_DRAIN_TIMEOUT_MS = 10_000;
 
+/** A single drain step — may be sync or async, and may be omitted. */
+type DrainStep = (() => void | Promise<void>) | undefined;
+
+interface LifecycleDeps {
+  notifyRestart?: DrainStep;
+  closeSockets?: DrainStep;
+  closeHttp?: DrainStep;
+  closeWorkers?: DrainStep;
+  closeDb?: DrainStep;
+  logger?: typeof defaultLogger;
+  exit?: (code?: number) => never;
+  drainTimeoutMs?: number;
+}
+
 export function createLifecycle({
   // Notify connected clients that the server is restarting (best-effort).
   notifyRestart,
@@ -29,12 +43,12 @@ export function createLifecycle({
   logger = defaultLogger,
   exit = process.exit,
   drainTimeoutMs = DEFAULT_DRAIN_TIMEOUT_MS,
-} = {}) {
+}: LifecycleDeps = {}) {
   let shuttingDown = false;
 
   // Run one drain step, tolerating a missing dep and logging (not throwing) on
   // failure so a single broken step still lets the rest of the drain proceed.
-  async function runStep(name, fn) {
+  async function runStep(name: string, fn: DrainStep) {
     if (typeof fn !== 'function') return;
     try {
       await fn();
@@ -43,7 +57,7 @@ export function createLifecycle({
     }
   }
 
-  async function shutdown(signal) {
+  async function shutdown(signal: string) {
     if (shuttingDown) return; // ignore repeat/duplicate signals
     shuttingDown = true;
     logger.info({ signal, drainTimeoutMs }, 'Shutdown signal received — draining');
@@ -72,7 +86,7 @@ export function createLifecycle({
   // A fatal error means in-memory media/socket state is no longer trustworthy.
   // Log it and terminate so the supervisor restarts us clean, rather than limp
   // along in a corrupt state.
-  function handleFatal(err, origin) {
+  function handleFatal(err: unknown, origin: string) {
     logger.fatal({ err, origin }, 'Fatal error — terminating process');
     exit(1);
   }
@@ -83,8 +97,8 @@ export function createLifecycle({
   function register() {
     const onSigterm = () => shutdown('SIGTERM');
     const onSigint = () => shutdown('SIGINT');
-    const onUncaught = (err) => handleFatal(err, 'uncaughtException');
-    const onRejection = (reason) => handleFatal(reason, 'unhandledRejection');
+    const onUncaught = (err: unknown) => handleFatal(err, 'uncaughtException');
+    const onRejection = (reason: unknown) => handleFatal(reason, 'unhandledRejection');
 
     process.on('SIGTERM', onSigterm);
     process.on('SIGINT', onSigint);

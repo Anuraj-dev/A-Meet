@@ -1,13 +1,43 @@
+import type { AuthUser } from '../types.js';
+
 const MAX_TRANSCRIPT_ENTRIES = 5000;
 const DEFAULT_EXPIRY_MS = 6 * 60 * 60 * 1000;
+
+interface TranscriptEntry {
+  id: string;
+  sequence: number;
+  speaker: { id: string; name: string; avatar: string };
+  text: string;
+  ts: number;
+  provider: string;
+  provisional: boolean;
+  revisedAt?: number;
+}
+
+interface TranscriptSession {
+  active: boolean;
+  startedAt: number | null;
+  startedBy: { id: string; name: string } | null;
+  stoppedAt: number | null;
+  nextSequence: number;
+  entries: TranscriptEntry[];
+  seenSegmentIds: Set<string>;
+}
+
+/** What appendTranscriptSegment reports back: at most one of these is set. */
+interface AppendResult {
+  error?: string;
+  duplicate?: boolean;
+  entry?: TranscriptEntry;
+}
 
 // The transcript is authoritative on the server but intentionally ephemeral for
 // v1. Every client receives entries from this store; no browser assembles its own
 // competing version. Rooms expire after their last participant leaves.
-const transcripts = new Map();
-const expiryTimers = new Map();
+const transcripts = new Map<string, TranscriptSession>();
+const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function createSession() {
+function createSession(): TranscriptSession {
   return {
     active: false,
     startedAt: null,
@@ -19,12 +49,12 @@ function createSession() {
   };
 }
 
-function getOrCreate(roomId) {
+function getOrCreate(roomId: string): TranscriptSession {
   if (!transcripts.has(roomId)) transcripts.set(roomId, createSession());
-  return transcripts.get(roomId);
+  return transcripts.get(roomId)!;
 }
 
-function publicState(session) {
+function publicState(session: TranscriptSession) {
   return {
     active: session.active,
     startedAt: session.startedAt,
@@ -33,12 +63,12 @@ function publicState(session) {
   };
 }
 
-export function getTranscriptSnapshot(roomId) {
+export function getTranscriptSnapshot(roomId: string) {
   const session = getOrCreate(roomId);
   return { ...publicState(session), entries: [...session.entries] };
 }
 
-export function startTranscript(roomId, user, now = Date.now()) {
+export function startTranscript(roomId: string, user: AuthUser, now = Date.now()) {
   const session = getOrCreate(roomId);
   session.active = true;
   session.startedAt ??= now;
@@ -47,14 +77,14 @@ export function startTranscript(roomId, user, now = Date.now()) {
   return publicState(session);
 }
 
-export function stopTranscript(roomId, now = Date.now()) {
+export function stopTranscript(roomId: string, now = Date.now()) {
   const session = getOrCreate(roomId);
   session.active = false;
   session.stoppedAt = now;
   return publicState(session);
 }
 
-export function appendTranscriptSegment(roomId, user, payload, now = Date.now()) {
+export function appendTranscriptSegment(roomId: string, user: AuthUser, payload: any, now = Date.now()): AppendResult {
   const session = getOrCreate(roomId);
   if (!session.active) return { error: 'Transcript is not active' };
 
@@ -91,7 +121,7 @@ export function appendTranscriptSegment(roomId, user, payload, now = Date.now())
   return { entry };
 }
 
-export function reviseTranscriptSegment(roomId, entryId, text, metadata = {}, now = Date.now()) {
+export function reviseTranscriptSegment(roomId: string, entryId: string, text: unknown, metadata: { provider?: string } = {}, now = Date.now()) {
   const session = getOrCreate(roomId);
   const normalized = typeof text === 'string' ? text.trim().replace(/\s+/g, ' ').slice(0, 1000) : '';
   const index = session.entries.findIndex((entry) => entry.id === entryId);
@@ -108,12 +138,12 @@ export function reviseTranscriptSegment(roomId, entryId, text, metadata = {}, no
   return revised;
 }
 
-export function cancelTranscriptExpiry(roomId) {
+export function cancelTranscriptExpiry(roomId: string) {
   clearTimeout(expiryTimers.get(roomId));
   expiryTimers.delete(roomId);
 }
 
-export function scheduleTranscriptExpiry(roomId, delay = DEFAULT_EXPIRY_MS) {
+export function scheduleTranscriptExpiry(roomId: string, delay = DEFAULT_EXPIRY_MS) {
   cancelTranscriptExpiry(roomId);
   const timer = setTimeout(() => {
     transcripts.delete(roomId);
@@ -124,7 +154,7 @@ export function scheduleTranscriptExpiry(roomId, delay = DEFAULT_EXPIRY_MS) {
 }
 
 // Test-only reset kept explicit rather than exposing internal Maps.
-export function clearTranscript(roomId) {
+export function clearTranscript(roomId: string) {
   cancelTranscriptExpiry(roomId);
   transcripts.delete(roomId);
 }

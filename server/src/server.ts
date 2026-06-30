@@ -37,10 +37,10 @@ async function start() {
     // on uncaught errors so a supervisor restarts us from a clean state.
     const lifecycle = createLifecycle({
       // Best-effort heads-up so clients can show "reconnecting" and back off.
-      notifyRestart: () => io.emit('server-restarting'),
+      notifyRestart: () => { io.emit('server-restarting'); },
       // io.close() disconnects every socket; we drain the bare HTTP server after.
-      closeSockets: () => new Promise((resolve) => io.close(() => resolve())),
-      closeHttp: () => new Promise((resolve) => httpServer.close(() => resolve())),
+      closeSockets: () => new Promise<void>((resolve) => io.close(() => resolve())),
+      closeHttp: () => new Promise<void>((resolve) => httpServer.close(() => resolve())),
       closeWorkers,
       closeDb: () => mongoose.disconnect(),
     });

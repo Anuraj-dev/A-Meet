@@ -3,6 +3,7 @@
 // Router (sfu-rooms.js) and the transports (sfu-handlers.js) agree.
 
 import http from 'http';
+import type { types as MediasoupTypes } from 'mediasoup';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 
@@ -12,7 +13,7 @@ import { logger } from '../config/logger.js';
 //     forwarding. (H264/VP9/AV1 are future tuning; VP8 keeps M4 about the SFU,
 //     not codec negotiation.)
 // mediasoup auto-adds the matching RTX codec for retransmission.
-export const mediaCodecs = [
+export const mediaCodecs: MediasoupTypes.RouterRtpCodecCapability[] = [
   {
     kind: 'audio',
     mimeType: 'audio/opus',
@@ -32,7 +33,7 @@ export const mediaCodecs = [
 
 // Per-Worker settings. The RTC port range is the band of UDP/TCP ports the
 // Worker binds for media — it must be open in the firewall on LAN/prod.
-export const workerSettings = {
+export const workerSettings: MediasoupTypes.WorkerSettings = {
   rtcMinPort: env.mediasoup.minPort,
   rtcMaxPort: env.mediasoup.maxPort,
   logLevel: 'warn',
@@ -43,7 +44,7 @@ export const workerSettings = {
 //   - listenInfos: bind on all interfaces (0.0.0.0) but ADVERTISE announcedIp
 //     to clients (the address they actually dial). 127.0.0.1 → same machine only.
 //   - prefer UDP (lower latency); fall back to TCP when UDP is blocked.
-export const webRtcTransportOptions = {
+export const webRtcTransportOptions: MediasoupTypes.WebRtcTransportOptions = {
   listenInfos: [
     { protocol: 'udp', ip: '0.0.0.0', announcedAddress: env.mediasoup.announcedIp },
     { protocol: 'tcp', ip: '0.0.0.0', announcedAddress: env.mediasoup.announcedIp },
@@ -67,7 +68,7 @@ export const webRtcTransportOptions = {
 // usable public address we keep it; otherwise we try the EC2 metadata service
 // (IMDSv2) to auto-fill the public IPv4, and fail loudly if we still can't.
 
-function isUnroutableForPeers(ip) {
+function isUnroutableForPeers(ip: string | undefined) {
   if (!ip) return true;
   if (ip === '127.0.0.1' || ip === '0.0.0.0' || ip === 'localhost') return true;
   if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
@@ -80,8 +81,15 @@ function isUnroutableForPeers(ip) {
 // IMDSv2 requires a short-lived token (PUT) before reading metadata (GET).
 // We keep both calls on a tight timeout so a non-EC2 host (where 169.254.169.254
 // is unreachable) doesn't stall startup.
-function imdsRequest({ method, path, headers = {}, timeout = 1200 }) {
-  return new Promise((resolve, reject) => {
+interface ImdsOptions {
+  method: string;
+  path: string;
+  headers?: Record<string, string>;
+  timeout?: number;
+}
+
+function imdsRequest({ method, path, headers = {}, timeout = 1200 }: ImdsOptions): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     const req = http.request(
       { host: '169.254.169.254', method, path, headers, timeout },
       (res) => {
@@ -126,7 +134,7 @@ export async function resolveAnnouncedIp() {
 
   const publicIp = await fetchEc2PublicIp();
   if (publicIp) {
-    for (const li of webRtcTransportOptions.listenInfos) li.announcedAddress = publicIp;
+    for (const li of webRtcTransportOptions.listenInfos ?? []) li.announcedAddress = publicIp;
     logger.warn(
       { announcedIp: publicIp, configured, source: 'ec2-imds' },
       'MEDIASOUP_ANNOUNCED_IP was loopback/private — auto-detected EC2 public IPv4. Set it explicitly in .env to avoid this lookup.',

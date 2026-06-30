@@ -15,13 +15,14 @@ import { Room } from '../models/Room.js';
 import { isRoomAdmin } from '../rooms/room-admin.js';
 import { getUserRoom } from './room-manager.js';
 import { logger } from '../config/logger.js';
+import type { Server, Socket } from 'socket.io';
 
 // socketId → roomId, established on get-rtp-capabilities. SFU-scoped (independent
 // of M1's room-manager) and set before any transport work, so it never races
 // the chat effect's join-room.
-const socketRoom = new Map();
+const socketRoom = new Map<string, string>();
 
-export function registerSfuHandlers(io, socket) {
+export function registerSfuHandlers(io: Server, socket: Socket) {
   // 1) Entry point: lazily create the room's Router, register this peer, and
   //    return the Router's rtpCapabilities so the client can load its Device.
   //    Also lazily creates the AudioLevelObserver on first peer join.
@@ -43,7 +44,7 @@ export function registerSfuHandlers(io, socket) {
         });
         room.audioProducerToSocket = new Map(); // producerId → socketId
         room.audioLevelObserver.on('volumes', (volumes) => {
-          const sid = room.audioProducerToSocket.get(volumes[0].producer.id);
+          const sid = room.audioProducerToSocket?.get(volumes[0].producer.id);
           if (sid) io.to(roomId).emit('sfu-active-speaker', { socketId: sid });
         });
         room.audioLevelObserver.on('silence', () => {
@@ -52,7 +53,7 @@ export function registerSfuHandlers(io, socket) {
       }
 
       callback({ rtpCapabilities: room.router.rtpCapabilities });
-    } catch (err) {
+    } catch (err: any) {
       logger.warn({ event: 'peer.joinFailed', socketId: socket.id, err: err.message }, 'peer join failed');
       callback({ error: err.message });
     }
@@ -92,7 +93,7 @@ export function registerSfuHandlers(io, socket) {
           remotePort: tuple?.remotePort,
         }, 'ICE tuple selected');
       });
-      transport.on('icestatechange', (iceState) => {
+      transport.on('icestatechange', (iceState: string) => {
         const level = (iceState === 'disconnected' || iceState === 'failed') ? 'warn' : 'debug';
         logger[level]({ event: 'ice.stateChange', direction, socketId: socket.id, iceState }, `ICE ${iceState}`);
       });
@@ -108,7 +109,7 @@ export function registerSfuHandlers(io, socket) {
         iceCandidates: transport.iceCandidates,
         dtlsParameters: transport.dtlsParameters,
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.warn({ event: 'transport.createFailed', socketId: socket.id, err: err.message }, 'transport create failed');
       callback({ error: err.message });
     }
@@ -123,7 +124,7 @@ export function registerSfuHandlers(io, socket) {
       if (!transport) throw new Error('transport not found');
       await transport.connect({ dtlsParameters });
       callback({ connected: true });
-    } catch (err) {
+    } catch (err: any) {
       callback({ error: err.message });
     }
   });
@@ -136,7 +137,7 @@ export function registerSfuHandlers(io, socket) {
       const room = getRoom(roomId);
       const peer = getPeer(roomId, socket.id);
       const transport = peer?.transports.get(transportId);
-      if (!transport) throw new Error('send transport not found');
+      if (!peer || !transport) throw new Error('send transport not found');
 
       const producer = await transport.produce({ kind, rtpParameters, appData });
       peer.producers.set(producer.id, producer);
@@ -148,12 +149,15 @@ export function registerSfuHandlers(io, socket) {
 
       // Register audio producers with the level observer (screen-share audio excluded).
       if (kind === 'audio' && appData?.source !== 'screen' && room?.audioLevelObserver) {
-        room.audioProducerToSocket.set(producer.id, socket.id);
-        producer.on('close', () => room.audioProducerToSocket?.delete(producer.id));
+        room.audioProducerToSocket?.set(producer.id, socket.id);
+        // NOTE: 'close' is not a Producer event in mediasoup (transportclose is);
+        // this listener is effectively dead but preserved as-is during the TS
+        // migration to avoid a behavior change. Cast keeps the typed emitter happy.
+        (producer.on as any)('close', () => room.audioProducerToSocket?.delete(producer.id));
         try { await room.audioLevelObserver.addProducer({ producerId: producer.id }); } catch { /* ok */ }
       }
 
-      socket.to(roomId).emit('sfu-new-producer', {
+      socket.to(roomId!).emit('sfu-new-producer', {
         producerId: producer.id,
         socketId: socket.id,
         user: socket.user,
@@ -163,7 +167,7 @@ export function registerSfuHandlers(io, socket) {
       });
 
       callback({ id: producer.id });
-    } catch (err) {
+    } catch (err: any) {
       callback({ error: err.message });
     }
   });
@@ -208,7 +212,7 @@ export function registerSfuHandlers(io, socket) {
         rtpParameters: consumer.rtpParameters,
         producerPaused: consumer.producerPaused,
       });
-    } catch (err) {
+    } catch (err: any) {
       callback({ error: err.message });
     }
   });
@@ -221,7 +225,7 @@ export function registerSfuHandlers(io, socket) {
       if (!consumer) throw new Error('consumer not found');
       await consumer.resume();
       callback({ resumed: true });
-    } catch (err) {
+    } catch (err: any) {
       callback({ error: err.message });
     }
   });
@@ -239,10 +243,10 @@ export function registerSfuHandlers(io, socket) {
       const producer = getPeer(roomId, socket.id)?.producers.get(producerId);
       if (!producer) throw new Error('producer not found');
       await producer.pause();
-      socket.to(roomId).emit('sfu-producer-paused', { producerId, socketId: socket.id });
+      socket.to(roomId!).emit('sfu-producer-paused', { producerId, socketId: socket.id });
       logger.debug({ event: 'producer.paused', producerId, kind: producer.kind, socketId: socket.id }, 'producer paused');
       callback?.({ paused: true });
-    } catch (err) {
+    } catch (err: any) {
       callback?.({ error: err.message });
     }
   });
@@ -253,10 +257,10 @@ export function registerSfuHandlers(io, socket) {
       const producer = getPeer(roomId, socket.id)?.producers.get(producerId);
       if (!producer) throw new Error('producer not found');
       await producer.resume();
-      socket.to(roomId).emit('sfu-producer-resumed', { producerId, socketId: socket.id });
+      socket.to(roomId!).emit('sfu-producer-resumed', { producerId, socketId: socket.id });
       logger.debug({ event: 'producer.resumed', producerId, kind: producer.kind, socketId: socket.id }, 'producer resumed');
       callback?.({ resumed: true });
-    } catch (err) {
+    } catch (err: any) {
       callback?.({ error: err.message });
     }
   });
@@ -269,11 +273,11 @@ export function registerSfuHandlers(io, socket) {
       const roomId = socketRoom.get(socket.id);
       const peer = getPeer(roomId, socket.id);
       const producer = peer?.producers.get(producerId);
-      if (!producer) throw new Error('producer not found');
+      if (!peer || !producer) throw new Error('producer not found');
       producer.close();
       peer.producers.delete(producerId);
       callback?.({ closed: true });
-    } catch (err) {
+    } catch (err: any) {
       callback?.({ error: err.message });
     }
   });
@@ -284,7 +288,7 @@ export function registerSfuHandlers(io, socket) {
     const peer = getPeer(roomId, socket.id);
     if (!peer) return;
     peer.handRaised = !!raised;
-    socket.to(roomId).emit('sfu-hand-raise-update', { socketId: socket.id, raised: peer.handRaised });
+    socket.to(roomId!).emit('sfu-hand-raise-update', { socketId: socket.id, raised: peer.handRaised });
     callback?.({ ok: true });
   });
 
@@ -336,7 +340,7 @@ export function registerSfuHandlers(io, socket) {
   }
 
   // The peer's primary (camera/mic) audio producer — screen-share audio excluded.
-  function micProducer(roomId, targetSocketId) {
+  function micProducer(roomId: string, targetSocketId: string) {
     const peer = getPeer(roomId, targetSocketId);
     if (!peer) return null;
     for (const producer of peer.producers.values()) {
@@ -345,7 +349,7 @@ export function registerSfuHandlers(io, socket) {
     return null;
   }
 
-  async function pauseMic(roomId, targetSocketId) {
+  async function pauseMic(roomId: string, targetSocketId: string) {
     const producer = micProducer(roomId, targetSocketId);
     if (!producer || producer.paused) return false;
     await producer.pause();
@@ -363,7 +367,7 @@ export function registerSfuHandlers(io, socket) {
     try {
       const muted = await pauseMic(roomId, targetSocketId);
       if (muted) logger.info({ event: 'host.mute', roomId, by: socket.id, target: targetSocketId }, 'host muted peer');
-    } catch (err) { logger.warn({ event: 'host.muteFailed', err: err.message }); }
+    } catch (err: any) { logger.warn({ event: 'host.muteFailed', err: err.message }); }
   });
 
   // 15) Host mutes everyone but themselves (enforced).
