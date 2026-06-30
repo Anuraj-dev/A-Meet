@@ -160,13 +160,17 @@ describe('join-room', () => {
     expect(socketEmits.some((e) => e.event === 'transcript-snapshot')).toBe(true);
   });
 
-  it('emits user-joined to peers when the user was not already present', () => {
-    const { handlers, socketEmits } = setup();
+  it('emits user-joined to peers (tagged with the socketId) when the user was not already present', () => {
+    const { handlers, socket, socketEmits } = setup();
     isUserInRoom.mockReturnValue(false);
 
     handlers['join-room'](ROOM);
 
-    expect(socketEmits.some((e) => e.event === 'user-joined')).toBe(true);
+    const joined = socketEmits.find((e) => e.event === 'user-joined');
+    expect(joined).toBeTruthy();
+    // The socketId rides along so peers can target this socket for moderation
+    // even with the SFU media path off.
+    expect(joined.payload).toMatchObject({ ...USER, socketId: socket.id });
   });
 
   it('does NOT emit user-joined when the user was already present (multi-tab)', () => {
@@ -272,6 +276,26 @@ describe('disconnect grace window', () => {
     handlers['join-room'](ROOM);
 
     // user-joined should be suppressed since rejoinedInGrace is true
+    expect(socketEmits.some((e) => e.event === 'user-joined')).toBe(false);
+  });
+
+  it('pushes peers an updated roster when a peer rejoins within the grace window', () => {
+    const { handlers, socketEmits } = setup();
+    removeUser.mockReturnValue({ roomId: ROOM, user: USER });
+    isUserInRoom.mockReturnValue(false);
+    getRoomUsers.mockReturnValue([{ ...USER, socketId: 'sock-1' }]);
+
+    handlers['disconnect']();
+    socketEmits.length = 0; // ignore emits from the original join
+
+    handlers['join-room'](ROOM);
+
+    // Peers (socket.to(roomId)) get a fresh room-users so their moderation
+    // targets follow the reconnected peer's new socket id — even though the
+    // user-joined toast/chime stays suppressed for a grace reconnect.
+    const toPeers = socketEmits.find((e) => e.event === 'room-users' && e.target === ROOM);
+    expect(toPeers).toBeTruthy();
+    expect(toPeers.payload).toEqual([{ ...USER, socketId: 'sock-1' }]);
     expect(socketEmits.some((e) => e.event === 'user-joined')).toBe(false);
   });
 });

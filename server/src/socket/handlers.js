@@ -70,7 +70,16 @@ export function registerHandlers(io) {
         configured: transcriptionConfigured(),
       });
       if (!alreadyPresent && !rejoinedInGrace) {
-        socket.to(roomId).emit('user-joined', socket.user);
+        // Tag the join with the socketId so peers can target this socket for host
+        // moderation even with the SFU media path off (matches getRoomUsers).
+        socket.to(roomId).emit('user-joined', { ...socket.user, socketId: socket.id });
+      } else if (rejoinedInGrace) {
+        // A grace-window reconnect gets a FRESH socket id, but user-joined is
+        // suppressed (no "rejoined" spam). Push peers an updated roster so their
+        // moderation targets follow the live socket — otherwise a host removing a
+        // just-reconnected peer would target the dropped socket (and the
+        // same-room guard would reject it).
+        socket.to(roomId).emit('room-users', getRoomUsers(roomId));
       }
     });
 

@@ -321,9 +321,12 @@ export function registerSfuHandlers(io, socket) {
   // live mic without consent; instead the host can only *request* an unmute,
   // which the target accepts with one tap (Google-Meet behaviour).
 
-  // Resolve+verify the caller as host once per action (small DB read).
+  // Resolve+verify the caller as host once per action (small DB read). Resolve
+  // the room from the SFU map as a fast path, falling back to canonical presence
+  // (room-manager) — so host moderation works before the SFU handshake completes
+  // and on the SFU-off E2E harness, where `socketRoom` is never populated.
   async function callerIsHost() {
-    const roomId = socketRoom.get(socket.id);
+    const roomId = socketRoom.get(socket.id) ?? getUserRoom(socket.id);
     if (!roomId) return null;
     try {
       const room = await Room.findOne({ roomId });
@@ -396,6 +399,11 @@ export function registerSfuHandlers(io, socket) {
   socket.on('sfu-host-remove', async ({ socketId: targetSocketId } = {}) => {
     const roomId = await callerIsHost();
     if (!roomId || !targetSocketId || targetSocketId === socket.id) return;
+    // The target must be in the host's OWN room. This emits straight at a socket
+    // id (unlike mute, which is scoped by getPeer(roomId, …)), so without this a
+    // host of one room could disconnect a socket in another room by passing its
+    // id. Presence (room-manager) covers both SFU-on and SFU-off members.
+    if (getUserRoom(targetSocketId) !== roomId) return;
     io.to(targetSocketId).emit('sfu-removed');
     const target = io.sockets.sockets.get(targetSocketId);
     if (target) setTimeout(() => { try { target.disconnect(true); } catch { /* gone */ } }, 250);

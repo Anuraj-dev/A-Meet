@@ -12,18 +12,22 @@ import {
 const user = (id, name) => ({ id, name, email: `${name}@x.io`, avatar: '' });
 
 describe('room-manager', () => {
-  it('adds a user and lists them in the room', () => {
+  it('adds a user and lists them in the room, tagged with their socketId', () => {
     addUser('room-add', 'sock-1', user('u1', 'Anuraj'));
-    expect(getRoomUsers('room-add')).toEqual([user('u1', 'Anuraj')]);
+    // The roster carries the socketId so host moderation (mute/remove/spotlight)
+    // can target a specific socket even when the SFU media path is absent.
+    expect(getRoomUsers('room-add')).toEqual([{ ...user('u1', 'Anuraj'), socketId: 'sock-1' }]);
     expect(getUserRoom('sock-1')).toBe('room-add');
   });
 
-  it('deduplicates a user joined from two sockets (e.g. two tabs)', () => {
+  it('deduplicates a user joined from two sockets (e.g. two tabs), keeping the latest socket', () => {
     addUser('room-dup', 'sock-a', user('u2', 'Bob'));
-    addUser('room-dup', 'sock-b', user('u2', 'Bob')); // same user.id, new socket
+    addUser('room-dup', 'sock-b', user('u2', 'Bob')); // same user.id, new socket (reconnect / 2nd tab)
     const users = getRoomUsers('room-dup');
     expect(users).toHaveLength(1);
     expect(users[0].id).toBe('u2');
+    // The most recent socket wins, so a reconnect's fresh socket is the target.
+    expect(users[0].socketId).toBe('sock-b');
   });
 
   it('reports membership via isUserInRoom', () => {

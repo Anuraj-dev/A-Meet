@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { RoomMetaContext } from '../components/RoomGuard';
 import socket from '../services/socket';
+import api from '../api/axios';
 import { useMediasoup } from '../hooks/useMediasoup';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { isPcmCaptureSupported, usePcmCapture } from '../hooks/usePcmCapture';
@@ -132,9 +133,11 @@ export default function RoomPage() {
   // on transient socket membership.
   useEffect(() => {
     let active = true;
-    fetch(`/api/rooms/${roomId}`, { credentials: 'include' })
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
+    // Use the shared axios instance (honors VITE_SERVER_URL) — a raw relative
+    // fetch only reaches the API in dev via the Vite proxy, and would miss the
+    // separate API origin in production and the E2E preview harness.
+    api.get(`/rooms/${roomId}`)
+      .then(({ data }) => {
         if (!active) return;
         const adminId = data?.admin?._id ?? data?.admin?.id ?? data?.host?._id ?? data?.host?.id;
         setIsHost(Boolean(user?.id && adminId && String(adminId) === String(user.id)));
@@ -1129,6 +1132,19 @@ export default function RoomPage() {
         isSpeaking: activeSpeaker === sid, isLocal: false, isHost: false, pinned: pinnedKey === sid,
       };
     }),
+    // Presence-only peers: people in the room (from the socket presence roster)
+    // whose SFU media stream hasn't arrived — or never will, on the SFU-off E2E
+    // harness. Including them keeps the People panel and its host-moderation
+    // targets in sync with who's actually here, not just who's sending media.
+    // Keyed by socketId so moderation targets the right socket; peers already
+    // listed above via their SFU stream are filtered out to avoid duplicates.
+    ...users
+      .filter((u) => u.socketId && u.socketId !== socket.id && !remoteStreams[u.socketId])
+      .map((u) => ({
+        id: u.socketId, name: u.name, avatar: u.avatar,
+        audioOn: true, videoOn: false, handRaised: false,
+        isSpeaking: false, isLocal: false, isHost: false, pinned: pinnedKey === u.socketId,
+      })),
   ];
 
   const handleAskUnmute = (person) => socket.emit('sfu-request-unmute', { socketId: person.id });

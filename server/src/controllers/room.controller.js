@@ -1,5 +1,6 @@
 import { customAlphabet } from 'nanoid';
 import { Room } from '../models/Room.js';
+import { User } from '../models/User.js';
 import { isRoomAdmin } from '../rooms/room-admin.js';
 
 // Generates a Google Meet-style code: xxx-xxxx-xxx (lowercase letters only).
@@ -135,10 +136,10 @@ export async function getRoom(req, res, next) {
     // Codes are generated lowercase; lowercase the lookup so an uppercase param
     // (mobile autocapitalize, manual URL edit) still matches.
     const roomId = String(req.params.roomId || '').toLowerCase();
-    const room = await Room.findOne({ roomId })
-      .populate('host', 'name avatar')
-      .populate('admin', 'name avatar')
-      .lean();
+    // Read the raw refs first (no populate) so the response always carries the
+    // host/admin id, even when the referenced User profile is missing — e.g. a
+    // deleted account, or auth that issues JWTs without persisting a User doc.
+    const room = await Room.findOne({ roomId }).lean();
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
@@ -147,16 +148,26 @@ export async function getRoom(req, res, next) {
       // can show "this meeting has ended" instead of "check your code".
       return res.status(410).json({ error: 'Meeting has ended', ended: true });
     }
-    // Persist the explicit flag as legacy rooms are next accessed. The response
-    // still uses the fallback immediately, so a creator never loses admin UI
-    // while the backfill happens.
-    const admin = room.admin ?? room.host;
-    if (!room.admin && room.host?._id) {
-      void Room.updateOne({ _id: room._id, admin: null }, { $set: { admin: room.host._id } }).catch(() => {});
+    // Persist the explicit admin flag as legacy rooms are next accessed. The
+    // response still uses the fallback immediately, so a creator never loses
+    // admin UI while the backfill happens.
+    const hostId = room.host ?? null;
+    const adminId = room.admin ?? room.host ?? null;
+    if (!room.admin && room.host) {
+      void Room.updateOne({ _id: room._id, admin: null }, { $set: { admin: room.host } }).catch(() => {});
     }
+    // Best-effort profile lookup for display (name/avatar); the id stands alone
+    // if the profile is gone. Build `{ _id, ...profile }` so the client can
+    // always resolve identity (host-only UI) by id.
+    const profileFor = async (id) => {
+      if (!id) return null;
+      const profile = await User.findById(id).select('name avatar').lean().catch(() => null);
+      return { _id: String(id), ...(profile ?? {}) };
+    };
+    const [host, admin] = await Promise.all([profileFor(hostId), profileFor(adminId)]);
     res.json({
       roomId: room.roomId,
-      host: room.host,
+      host,
       admin,
       active: room.active,
       title: room.title,
