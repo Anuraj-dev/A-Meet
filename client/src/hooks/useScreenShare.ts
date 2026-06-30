@@ -1,5 +1,26 @@
 import { useCallback, useMemo, useState } from 'react';
 
+export interface ScreenSharePeerState {
+  name?: string;
+}
+
+export interface ScreenShareOptions {
+  remoteScreens: Record<string, MediaStream>;
+  isScreenSharing: boolean;
+  localScreenStream: MediaStream | null;
+  localScreenSurface: string | null;
+  peerStates: Record<string, ScreenSharePeerState>;
+  localName?: string;
+}
+
+export interface ScreenShareEntry {
+  key: string;
+  stream: MediaStream;
+  isLocal: boolean;
+  name: string;
+  surface: string | null;
+}
+
 // Owns the screen-share / presentation concern extracted from RoomPage so it can
 // be tested in isolation and so RoomPage moves toward a thin composition:
 //   • shares          — the unified presentation model (remote screens + your own
@@ -33,7 +54,7 @@ export function useScreenShare({
   localScreenSurface,
   peerStates,
   localName = 'You',
-}) {
+}: ScreenShareOptions) {
   const remoteScreenEntries = Object.entries(remoteScreens ?? {});
 
   // Unified shares model — avoids self-mirror loop and supports multi-share.
@@ -62,7 +83,7 @@ export function useScreenShare({
 
   // The user's requested pin. Validity is handled by deriving pinnedShare below,
   // so a stale key never needs a setState-in-effect to be cleared.
-  const [pinnedShareKey, setPinnedShareKey] = useState(null);
+  const [pinnedShareKey, setPinnedShareKey] = useState<string | null>(null);
   const pinnedShare = shares.find((s) => s.key === pinnedShareKey)
     ?? shares.find((s) => !s.isLocal)
     ?? shares[0]
@@ -75,12 +96,12 @@ export function useScreenShare({
   // the share drops localScreenStream (→ false), and a fresh share produces a new
   // stream object that no longer matches the revealed one (→ false again). This
   // replaces the previous setState-in-effect reset with pure derived state.
-  const [revealedStream, setRevealedStream] = useState(null);
+  const [revealedStream, setRevealedStream] = useState<MediaStream | null>(null);
   const showScreenAnyway = isScreenSharing
     && localScreenStream != null
     && revealedStream === localScreenStream;
   const setShowScreenAnyway = useCallback(
-    (value) => setRevealedStream(value ? localScreenStream : null),
+    (value: boolean) => setRevealedStream(value ? localScreenStream : null),
     [localScreenStream],
   );
 

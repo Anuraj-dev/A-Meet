@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,21 +7,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // record produce/consume calls. Hoisted so the vi.mock factories can close over
 // them, and inspected from the tests.
 const H = vi.hoisted(() => {
-  const handlers = {};
+  const handlers: Record<string, Array<(payload: any) => void>> = {};
   const socket = {
     connected: false,
     id: 'local-socket-id',
-    on: vi.fn((event, cb) => { (handlers[event] ||= []).push(cb); }),
-    off: vi.fn((event, cb) => { if (handlers[event]) handlers[event] = handlers[event].filter((h) => h !== cb); }),
+    on: vi.fn((event: string, cb: (payload: any) => void) => { (handlers[event] ||= []).push(cb); }),
+    off: vi.fn((event: string, cb: (payload: any) => void) => { if (handlers[event]) handlers[event] = handlers[event].filter((h) => h !== cb); }),
     emit: vi.fn(),
     connect: vi.fn(() => { socket.connected = true; }),
     disconnect: vi.fn(() => { socket.connected = false; }),
     _handlers: handlers,
     // Push an incoming server event to the hook's registered listeners.
-    _emit(event, payload) { (handlers[event] || []).slice().forEach((cb) => cb(payload)); },
+    _emit(event: string, payload: any) { (handlers[event] || []).slice().forEach((cb) => cb(payload)); },
   };
 
-  const state = {
+  const state: any = {
     socket,
     request: vi.fn(),
     devices: [],
@@ -33,14 +34,14 @@ const H = vi.hoisted(() => {
     pid: 0,
   };
 
-  function makeProducer(appData) {
+  function makeProducer(appData: any) {
     return {
       id: `producer-${appData?.mediaTag ?? appData?.source ?? 'x'}-${++state.pid}`,
       appData, paused: false,
       on: vi.fn(), pause: vi.fn(), resume: vi.fn(), close: vi.fn(),
     };
   }
-  function makeConsumer(id, producerId, kind) {
+  function makeConsumer(id: string, producerId: string, kind: string) {
     return {
       id, producerId, kind,
       track: { kind, id: `track-${id}`, stop: vi.fn() },
@@ -48,15 +49,15 @@ const H = vi.hoisted(() => {
       getStats: vi.fn(async () => new Map()),
     };
   }
-  function makeTransport(direction, params) {
-    const listeners = {};
+  function makeTransport(direction: string, params: any) {
+    const listeners: Record<string, (...args: any[]) => void> = {};
     return {
       id: params?.id ?? `${direction}-transport`,
       direction,
       connectionState: 'new',
-      on: vi.fn((event, cb) => { listeners[event] = cb; }),
-      produce: vi.fn(async ({ track, appData }) => { state.produced.push({ appData, track }); return makeProducer(appData); }),
-      consume: vi.fn(async ({ id, producerId, kind }) => { const c = makeConsumer(id, producerId, kind); state.consumed.push(c); return c; }),
+      on: vi.fn((event: string, cb: (...args: any[]) => void) => { listeners[event] = cb; }),
+      produce: vi.fn(async ({ track, appData }: any) => { state.produced.push({ appData, track }); return makeProducer(appData); }),
+      consume: vi.fn(async ({ id, producerId, kind }: any) => { const c = makeConsumer(id, producerId, kind); state.consumed.push(c); return c; }),
       close: vi.fn(),
       _listeners: listeners,
     };
@@ -66,8 +67,8 @@ const H = vi.hoisted(() => {
       rtpCapabilities: { codecs: [], headerExtensions: [] },
       load: vi.fn(async () => {}),
       canProduce: vi.fn(() => true),
-      createSendTransport: vi.fn((params) => { const t = makeTransport('send', params); state.sendTransports.push(t); return t; }),
-      createRecvTransport: vi.fn((params) => { const t = makeTransport('recv', params); state.recvTransports.push(t); return t; }),
+      createSendTransport: vi.fn((params: any) => { const t = makeTransport('send', params); state.sendTransports.push(t); return t; }),
+      createRecvTransport: vi.fn((params: any) => { const t = makeTransport('recv', params); state.recvTransports.push(t); return t; }),
     };
     state.devices.push(device);
     return device;
@@ -84,17 +85,20 @@ import { useMediasoup } from './useMediasoup';
 
 // ── Browser-media globals (jsdom has none) ──────────────────────────────────
 class FakeMediaStream {
-  constructor(tracks = []) { this._tracks = [...tracks]; }
-  addTrack(t) { this._tracks.push(t); }
-  removeTrack(t) { this._tracks = this._tracks.filter((x) => x !== t); }
+  _tracks: any[];
+  constructor(tracks: any[] = []) { this._tracks = [...tracks]; }
+  addTrack(t: any) { this._tracks.push(t); }
+  removeTrack(t: any) { this._tracks = this._tracks.filter((x) => x !== t); }
   getTracks() { return this._tracks; }
   getVideoTracks() { return this._tracks.filter((t) => t.kind === 'video'); }
   getAudioTracks() { return this._tracks.filter((t) => t.kind === 'audio'); }
 }
-function fakeTrack(kind, deviceId) {
+function fakeTrack(kind: string, deviceId: string) {
   return { kind, enabled: true, stop: vi.fn(), addEventListener: vi.fn(), getSettings: () => ({ deviceId, sampleRate: 48000 }) };
 }
 class FakeAudioContext {
+  state: AudioContextState;
+  sampleRate: number;
   constructor() { this.state = 'running'; this.sampleRate = 48000; }
   createMediaStreamSource() { return { connect: vi.fn(), disconnect: vi.fn() }; }
   createGain() { return { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() }; }
@@ -105,7 +109,7 @@ class FakeAudioContext {
 
 const originals = { MediaStream: globalThis.MediaStream, AudioContext: window.AudioContext };
 
-function defaultResponder(event, data) {
+function defaultResponder(event: string, data: any) {
   switch (event) {
     case 'sfu-get-rtp-capabilities': return { rtpCapabilities: { codecs: [], headerExtensions: [] } };
     case 'sfu-create-transport': return { id: `${data.direction}-transport`, iceParameters: {}, iceCandidates: [], dtlsParameters: {} };
@@ -127,18 +131,18 @@ beforeEach(() => {
   H.producerKinds = {}; H.existingProducers = [];
   Object.keys(H.socket._handlers).forEach((k) => delete H.socket._handlers[k]);
   H.socket.connected = false;
-  H.request.mockImplementation(async (event, data) => defaultResponder(event, data));
+  H.request.mockImplementation(async (event: string, data: any) => defaultResponder(event, data));
 
-  globalThis.MediaStream = FakeMediaStream;
-  window.AudioContext = FakeAudioContext;
-  navigator.mediaDevices = {
-    getUserMedia: vi.fn(async (constraints) => {
+  globalThis.MediaStream = FakeMediaStream as unknown as typeof MediaStream;
+  window.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+    getUserMedia: vi.fn(async (constraints: MediaStreamConstraints) => {
       if (constraints.audio) return new FakeMediaStream([fakeTrack('audio', 'mic-1')]);
       if (constraints.video) return new FakeMediaStream([fakeTrack('video', 'cam-1')]);
       return new FakeMediaStream([]);
     }),
     getDisplayMedia: vi.fn(),
-  };
+  } });
 });
 
 afterEach(() => {
@@ -146,7 +150,7 @@ afterEach(() => {
   window.AudioContext = originals.AudioContext;
 });
 
-function mount(devices = { startAudioOn: true, startVideoOn: true }) {
+function mount(devices: { startAudioOn?: boolean; startVideoOn?: boolean; audioDeviceId?: string; videoDeviceId?: string } = { startAudioOn: true, startVideoOn: true }) {
   return renderHook(() => useMediasoup('room-1', devices));
 }
 
@@ -159,7 +163,7 @@ async function waitForSetup() {
 }
 
 // Bring one remote peer into the call by announcing its producer.
-async function consumePeer(result, { producerId = 'p-remote-1', socketId = 'peer-1', kind = 'video', user } = {}) {
+async function consumePeer(result: any, { producerId = 'p-remote-1', socketId = 'peer-1', kind = 'video', user }: any = {}) {
   H.producerKinds[producerId] = kind;
   await act(async () => {
     H.socket._emit('sfu-new-producer', {
@@ -185,7 +189,7 @@ describe('useMediasoup', () => {
     expect(H.devices).toHaveLength(1);
     expect(H.devices[0].load).toHaveBeenCalledWith({ routerRtpCapabilities: { codecs: [], headerExtensions: [] } });
     expect(H.sendTransports).toHaveLength(1);
-    const producedTags = H.produced.map((p) => p.appData?.mediaTag);
+    const producedTags = H.produced.map((p: any) => p.appData?.mediaTag);
     expect(producedTags).toContain('audio');
     expect(producedTags).toContain('video');
   });
@@ -309,14 +313,16 @@ describe('useMediasoup', () => {
   });
 
   it('starts and stops screen sharing', async () => {
-    navigator.mediaDevices.getDisplayMedia.mockResolvedValue(new FakeMediaStream([fakeTrack('video', 'screen-1')]));
+    vi.mocked(navigator.mediaDevices.getDisplayMedia).mockResolvedValue(
+      new FakeMediaStream([fakeTrack('video', 'screen-1')]) as unknown as MediaStream,
+    );
     const { result } = mount();
     await waitForSetup();
 
     await act(async () => { await result.current.shareScreen(); });
     expect(result.current.isScreenSharing).toBe(true);
     expect(result.current.localScreenStream).toBeInstanceOf(FakeMediaStream);
-    expect(H.produced.some((p) => p.appData?.source === 'screen')).toBe(true);
+    expect(H.produced.some((p: any) => p.appData?.source === 'screen')).toBe(true);
 
     act(() => { result.current.stopScreenShare(); });
     expect(result.current.isScreenSharing).toBe(false);
@@ -355,7 +361,7 @@ describe('useMediasoup', () => {
   });
 
   it('flags permissionDenied when camera and microphone are both blocked', async () => {
-    navigator.mediaDevices.getUserMedia.mockRejectedValue(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }));
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue(Object.assign(new Error('blocked'), { name: 'NotAllowedError' }));
 
     const { result } = mount();
 
@@ -371,14 +377,14 @@ describe('useMediasoup', () => {
     // Tracks are produced (so toggling later is instant) but immediately paused.
     expect(result.current.localAudioOn).toBe(false);
     expect(result.current.localVideoOn).toBe(false);
-    const producedTags = H.produced.map((p) => p.appData?.mediaTag);
+    const producedTags = H.produced.map((p: any) => p.appData?.mediaTag);
     expect(producedTags).toContain('audio');
     expect(producedTags).toContain('video');
     expect(H.request).toHaveBeenCalledWith('sfu-pause-producer', expect.objectContaining({ producerId: expect.any(String) }));
   });
 
   it('ignores a screen-share that the user cancels', async () => {
-    navigator.mediaDevices.getDisplayMedia.mockRejectedValue(Object.assign(new Error('cancelled'), { name: 'NotAllowedError' }));
+    vi.mocked(navigator.mediaDevices.getDisplayMedia).mockRejectedValue(Object.assign(new Error('cancelled'), { name: 'NotAllowedError' }));
     const { result } = mount();
     await waitForSetup();
 
@@ -420,8 +426,8 @@ describe('useMediasoup', () => {
   });
 
   it('does not flag permissionDenied when only the camera is unavailable', async () => {
-    navigator.mediaDevices.getUserMedia.mockImplementation(async (constraints) => {
-      if (constraints.audio) return new FakeMediaStream([fakeTrack('audio', 'mic-1')]);
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockImplementation(async (constraints?: MediaStreamConstraints) => {
+      if (constraints?.audio) return new FakeMediaStream([fakeTrack('audio', 'mic-1')]) as unknown as MediaStream;
       throw Object.assign(new Error('no camera'), { name: 'NotFoundError' });
     });
 
