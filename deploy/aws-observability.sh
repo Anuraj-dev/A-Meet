@@ -72,6 +72,7 @@ deploy_notifier_lambda() {
       --role "$LAMBDA_ROLE_ARN" \
       --runtime nodejs22.x \
       --handler index.handler \
+      --timeout "${LAMBDA_TIMEOUT:-15}" \
       --environment "Variables={ENVIRONMENT=${ENVIRONMENT},SSM_REGION=${AWS_REGION},TELEGRAM_TOKEN_PARAMETER=${TELEGRAM_TOKEN_PARAMETER},TELEGRAM_CHAT_ID_PARAMETER=${TELEGRAM_CHAT_ID_PARAMETER}}" >/dev/null
   else
     aws lambda create-function \
@@ -80,6 +81,7 @@ deploy_notifier_lambda() {
       --role "$LAMBDA_ROLE_ARN" \
       --runtime nodejs22.x \
       --handler index.handler \
+      --timeout "${LAMBDA_TIMEOUT:-15}" \
       --zip-file "fileb://${bundle}/notifier.zip" \
       --environment "Variables={ENVIRONMENT=${ENVIRONMENT},SSM_REGION=${AWS_REGION},TELEGRAM_TOKEN_PARAMETER=${TELEGRAM_TOKEN_PARAMETER},TELEGRAM_CHAT_ID_PARAMETER=${TELEGRAM_CHAT_ID_PARAMETER}}" >/dev/null
   fi

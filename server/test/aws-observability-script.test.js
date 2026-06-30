@@ -25,4 +25,14 @@ describe('deploy/aws-observability.sh', () => {
     // only once) would never accumulate the consecutive datapoints to alarm.
     expect(script).toContain('put_alarm mongo-disconnect MongoDisconnectCount 60 1 1');
   });
+
+  it('gives the notifier Lambda a timeout above the 3s default to survive cold-start SSM + Telegram calls', async () => {
+    const script = await readFile(new URL('../../deploy/aws-observability.sh', import.meta.url), 'utf8');
+
+    // The notifier is invoked only on alarms, so it is almost always a cold start:
+    // init + SSM decrypt + an outbound Telegram HTTPS call exceeds Lambda's 3s default
+    // and the alert is silently lost. Both the create and update paths must set it.
+    const timeoutFlags = script.match(/--timeout "\$\{LAMBDA_TIMEOUT:-15\}"/g) ?? [];
+    expect(timeoutFlags.length).toBe(2);
+  });
 });
