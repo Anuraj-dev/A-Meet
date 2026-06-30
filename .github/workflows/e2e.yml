@@ -46,3 +46,40 @@ jobs:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+
+  # SFU-ENABLED job (#133): the host-moderation cases that need real media —
+  # enforced mute (pause a live mediasoup audio producer) and spotlight's layout
+  # effect. Unlike the smoke job it installs deps WITHOUT --ignore-scripts so
+  # mediasoup's native worker binary is built, and boots the server with the SFU
+  # on (server-launcher.sfu.js, MEDIASOUP_ANNOUNCED_IP=127.0.0.1).
+  e2e-sfu:
+    name: Playwright SFU host-moderation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # No --ignore-scripts here: mediasoup compiles its native worker during
+      # install, which the SFU-on harness needs at runtime.
+      - name: Install workspace deps (with native mediasoup build)
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: e2e
+
+      - name: Run SFU E2E
+        run: npm run test:sfu
+        working-directory: e2e
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-sfu
+          path: e2e/playwright-report/
+          retention-days: 7

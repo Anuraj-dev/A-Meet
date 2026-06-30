@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:sfu": "playwright test --config playwright.sfu.config.js",
     "test:headed": "playwright test --headed",
     "install:browsers": "playwright install --with-deps chromium",
     "report": "playwright show-report"

@@ -1078,7 +1078,7 @@ export default function RoomPage() {
     return (
       <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: { xs: 'column', sm: 'row' } }}>
         <Box sx={{ flex: 1, p: { xs: 1, sm: 1.5 }, minWidth: 0, minHeight: 0, pt: { xs: 8, sm: 9 }, pb: { sm: 13 } }}>
-          <Box sx={{ width: '100%', height: '100%', borderRadius: 3, overflow: 'hidden' }}>
+          <Box data-testid="stage-focus" sx={{ width: '100%', height: '100%', borderRadius: 3, overflow: 'hidden' }}>
             <VideoTile {...focusProps} objectFit="cover" />
           </Box>
         </Box>
