@@ -14,7 +14,7 @@ const turnSecret = import.meta.env.VITE_TURN_SECRET;
 
 const hasTurn = Boolean(turnDomain && turnSecret);
 
-const turnServers = hasTurn
+const turnServers: RTCIceServer[] = hasTurn
   ? [
       // UDP relay (lowest latency) ...
       { urls: `turn:${turnDomain}:3478?transport=udp`, username: turnUsername, credential: turnSecret },
@@ -25,7 +25,7 @@ const turnServers = hasTurn
     ]
   : [];
 
-export const ICE_SERVERS = [
+export const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   ...turnServers,
@@ -35,5 +35,5 @@ export const ICE_SERVERS = [
 // through the relay. Proves the coturn path works end-to-end during testing.
 // Ignored unless TURN is actually configured, so it can't accidentally break a
 // dev build with no relay candidates.
-export const ICE_TRANSPORT_POLICY =
+export const ICE_TRANSPORT_POLICY: RTCIceTransportPolicy =
   hasTurn && import.meta.env.VITE_FORCE_RELAY === '1' ? 'relay' : 'all';

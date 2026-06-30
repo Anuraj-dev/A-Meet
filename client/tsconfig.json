@@ -11,7 +11,9 @@
   "include": [
     "typecheck",
     "src/utils/peer-color.ts",
+    "src/utils/pending-producers.ts",
     "src/services/socket.ts",
-    "src/services/mediasoup-signal.ts"
+    "src/services/mediasoup-signal.ts",
+    "src/services/ice-config.ts"
   ]
 }
