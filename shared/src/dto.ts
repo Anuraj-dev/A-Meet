@@ -40,3 +40,25 @@ export interface ScheduledMeetingDto {
 export interface MeetingsResponse {
   meetings: ScheduledMeetingDto[];
 }
+
+export interface AuthUserDto {
+  id: string;
+  name?: string;
+  email?: string;
+  avatar?: string;
+}
+
+export interface AuthMeResponse {
+  user: AuthUserDto | null;
+}
+
+export interface RoomMetadataDto {
+  roomId: string;
+  host?: AuthUserDto | null;
+  admin?: AuthUserDto | null;
+  active: boolean;
+  title?: string;
+  description?: string;
+  scheduledFor?: string;
+  createdAt?: string;
+}

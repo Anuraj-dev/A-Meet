@@ -1,9 +1,14 @@
-import { createContext, useEffect, useState } from 'react';
+import { createContext, useEffect, useState, type ReactNode } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
 import api from '../api/axios';
 import CheckMeetingCode from '../pages/CheckMeetingCode';
 import { shouldRedirectToLobby } from '../utils/room-entry';
+import type { RoomMetadataDto } from '@a-meet/contracts';
+import type { AxiosError } from 'axios';
+
+type GuardStatus = 'valid' | 'invalid' | 'ended';
+interface GuardResult { code: string; status: GuardStatus }
 
 // Room metadata (title, scheduledFor, …) fetched by RoomGuard and made available
 // to child pages so lobby and room can show scheduled-meeting info without a
@@ -11,25 +16,25 @@ import { shouldRedirectToLobby } from '../utils/room-entry';
 // only-export-components is a fast-refresh DX guard, not correctness, so a
 // narrow opt-out is fine here.
 // eslint-disable-next-line react-refresh/only-export-components
-export const RoomMetaContext = createContext(null);
+export const RoomMetaContext = createContext<RoomMetadataDto | null>(null);
 
 // Validates the :roomId in the URL against the server before rendering the
 // Lobby/Room. A non-existent code renders the "Check your meeting code" screen;
 // an ended meeting renders a clearer "meeting has ended" variant.
-export default function RoomGuard({ children }) {
+export default function RoomGuard({ children }: { children: ReactNode }) {
   const { roomId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   // Result is tagged with the code it belongs to, so a stale result for a
   // previous code never shows for the current one (status derives to 'loading').
-  const [result, setResult] = useState(null); // { code, status: 'valid'|'invalid'|'ended' }
-  const [roomMeta, setRoomMeta] = useState(null);
+  const [result, setResult] = useState<GuardResult | null>(null); // { code, status: 'valid'|'invalid'|'ended' }
+  const [roomMeta, setRoomMeta] = useState<RoomMetadataDto | null>(null);
 
   // Canonical code is lowercase, no stray whitespace. If the URL isn't canonical
   // (uppercase from autocapitalize, a pasted space), redirect BEFORE anything
   // else — otherwise two people could land in different SFU rooms for the same
   // code (the room is keyed by the exact string), or the lookup 404s.
-  const canonical = roomId.trim().toLowerCase();
+  const canonical = (roomId ?? '').trim().toLowerCase();
   const needsCanonical = canonical !== roomId;
 
   useEffect(() => {
@@ -42,13 +47,13 @@ export default function RoomGuard({ children }) {
     if (needsCanonical) return undefined; // wait for the redirect to land
     let active = true;
     api
-      .get(`/rooms/${encodeURIComponent(canonical)}`)
+      .get<RoomMetadataDto>(`/rooms/${encodeURIComponent(canonical)}`)
       .then((res) => {
         if (!active) return;
         setResult({ code: canonical, status: 'valid' });
         setRoomMeta(res.data ?? null);
       })
-      .catch((err) => {
+      .catch((err: AxiosError) => {
         if (!active) return;
         // 410 Gone = the meeting existed but the host ended it.
         setResult({ code: canonical, status: err?.response?.status === 410 ? 'ended' : 'invalid' });

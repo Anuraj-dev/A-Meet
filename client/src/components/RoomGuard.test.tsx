@@ -14,7 +14,7 @@ const CODE = 'abc-defg-hij';
 
 // Renders RoomGuard for /room/:roomId with the given navigation state, alongside
 // a sibling /lobby route, so we can assert which screen actually shows.
-function renderRoomEntry(state) {
+function renderRoomEntry(state: unknown) {
   return render(
     <MemoryRouter initialEntries={[{ pathname: `/room/${CODE}`, state }]}>
       <Routes>
@@ -35,7 +35,7 @@ function renderRoomEntry(state) {
 describe('<RoomGuard /> lobby gate', () => {
   beforeEach(() => {
     // Valid, active room for every test; the routing decision is what varies.
-    api.get.mockResolvedValue({ data: { roomId: CODE, active: true } });
+    vi.mocked(api.get).mockResolvedValue({ data: { roomId: CODE, active: true } });
   });
 
   it('bounces a cold /room link open (no nav state) to the lobby/preview', async () => {

@@ -10,7 +10,34 @@ import {
   StopCircleOutlined as StopIcon,
 } from '@mui/icons-material';
 
-function formatTime(ts) {
+interface TranscriptSpeaker { name?: string; avatar?: string }
+interface TranscriptEntry {
+  id: string;
+  speaker?: TranscriptSpeaker;
+  ts: string | number | Date;
+  text: string;
+}
+interface TranscriptInterim {
+  utteranceId: string;
+  speaker?: TranscriptSpeaker;
+  text: string;
+}
+interface TranscriptPanelProps {
+  open: boolean;
+  entries: TranscriptEntry[];
+  active: boolean;
+  interims: TranscriptInterim[];
+  contributorStatus: string;
+  contributorError?: string;
+  isHost: boolean;
+  canContribute: boolean;
+  onEnableContribution: () => void;
+  onStop: () => void;
+  onDownload: () => void;
+  onClose: () => void;
+}
+
+function formatTime(ts: string | number | Date): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
@@ -27,8 +54,8 @@ export default function TranscriptPanel({
   onStop,
   onDownload,
   onClose,
-}) {
-  const bottomRef = useRef(null);
+}: TranscriptPanelProps) {
+  const bottomRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [open, entries.length, interims.length]);
@@ -54,9 +81,9 @@ export default function TranscriptPanel({
       }}
     >
       <Box sx={{ px: 2.25, pt: 2, pb: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between">
+        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ textAlign: 'left' }}>
-            <Stack direction="row" alignItems="center" spacing={1}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Typography sx={{ fontFamily: '"Outfit", sans-serif', fontWeight: 650, fontSize: 18 }}>
                 Meeting transcript
               </Typography>
@@ -78,7 +105,7 @@ export default function TranscriptPanel({
           </Stack>
         </Stack>
 
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap', rowGap: 1 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 1.5, flexWrap: 'wrap', rowGap: 1 }}>
           <Chip
             size="small"
             icon={<ListeningIcon />}
@@ -112,7 +139,7 @@ export default function TranscriptPanel({
 
       <Box sx={{ flex: 1, overflowY: 'auto', px: 2.25, py: 2, contentVisibility: 'auto' }}>
         {!entries.length && !interims.length ? (
-          <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 260, color: 'text.secondary', textAlign: 'center', px: 3 }}>
+          <Stack sx={{ alignItems: 'center', justifyContent: 'center', minHeight: 260, color: 'text.secondary', textAlign: 'center', px: 3 }}>
             <NotesIcon sx={{ fontSize: 36, mb: 1.5, opacity: 0.5 }} />
             <Typography sx={{ fontWeight: 650, color: 'text.primary' }}>The conversation will appear here</Typography>
             <Typography variant="body2" sx={{ mt: 0.5 }}>
@@ -128,7 +155,7 @@ export default function TranscriptPanel({
                 {entry.speaker?.name?.[0] || '?'}
               </Avatar>
               <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Stack direction="row" alignItems="baseline" justifyContent="space-between" spacing={1}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
                   <Typography variant="body2" sx={{ fontWeight: 700 }}>{entry.speaker?.name || 'Participant'}</Typography>
                   <Typography variant="caption" color="text.disabled">{formatTime(entry.ts)}</Typography>
                 </Stack>

@@ -7,7 +7,7 @@ import { AuthProvider } from './context/AuthContext';
 import App from './App.jsx';
 import './utils/logger'; // registers window.onerror + sendBeacon flush
 
-createRoot(document.getElementById('root')).render(
+createRoot(document.getElementById('root')!).render(
   <BrowserRouter>
     <ThemeProvider theme={theme}>
       <CssBaseline />

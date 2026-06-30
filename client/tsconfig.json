@@ -3,7 +3,7 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": ["vite/client", "@testing-library/jest-dom"]
   },
   // Leaf-up migration: only migrated TypeScript modules are type-checked, added
   // file-by-file as they convert. JavaScript keeps building untouched via Vite.
@@ -49,6 +49,17 @@
     "src/hooks/useLobbyMedia.ts",
     "src/hooks/usePictureInPicture.ts",
     "src/hooks/useAudioLevel.ts",
+    "src/App.tsx",
+    "src/main.tsx",
+    "src/context/AuthContext.tsx",
+    "src/components/CallNotifications.tsx",
+    "src/components/ErrorBoundary.tsx",
+    "src/components/ProtectedRoute.tsx",
+    "src/components/RoomGuard.tsx",
+    "src/components/RoomGuard.test.tsx",
+    "src/components/SpaceCanvas.tsx",
+    "src/components/TranscriptPanel.tsx",
+    "src/components/BrandMark.test.tsx",
     "src/theme/theme.ts"
   ]
 }
