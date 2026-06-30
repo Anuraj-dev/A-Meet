@@ -10,6 +10,7 @@
   // As `src/` finishes migrating, this can collapse to a "src" glob.
   "include": [
     "typecheck",
+    "src/utils/capture-screenshot.ts",
     "src/utils/peer-color.ts",
     "src/utils/room-entry.ts",
     "src/utils/transcript.ts",
