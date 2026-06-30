@@ -9,8 +9,8 @@ map for that migration.
 The root `package.json` declares npm **workspaces**:
 
 ```
-client/   — Vite + React app (JavaScript today, .ts/.tsx added incrementally)
-server/   — Express + Socket.io + mediasoup (JavaScript today)
+client/   — Vite + React app (.ts/.tsx added incrementally)
+server/   — Express + Socket.io + mediasoup (TypeScript)
 shared/   — @a-meet/contracts: Socket event + REST DTO types (TypeScript)
 e2e/      — Playwright harness
 ```
@@ -23,15 +23,14 @@ including `@a-meet/contracts`.
 `shared/` publishes `@a-meet/contracts` — the single source of truth for shapes
 that cross the client/server boundary:
 
-- `HandRaisedPayload` + the `SocketEvent` name map — a representative Socket event.
+- `ClientToServerEvents` + `ServerToClientEvents` — typed Socket.io event maps.
+- `SfuRequestMap` — payload and acknowledgement types for SFU request/response signaling.
 - `RoomDto` — a representative REST response shape.
 
-Both ends type-check against these exports today via the
-`client/typecheck` and `server/typecheck` sample modules. The package is
-TypeScript-source only for now (no build step); it is consumed purely for types
-through the `paths` mapping in `tsconfig.base.json`. When the first runtime
-JavaScript module needs to import it, add a `tsc` build that emits to `dist/`
-and point `exports`/`main` at the compiled output.
+The server consumes the hand-raise payload contract, while the client socket and
+SFU request wrapper consume the event maps directly. The package remains
+TypeScript-source only because every current import is type-only and is erased by
+the compiler/loader; runtime constants still require an emitted package build.
 
 ## Type-checking
 
@@ -47,9 +46,16 @@ npm run typecheck:server
 ```
 
 `checkJs` is **off**: existing `.js`/`.jsx` files are not type-checked yet, so the
-gate stays green while the codebase is still mostly JavaScript. Only files listed
-in each package's `tsconfig.json` `include` are checked — today that is just the
-`typecheck/` sample module.
+gate stays green while client modules are still mostly JavaScript. The server
+includes all of `server/src`; the client includes migrated files explicitly.
+
+## Current status
+
+- Server: all `server/src` modules are strict TypeScript and run through `tsx`.
+- Client: `utils/peer-color.ts`, `services/socket.ts`, and
+  `services/mediasoup-signal.ts` are strict TypeScript.
+- Shared: SFU request/ack contracts are consumed by real server and client modules.
+- Remaining client order: utilities -> services -> hooks -> components -> pages.
 
 ## How to migrate a module (leaf-up)
 
