@@ -42,7 +42,7 @@ export default defineConfig({
   //  2. the built client served by `vite preview`, built to talk to that API.
   webServer: [
     {
-      command: 'node server-launcher.js',
+      command: 'node --import tsx server-launcher.js',
       url: `${SERVER_URL}/api/health`,
       reuseExistingServer: !CI,
       timeout: 120_000,

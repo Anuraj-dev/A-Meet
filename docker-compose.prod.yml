@@ -27,8 +27,8 @@ services:
     # build: is kept for local/manual builds (`up -d --build`); production pulls
     # the prebuilt image and never compiles on the instance.
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     container_name: a-meet-server
     # Host networking is required for mediasoup: the WebRtcTransport binds a wide
     # UDP/TCP RTC port range (MEDIASOUP_MIN_PORT..MAX_PORT) that browsers connect

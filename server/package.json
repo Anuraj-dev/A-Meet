@@ -4,8 +4,8 @@
   "description": "A-Meet server — Express + Mongoose + Passport + Socket.io",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx watch src/server.js",
-    "start": "tsx src/server.js",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",

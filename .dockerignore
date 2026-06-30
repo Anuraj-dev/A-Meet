@@ -1,0 +1,15 @@
+# The server image only needs workspace manifests plus server/shared sources.
+**
+!package.json
+!package-lock.json
+!server/
+server/**
+!server/package.json
+!server/Dockerfile
+!server/src/
+!server/src/**
+!shared/
+shared/**
+!shared/package.json
+!shared/src/
+!shared/src/**
