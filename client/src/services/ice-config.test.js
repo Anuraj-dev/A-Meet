@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // ice-config reads `import.meta.env` at module-eval time, so each scenario stubs
 // the env and re-imports the module fresh.
 async function loadIce() {
-  return import('./ice-config.js');
+  return import('./ice-config');
 }
 
 beforeEach(() => {

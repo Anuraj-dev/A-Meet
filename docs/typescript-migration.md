@@ -52,8 +52,9 @@ includes all of `server/src`; the client includes migrated files explicitly.
 ## Current status
 
 - Server: all `server/src` modules are strict TypeScript and run through `tsx`.
-- Client: `utils/peer-color.ts`, `services/socket.ts`, and
-  `services/mediasoup-signal.ts` are strict TypeScript.
+- Client: `utils/peer-color.ts`, `utils/pending-producers.ts`,
+  `services/socket.ts`, `services/mediasoup-signal.ts`, and
+  `services/ice-config.ts` are strict TypeScript.
 - Shared: SFU request/ack contracts are consumed by real server and client modules.
 - Remaining client order: utilities -> services -> hooks -> components -> pages.
 
