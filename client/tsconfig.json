@@ -25,6 +25,7 @@
     "src/utils/calendar-invite.ts",
     "src/utils/format-time.ts",
     "src/utils/logger.ts",
+    "src/utils/logger.test.ts",
     "src/api/axios.ts",
     "src/api/meetings.ts",
     "src/services/socket.ts",
