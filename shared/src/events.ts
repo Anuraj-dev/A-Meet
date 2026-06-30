@@ -38,3 +38,8 @@ export interface SfuHandRaiseUpdatePayload {
   /** `true` when the hand was raised, `false` when lowered. */
   raised: boolean;
 }
+
+export interface ServerToClientEvents {
+  [SocketEvent.HandRaised]: (payload: HandRaisedPayload) => void;
+  [SocketEvent.SfuHandRaiseUpdate]: (payload: SfuHandRaiseUpdatePayload) => void;
+}

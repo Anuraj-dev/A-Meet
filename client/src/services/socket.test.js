@@ -18,7 +18,7 @@ describe('services/socket', () => {
   it('constructs the client with the env server URL, credentials on, and autoConnect off', async () => {
     vi.stubEnv('VITE_SERVER_URL', 'http://localhost:9999');
 
-    const { default: socket } = await import('./socket.js');
+    const { default: socket } = await import('./socket');
 
     expect(ioMock).toHaveBeenCalledTimes(1);
     expect(ioMock).toHaveBeenCalledWith('http://localhost:9999', {

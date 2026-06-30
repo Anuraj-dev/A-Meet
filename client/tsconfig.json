@@ -3,10 +3,15 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": []
+    "types": ["vite/client"]
   },
   // Leaf-up migration: only migrated TypeScript modules are type-checked, added
   // file-by-file as they convert. JavaScript keeps building untouched via Vite.
   // As `src/` finishes migrating, this can collapse to a "src" glob.
-  "include": ["typecheck", "src/utils/peer-color.ts"]
+  "include": [
+    "typecheck",
+    "src/utils/peer-color.ts",
+    "src/services/socket.ts",
+    "src/services/mediasoup-signal.ts"
+  ]
 }
