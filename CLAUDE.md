@@ -37,6 +37,11 @@ NEVER add any Claude / Anthropic / AI attribution anywhere:
 - **Naming:** files `kebab-case`, React components `PascalCase.jsx`, Mongoose models `PascalCase` singular.
 - **Commits:** only when Anuraj explicitly asks.
 
+## Testing & TDD
+Strict TDD (red → green → refactor) for all new code and bug fixes, and tests assert
+**behavior, not implementation**. Full rules + how to run the gates locally
+(`npm run verify`) are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Models
 Opus for architecture / new concepts (M2 WebRTC, M4 mediasoup) / hard bugs / security review.
 Sonnet for routine coding. Haiku for trivial edits.
