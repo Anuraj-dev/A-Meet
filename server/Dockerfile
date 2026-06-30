@@ -46,7 +46,10 @@ USER node
 # networking at run time, so it is not (and cannot usefully be) EXPOSEd here.
 EXPOSE 5000
 
-CMD ["node", "src/server.js"]
+# Run through the tsx loader: the server sources are TypeScript (with some .js
+# still mid-migration) and tsx strips types at load time, so the image needs no
+# separate compile step. tsx ships as a runtime dependency (kept by --omit=dev).
+CMD ["node", "--import", "tsx", "src/server.ts"]
 
 # ---- smoke stage: exercise the actual runtime so a bad runtime fails the build ----
 # Build with `docker build --target smoke ...` (see CI). This spawns a real

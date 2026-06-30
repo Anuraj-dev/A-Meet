@@ -2,10 +2,10 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022"],
-    "types": []
+    "types": ["node"]
   },
-  // Leaf-up migration: today only the contract-check module is type-checked.
-  // As `src/` modules are converted to TypeScript, add "src" here so the
-  // strict checker covers them too. JavaScript keeps running untouched via Node.
-  "include": ["typecheck"]
+  // Leaf-up migration: migrated .ts modules are strict-checked; un-migrated .js
+  // are pulled in for resolution but not checked (checkJs:false). The tsx loader
+  // runs both at runtime. As `src/` finishes migrating this stays a "src" glob.
+  "include": ["src", "typecheck"]
 }
