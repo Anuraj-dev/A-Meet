@@ -1,10 +1,13 @@
-import { Component } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Box, Button, Paper, Typography } from '@mui/material';
 import { Error as ErrorOutlineIcon } from '@mui/icons-material';
 import { appLogger } from '../utils/logger';
 
-export default class ErrorBoundary extends Component {
-  constructor(props) {
+interface ErrorBoundaryProps { children: ReactNode }
+interface ErrorBoundaryState { hasError: boolean }
+
+export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
   }
@@ -13,7 +16,7 @@ export default class ErrorBoundary extends Component {
     return { hasError: true };
   }
 
-  componentDidCatch(error, info) {
+  componentDidCatch(error: Error, info: ErrorInfo) {
     appLogger.error('React render error', {
       error: error.message,
       stack: error.stack?.slice(0, 800),

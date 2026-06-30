@@ -5,13 +5,28 @@ import {
   InfoOutlined as InfoIcon,
 } from '@mui/icons-material';
 
+interface NotificationNote {
+  id: string | number;
+  kind?: 'chat' | 'event';
+  variant?: 'join' | 'leave' | 'info';
+  text?: string;
+  name?: string;
+  avatar?: string;
+}
+
+interface CallNotificationsProps {
+  notes: NotificationNote[];
+  onOpenChat: () => void;
+  onDismiss: (id: string | number) => void;
+}
+
 // Bottom-left transient overlay (like Google Meet):
 //  • event flashes — "<name> joined" / "<name> left", and short info toasts
 //  • chat previews — avatar + name + message when the chat panel is closed
 // Notes auto-dismiss on a timer (managed by the parent); chat previews open
 // the chat when clicked.
 
-function EventNote({ note }) {
+function EventNote({ note }: { note: NotificationNote }) {
   const label = note.text ?? `${note.name} ${note.variant === 'leave' ? 'left' : 'joined'}`;
   const Icon = note.variant === 'leave' ? LogoutIcon : note.variant === 'info' ? InfoIcon : LoginIcon;
   return (
@@ -49,7 +64,7 @@ function EventNote({ note }) {
   );
 }
 
-function ChatNote({ note, onOpen }) {
+function ChatNote({ note, onOpen }: { note: NotificationNote; onOpen: () => void }) {
   return (
     <Box
       onClick={onOpen}
@@ -106,7 +121,7 @@ function ChatNote({ note, onOpen }) {
   );
 }
 
-export default function CallNotifications({ notes, onOpenChat, onDismiss }) {
+export default function CallNotifications({ notes, onOpenChat, onDismiss }: CallNotificationsProps) {
   if (!notes?.length) return null;
   return (
     <Box

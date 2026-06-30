@@ -3,13 +3,13 @@ import { Box } from '@mui/material';
 import * as THREE from 'three';
 
 export default function SpaceCanvas() {
-  const canvasRef = useRef(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    let rafId;
+    let rafId = 0;
     let disposed = false;
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
@@ -43,7 +43,7 @@ export default function SpaceCanvas() {
     scene.add(stars);
 
     // ── Bokeh dust — large near-invisible blobs for depth ─────────────
-    const bokehSeed = [[-12, 6, -20], [14, -8, -25], [0, 14, -30]];
+    const bokehSeed: Array<[number, number, number]> = [[-12, 6, -20], [14, -8, -25], [0, 14, -30]];
     const bokehPositions = new Float32Array(9);
     bokehSeed.forEach(([x, y, z], i) => {
       bokehPositions[i * 3] = x; bokehPositions[i * 3 + 1] = y; bokehPositions[i * 3 + 2] = z;
@@ -57,7 +57,7 @@ export default function SpaceCanvas() {
     scene.add(bokeh);
 
     // ── Polyhedra — near-black, single faint navy emissive ──────────────
-    const polyDefs = [
+    const polyDefs: Array<{ geo: THREE.BufferGeometry; pos: [number, number, number]; rx: number; ry: number }> = [
       { geo: new THREE.IcosahedronGeometry(0.55, 0), pos: [-4.5, 1.8, -3.5], rx: 0.0003, ry: 0.0007 },
       { geo: new THREE.OctahedronGeometry(0.45, 0),  pos: [4.2, -1.6, -4.0], rx: 0.0006, ry: 0.0004 },
       { geo: new THREE.TetrahedronGeometry(0.4, 0),  pos: [1.5, 3.2, -5.0],  rx: 0.0004, ry: 0.0009 },
@@ -76,7 +76,7 @@ export default function SpaceCanvas() {
     // ── Constellation nodes & links ──────────────────────────────────────
     const NODE_COUNT = 70;
     const nodePositions = new Float32Array(NODE_COUNT * 3);
-    const nodeData = [];
+    const nodeData: Array<[number, number, number]> = [];
     for (let i = 0; i < NODE_COUNT; i++) {
       const x = (Math.random() - 0.5) * 18;
       const y = (Math.random() - 0.5) * 12;
@@ -92,7 +92,7 @@ export default function SpaceCanvas() {
     scene.add(new THREE.Points(nodeGeo, nodeMat));
 
     // Build links where distance < threshold
-    const linkVerts = [];
+    const linkVerts: number[] = [];
     const LINK_DIST = 6.2;
     for (let i = 0; i < NODE_COUNT; i++) {
       for (let j = i + 1; j < NODE_COUNT; j++) {
@@ -119,7 +119,7 @@ export default function SpaceCanvas() {
 
     // ── Mouse parallax ───────────────────────────────────────────────────
     const mouse = { x: 0, y: 0 };
-    const onPointer = (e) => {
+    const onPointer = (e: MouseEvent) => {
       mouse.x = (e.clientX / window.innerWidth - 0.5) * 2;
       mouse.y = (e.clientY / window.innerHeight - 0.5) * 2;
     };

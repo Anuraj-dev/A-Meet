@@ -1,15 +1,24 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import api from '../api/axios';
+import type { AuthMeResponse, AuthUserDto } from '@a-meet/contracts';
 
-const AuthContext = createContext(null);
+interface AuthContextValue {
+  user: AuthUserDto | null;
+  loading: boolean;
+  login: (returnTo?: unknown) => void;
+  logout: () => Promise<void>;
+  refresh: () => Promise<void>;
+}
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<AuthUserDto | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function refresh() {
     try {
-      const { data } = await api.get('/auth/me');
+      const { data } = await api.get<AuthMeResponse>('/auth/me');
       // /auth/me responds `{ user: {...} }`; store the flat user so consumers
       // can read user.name / user.avatar / user.id directly.
       setUser(data.user ?? null);
@@ -26,7 +35,7 @@ export function AuthProvider({ children }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh(); }, []);
 
-  function login(returnTo) {
+  function login(returnTo?: unknown) {
     const base = import.meta.env.VITE_SERVER_URL ?? '';
     // Send the post-login destination along so the server can land us back on
     // the meeting invite link. Falls back to a deep link a ProtectedRoute
