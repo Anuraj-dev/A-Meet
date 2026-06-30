@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getPeerColor, PEER_COLORS } from './peer-color.js';
+import { getPeerColor, PEER_COLORS } from './peer-color';
 
 describe('getPeerColor', () => {
   it('falls back to the first color for empty / missing names', () => {

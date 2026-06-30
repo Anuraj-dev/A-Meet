@@ -13,15 +13,15 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.js'],
-    include: ['src/**/*.test.{js,jsx}'],
+    include: ['src/**/*.test.{js,jsx,ts,tsx}'],
     css: false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary'],
       // Measure application source only; tests, the test harness, and the app
       // entrypoint don't represent testable behavior and would skew the number.
-      include: ['src/**/*.{js,jsx}'],
-      exclude: ['src/**/*.test.{js,jsx}', 'src/test/**', 'src/main.jsx'],
+      include: ['src/**/*.{js,jsx,ts,tsx}'],
+      exclude: ['src/**/*.test.{js,jsx,ts,tsx}', 'src/test/**', 'src/main.jsx'],
       // Coverage floor — the non-decreasing ratchet. `vitest run --coverage`
       // fails when any metric drops below these numbers. They hold today's
       // measured coverage; RAISING them is an intentional, reviewed commit —
