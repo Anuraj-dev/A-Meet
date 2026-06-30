@@ -1,6 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import socket from '../services/socket';
 import { createPeerConnection } from '../services/webrtc';
+import type {
+  WebRtcInboundCandidatePayload,
+  WebRtcInboundRelayPayload,
+  WebRtcMediaStatePayload,
+  SessionDescriptionDto,
+} from '@a-meet/contracts';
+
+interface MediaDevicesOptions {
+  videoDeviceId?: string;
+  audioDeviceId?: string;
+  startVideoOn?: boolean;
+  startAudioOn?: boolean;
+}
+
+interface PeerMediaState {
+  video: boolean;
+  audio: boolean;
+  name?: string;
+  avatar?: string;
+}
+
+const errorName = (error: unknown): string => error instanceof Error ? error.name : String(error);
 
 // Orchestrates a hand-built WebRTC mesh (1:1 for M2/M3, but per-peer so it
 // generalises). Returns local media + controls plus a map of remote streams
@@ -13,25 +35,25 @@ import { createPeerConnection } from '../services/webrtc';
 // Renegotiation (M3.3): each PC has an onnegotiationneeded handler that fires
 // when addTrack is called (e.g., user turns camera on after joining without one).
 // It only acts when signalingState is 'stable' to avoid offer glare.
-export function useWebRTC(roomId, devices = {}) {
-  const [localStream, setLocalStream] = useState(null);
-  const [remoteStreams, setRemoteStreams] = useState({}); // socketId → MediaStream
-  const [peerStates, setPeerStates] = useState({}); // socketId → { video, audio, name, avatar }
-  const [peerConnectionStates, setPeerConnectionStates] = useState({}); // socketId → RTCPeerConnectionState
+export function useWebRTC(roomId: string, devices: MediaDevicesOptions = {}) {
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({}); // socketId → MediaStream
+  const [peerStates, setPeerStates] = useState<Record<string, PeerMediaState>>({}); // socketId → { video, audio, name, avatar }
+  const [peerConnectionStates, setPeerConnectionStates] = useState<Record<string, RTCPeerConnectionState>>({}); // socketId → RTCPeerConnectionState
   const [localVideoOn, setLocalVideoOn] = useState(false);
   const [localAudioOn, setLocalAudioOn] = useState(false);
   const [hasCamera, setHasCamera] = useState(false);
   const [hasMic, setHasMic] = useState(false);
 
-  const localStreamRef = useRef(null);
-  const pcsRef = useRef(new Map()); // socketId → RTCPeerConnection
-  const pendingCandidatesRef = useRef(new Map()); // socketId → RTCIceCandidateInit[]
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const pcsRef = useRef(new Map<string, RTCPeerConnection>()); // socketId → RTCPeerConnection
+  const pendingCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>()); // socketId → RTCIceCandidateInit[]
   const mediaStateRef = useRef({ video: false, audio: false });
   // Keep device IDs accessible inside async callbacks without stale closures.
   const devicesRef = useRef(devices);
   useEffect(() => { devicesRef.current = devices; }, [devices]);
 
-  const sendMediaState = useCallback((to) => {
+  const sendMediaState = useCallback((to?: string) => {
     socket.emit('webrtc-media-state', {
       to,
       video: mediaStateRef.current.video,
@@ -68,16 +90,17 @@ export function useWebRTC(roomId, devices = {}) {
         .then((newStream) => {
           const track = newStream.getVideoTracks()[0];
           if (!track || !localStreamRef.current) return;
-          localStreamRef.current.addTrack(track);
+          const stream = localStreamRef.current;
+          stream.addTrack(track);
           // Rebuild state stream so React sees the new track.
-          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-          pcsRef.current.forEach((pc) => pc.addTrack(track, localStreamRef.current));
+          setLocalStream(new MediaStream(stream.getTracks()));
+          pcsRef.current.forEach((pc) => pc.addTrack(track, stream));
           mediaStateRef.current.video = true;
           setLocalVideoOn(true);
           setHasCamera(true);
           sendMediaState();
         })
-        .catch((err) => console.warn('[webrtc] camera still unavailable:', err.name));
+        .catch((err: unknown) => console.warn('[webrtc] camera still unavailable:', errorName(err)));
     }
   }, [sendMediaState]);
 
@@ -86,14 +109,14 @@ export function useWebRTC(roomId, devices = {}) {
     const pcs = pcsRef.current;
     const pendingCandidates = pendingCandidatesRef.current;
 
-    function getOrCreatePeer(peerId) {
+    function getOrCreatePeer(peerId: string): RTCPeerConnection {
       const existing = pcs.get(peerId);
       if (existing) return existing;
 
       const pc = createPeerConnection();
 
       localStreamRef.current?.getTracks().forEach((track) => {
-        pc.addTrack(track, localStreamRef.current);
+        pc.addTrack(track, localStreamRef.current!);
       });
 
       pc.onicecandidate = (e) => {
@@ -115,7 +138,7 @@ export function useWebRTC(roomId, devices = {}) {
           const offer = await pc.createOffer();
           if (pc.signalingState !== 'stable') return;
           await pc.setLocalDescription(offer);
-          socket.emit('webrtc-offer', { to: peerId, description: pc.localDescription });
+          socket.emit('webrtc-offer', { to: peerId, description: pc.localDescription! });
         } catch (err) {
           console.warn('[webrtc] renegotiation offer failed:', err);
         }
@@ -130,7 +153,7 @@ export function useWebRTC(roomId, devices = {}) {
       return pc;
     }
 
-    async function flushCandidates(peerId, pc) {
+    async function flushCandidates(peerId: string, pc: RTCPeerConnection) {
       const buffered = pendingCandidates.get(peerId);
       if (!buffered) return;
       for (const candidate of buffered) {
@@ -143,7 +166,7 @@ export function useWebRTC(roomId, devices = {}) {
       pendingCandidates.delete(peerId);
     }
 
-    function closePeer(peerId) {
+    function closePeer(peerId: string) {
       const pc = pcs.get(peerId);
       if (pc) {
         pc.onicecandidate = null;
@@ -174,34 +197,34 @@ export function useWebRTC(roomId, devices = {}) {
       });
     }
 
-    const onPeers = async (peers) => {
+    const onPeers = async (peers: string[]) => {
       for (const peerId of peers) {
         const pc = getOrCreatePeer(peerId);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        socket.emit('webrtc-offer', { to: peerId, description: pc.localDescription });
+        socket.emit('webrtc-offer', { to: peerId, description: pc.localDescription! });
         sendMediaState(peerId);
       }
     };
 
-    const onOffer = async ({ from, description }) => {
+    const onOffer = async ({ from, description }: WebRtcInboundRelayPayload<SessionDescriptionDto>) => {
       const pc = getOrCreatePeer(from);
       await pc.setRemoteDescription(description);
       await flushCandidates(from, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      socket.emit('webrtc-answer', { to: from, description: pc.localDescription });
+      socket.emit('webrtc-answer', { to: from, description: pc.localDescription! });
       sendMediaState(from);
     };
 
-    const onAnswer = async ({ from, description }) => {
+    const onAnswer = async ({ from, description }: WebRtcInboundRelayPayload<SessionDescriptionDto>) => {
       const pc = pcs.get(from);
       if (!pc) return;
       await pc.setRemoteDescription(description);
       await flushCandidates(from, pc);
     };
 
-    const onIceCandidate = async ({ from, candidate }) => {
+    const onIceCandidate = async ({ from, candidate }: WebRtcInboundCandidatePayload) => {
       const pc = pcs.get(from);
       if (pc?.remoteDescription?.type) {
         try {
@@ -216,14 +239,14 @@ export function useWebRTC(roomId, devices = {}) {
       }
     };
 
-    const onMediaState = ({ socketId, user, video, audio }) => {
+    const onMediaState = ({ socketId, user, video, audio }: Required<Pick<WebRtcMediaStatePayload, 'socketId' | 'video' | 'audio'>> & Pick<WebRtcMediaStatePayload, 'user'>) => {
       setPeerStates((prev) => ({
         ...prev,
         [socketId]: { video, audio, name: user?.name, avatar: user?.avatar },
       }));
     };
 
-    const onPeerLeft = ({ socketId }) => closePeer(socketId);
+    const onPeerLeft = ({ socketId }: { socketId: string }) => closePeer(socketId);
 
     async function init() {
       const { videoDeviceId, audioDeviceId, startVideoOn = true, startAudioOn = true } = devicesRef.current;
@@ -238,8 +261,8 @@ export function useWebRTC(roomId, devices = {}) {
           t.enabled = startAudioOn;
           stream.addTrack(t);
         });
-      } catch (err) {
-        console.warn('[webrtc] microphone unavailable:', err.name);
+      } catch (err: unknown) {
+        console.warn('[webrtc] microphone unavailable:', errorName(err));
       }
 
       try {
@@ -249,8 +272,8 @@ export function useWebRTC(roomId, devices = {}) {
           t.enabled = startVideoOn;
           stream.addTrack(t);
         });
-      } catch (err) {
-        console.warn('[webrtc] camera unavailable:', err.name);
+      } catch (err: unknown) {
+        console.warn('[webrtc] camera unavailable:', errorName(err));
       }
 
       if (cancelled) {

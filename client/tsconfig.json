@@ -33,6 +33,13 @@
     "src/services/ice-config.ts",
     "src/services/sounds.ts",
     "src/services/webrtc.ts",
+    "src/hooks/useMediasoup.ts",
+    "src/hooks/useMediasoup.test.tsx",
+    "src/hooks/useWebRTC.ts",
+    "src/hooks/useScreenShare.ts",
+    "src/hooks/useScreenShare.test.tsx",
+    "src/hooks/usePcmCapture.ts",
+    "src/hooks/usePcmCapture.test.tsx",
     "src/theme/theme.ts"
   ]
 }

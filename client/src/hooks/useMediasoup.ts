@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Device } from 'mediasoup-client';
+import type { Consumer, MediaKind, Producer, Transport } from 'mediasoup-client/types';
+import type {
+  SfuActiveSpeakerPayload,
+  SfuConsumerClosedPayload,
+  SfuHandRaiseUpdatePayload,
+  SfuPeerLeftPayload,
+  SfuProducerDescriptor,
+  SfuProducerStatePayload,
+} from '@a-meet/contracts';
 import socket from '../services/socket';
 import { request } from '../services/mediasoup-signal';
 import { ICE_SERVERS, ICE_TRANSPORT_POLICY } from '../services/ice-config';
@@ -23,43 +32,97 @@ const CAM_VIDEO_ENCODINGS = [
 ];
 const CAM_VIDEO_CODEC_OPTIONS = { videoGoogleStartBitrate: 1000 };
 
-export function useMediasoup(roomId, devices = {}) {
-  const [localStream, setLocalStream] = useState(null);
-  const [remoteStreams, setRemoteStreams] = useState({});
-  const [remoteScreens, setRemoteScreens] = useState({});
-  const [peerStates, setPeerStates] = useState({});
-  const [peerConnectionStates, setPeerConnectionStates] = useState({});
+interface MediaDevicesOptions {
+  videoDeviceId?: string;
+  audioDeviceId?: string;
+  startVideoOn?: boolean;
+  startAudioOn?: boolean;
+}
+
+interface PeerState {
+  video: boolean;
+  audio: boolean;
+  name?: string;
+  avatar?: string;
+  handRaised?: boolean;
+}
+
+type ProducerSource = 'camera' | 'screen';
+type LoggerLevel = keyof typeof appLogger;
+
+interface ProducerInfo {
+  socketId: string;
+  kind: MediaKind;
+  source: ProducerSource;
+}
+
+interface ConsumerEntry extends ProducerInfo {
+  consumer: Consumer;
+  producerId: string;
+}
+
+interface RtcConsumerStat {
+  id: string;
+  kind: MediaKind;
+  source: ProducerSource;
+  kbps: number;
+  packetsLost: number;
+  jitter: number | null;
+  fec: number | null;
+}
+
+interface RtcStatsState {
+  transport: string;
+  consumers: RtcConsumerStat[];
+}
+
+interface InboundRtpStats extends RTCStats {
+  bytesReceived: number;
+  packetsLost?: number;
+  jitter?: number;
+  fecPacketsReceived?: number;
+}
+
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const errorName = (error: unknown): string => error instanceof Error ? error.name : String(error);
+
+export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) {
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [remoteScreens, setRemoteScreens] = useState<Record<string, MediaStream>>({});
+  const [peerStates, setPeerStates] = useState<Record<string, PeerState>>({});
+  const [peerConnectionStates, setPeerConnectionStates] = useState<Record<string, string | undefined>>({});
   const [localVideoOn, setLocalVideoOn] = useState(false);
   const [localAudioOn, setLocalAudioOn] = useState(false);
   const [hasCamera, setHasCamera] = useState(false);
   const [hasMic, setHasMic] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [localScreenStream, setLocalScreenStream] = useState(null);
-  const [localScreenSurface, setLocalScreenSurface] = useState(null);
+  const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null);
+  const [localScreenSurface, setLocalScreenSurface] = useState<string | null>(null);
   const [micGain, setMicGainState] = useState(1);
   const [handRaised, setHandRaised] = useState(false);
-  const [activeSpeaker, setActiveSpeaker] = useState(null);
+  const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [permissionDenied, setPermissionDenied] = useState(false);
-  const [rtcStats, setRtcStats] = useState(null); // dev-only diagnostics
+  const [rtcStats, setRtcStats] = useState<RtcStatsState | null>(null); // dev-only diagnostics
 
-  const deviceRef = useRef(null);
-  const sendTransportRef = useRef(null);
-  const recvTransportRef = useRef(null);
-  const localStreamRef = useRef(null);
-  const producersRef = useRef(new Map());
-  const consumersRef = useRef(new Map());
-  const peerStreamsRef = useRef(new Map());
-  const screenStreamsRef = useRef(new Map());
-  const producerInfoRef = useRef(new Map());
-  const pendingProducersRef = useRef(new Map());
-  const screenProducerRef = useRef(null);
-  const localScreenStreamRef = useRef(null);
+  const deviceRef = useRef<Device | null>(null);
+  const sendTransportRef = useRef<Transport | null>(null);
+  const recvTransportRef = useRef<Transport | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const producersRef = useRef(new Map<MediaKind, Producer>());
+  const consumersRef = useRef(new Map<string, ConsumerEntry>());
+  const peerStreamsRef = useRef(new Map<string, MediaStream>());
+  const screenStreamsRef = useRef(new Map<string, MediaStream>());
+  const producerInfoRef = useRef(new Map<string, ProducerInfo>());
+  const pendingProducersRef = useRef(new Map<string, SfuProducerDescriptor>());
+  const screenProducerRef = useRef<Producer | null>(null);
+  const localScreenStreamRef = useRef<MediaStream | null>(null);
   const handRaisedRef = useRef(false);
-  const audioCtxRef = useRef(null);
-  const gainNodeRef = useRef(null);
-  const gainSrcRef = useRef(null);
-  const gainDestRef = useRef(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const gainSrcRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const gainDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const micGainRef = useRef(1);        // desired mic gain (persists across reconnects)
   const devicesRef = useRef(devices);
   // These are the user's requested states, independent of whether mediasoup
@@ -71,7 +134,7 @@ export function useMediasoup(roomId, devices = {}) {
   const initializedRef = useRef(false);
   useEffect(() => { devicesRef.current = devices; }, [devices]);
 
-  const logSfuStage = useCallback((stage, data = {}, level = 'info') => {
+  const logSfuStage = useCallback((stage: string, data: Record<string, unknown> = {}, level: LoggerLevel = 'info') => {
     const fn = appLogger[level] ?? appLogger.info;
     fn('sfu-stage', { roomId, stage, ...data });
   }, [roomId]);
@@ -82,7 +145,7 @@ export function useMediasoup(roomId, devices = {}) {
     localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = next; });
     // Update the local UI immediately. If negotiation is still in flight,
     // setupSfu reads the ref and creates the producer in this requested state.
-    setLocalAudioOn(next && localStreamRef.current?.getAudioTracks().length > 0);
+    setLocalAudioOn(next && Boolean(localStreamRef.current?.getAudioTracks().length));
     const producer = producersRef.current.get('audio');
     if (!producer) return;
     try {
@@ -93,8 +156,8 @@ export function useMediasoup(roomId, devices = {}) {
         producer.pause();
         await request('sfu-pause-producer', { producerId: producer.id });
       }
-    } catch (err) {
-      if (import.meta.env.DEV) console.warn('[sfu] toggle audio failed:', err.message);
+    } catch (err: unknown) {
+      if (import.meta.env.DEV) console.warn('[sfu] toggle audio failed:', errorMessage(err));
     }
   }, []);
 
@@ -102,7 +165,7 @@ export function useMediasoup(roomId, devices = {}) {
     const next = !desiredVideoOnRef.current;
     desiredVideoOnRef.current = next;
     localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = next; });
-    setLocalVideoOn(next && localStreamRef.current?.getVideoTracks().length > 0);
+    setLocalVideoOn(next && Boolean(localStreamRef.current?.getVideoTracks().length));
     const producer = producersRef.current.get('video');
     if (producer) {
       try {
@@ -113,8 +176,8 @@ export function useMediasoup(roomId, devices = {}) {
           producer.pause();
           await request('sfu-pause-producer', { producerId: producer.id });
         }
-      } catch (err) {
-        if (import.meta.env.DEV) console.warn('[sfu] toggle video failed:', err.message);
+      } catch (err: unknown) {
+        if (import.meta.env.DEV) console.warn('[sfu] toggle video failed:', errorMessage(err));
       }
       return;
     }
@@ -143,8 +206,8 @@ export function useMediasoup(roomId, devices = {}) {
       newProducer.on('transportclose', () => producersRef.current.delete('video'));
       setLocalVideoOn(desiredVideoOnRef.current);
       setHasCamera(true);
-    } catch (err) {
-      if (import.meta.env.DEV) console.warn('[sfu] camera still unavailable:', err.name);
+    } catch (err: unknown) {
+      if (import.meta.env.DEV) console.warn('[sfu] camera still unavailable:', errorName(err));
     }
   }, []);
 
@@ -168,7 +231,10 @@ export function useMediasoup(roomId, devices = {}) {
     const sendTransport = sendTransportRef.current;
     if (!sendTransport) return;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: 'always' } as MediaTrackConstraints,
+        audio: false,
+      });
       const track = stream.getVideoTracks()[0];
       if (!track) { stream.getTracks().forEach((t) => t.stop()); return; }
       const producer = await sendTransport.produce({ track, appData: { source: 'screen' } });
@@ -179,9 +245,9 @@ export function useMediasoup(roomId, devices = {}) {
       setIsScreenSharing(true);
       track.addEventListener('ended', stopScreenShare, { once: true });
       producer.on('transportclose', stopScreenShare);
-    } catch (err) {
-      if (err.name !== 'NotAllowedError' && import.meta.env.DEV) {
-        console.warn('[sfu] screen share failed:', err.message);
+    } catch (err: unknown) {
+      if (errorName(err) !== 'NotAllowedError' && import.meta.env.DEV) {
+        console.warn('[sfu] screen share failed:', errorMessage(err));
       }
     }
   }, [stopScreenShare]);
@@ -190,7 +256,7 @@ export function useMediasoup(roomId, devices = {}) {
   // the GainNode is always in the signal chain (built in setupSfu before produce()).
   // Gain=1.0 is a transparent passthrough, so there is no quality penalty at 100%.
   // Slider drags only update gain.value — no replaceTrack, no async, no race.
-  const setMicGain = useCallback((value) => {
+  const setMicGain = useCallback((value: number) => {
     const clamped = Math.max(0, Math.min(2, value));
     micGainRef.current = clamped;
     setMicGainState(clamped);
@@ -224,7 +290,7 @@ export function useMediasoup(roomId, devices = {}) {
     const pendingProducers = pendingProducersRef.current;
     const producers = producersRef.current;
 
-    function dropPeer(socketId) {
+    function dropPeer(socketId: string) {
       setRemoteStreams((prev) => {
         if (!(socketId in prev)) return prev;
         const next = { ...prev }; delete next[socketId]; return next;
@@ -243,7 +309,14 @@ export function useMediasoup(roomId, devices = {}) {
       });
     }
 
-    async function consumeProducer({ producerId, socketId, user, kind, paused, appData }) {
+    async function consumeProducer({
+      producerId,
+      socketId,
+      user,
+      kind,
+      paused,
+      appData,
+    }: SfuProducerDescriptor) {
       const source = appData?.source === 'screen' ? 'screen' : 'camera';
       const recvTransport = recvTransportRef.current;
       const device = deviceRef.current;
@@ -321,24 +394,28 @@ export function useMediasoup(roomId, devices = {}) {
         } else {
           setPeerStates((prev) => {
             if (prev[socketId]?.name) return prev;
-            return { ...prev, [socketId]: { video: false, audio: false, ...prev[socketId], name: user?.name, avatar: user?.avatar } };
+            const current = prev[socketId];
+            const next = current
+              ? { ...current, name: user?.name, avatar: user?.avatar }
+              : { video: false, audio: false, name: user?.name, avatar: user?.avatar };
+            return { ...prev, [socketId]: next };
           });
         }
         setPeerConnectionStates((prev) => ({ ...prev, [socketId]: recvTransportRef.current?.connectionState }));
-      } catch (err) {
+      } catch (err: unknown) {
         producerInfo.delete(producerId);
         logSfuStage('consume-failed', {
           producerId,
           socketId,
           kind,
           source,
-          err: err.message,
+          err: errorMessage(err),
         }, 'error');
-        if (import.meta.env.DEV) console.warn('[sfu] consume failed:', err.message);
+        if (import.meta.env.DEV) console.warn('[sfu] consume failed:', errorMessage(err));
       }
     }
 
-    function closeConsumerById(consumerId) {
+    function closeConsumerById(consumerId: string) {
       const entry = consumers.get(consumerId);
       if (!entry) return;
       const { consumer, socketId, producerId, kind, source } = entry;
@@ -373,7 +450,7 @@ export function useMediasoup(roomId, devices = {}) {
       }
     }
 
-    function removePeer(socketId) {
+    function removePeer(socketId: string) {
       for (const [cid, entry] of consumers) {
         if (entry.socketId !== socketId) continue;
         try { entry.consumer.close(); } catch { /* gone */ }
@@ -386,10 +463,10 @@ export function useMediasoup(roomId, devices = {}) {
       dropPeer(socketId);
     }
 
-    const onNewProducer = (info) => consumeProducer(info);
-    const onConsumerClosed = ({ consumerId }) => closeConsumerById(consumerId);
-    const onPeerLeft = ({ socketId }) => removePeer(socketId);
-    const setPeerKind = (producerId, kindOn) => {
+    const onNewProducer = (info: SfuProducerDescriptor) => consumeProducer(info);
+    const onConsumerClosed = ({ consumerId }: SfuConsumerClosedPayload) => closeConsumerById(consumerId);
+    const onPeerLeft = ({ socketId }: SfuPeerLeftPayload) => removePeer(socketId);
+    const setPeerKind = (producerId: string, kindOn: boolean) => {
       const info = producerInfo.get(producerId);
       if (!info || info.source === 'screen') return;
       setPeerStates((prev) => {
@@ -400,19 +477,19 @@ export function useMediasoup(roomId, devices = {}) {
         return { ...prev, [info.socketId]: next };
       });
     };
-    const onProducerPaused = ({ producerId }) => setPeerKind(producerId, false);
-    const onProducerResumed = ({ producerId }) => setPeerKind(producerId, true);
-    const onHandRaiseUpdate = ({ socketId, raised }) => {
+    const onProducerPaused = ({ producerId }: SfuProducerStatePayload) => setPeerKind(producerId, false);
+    const onProducerResumed = ({ producerId }: SfuProducerStatePayload) => setPeerKind(producerId, true);
+    const onHandRaiseUpdate = ({ socketId, raised }: SfuHandRaiseUpdatePayload) => {
       setPeerStates((prev) => {
         if (!prev[socketId]) return prev;
         return { ...prev, [socketId]: { ...prev[socketId], handRaised: raised } };
       });
     };
-    const onActiveSpeaker = ({ socketId }) => setActiveSpeaker(socketId);
+    const onActiveSpeaker = ({ socketId }: SfuActiveSpeakerPayload) => setActiveSpeaker(socketId);
 
     // SFU signaling sequence — can be called on initial join and after reconnect.
     // Does NOT re-acquire media; expects `stream` to already be set in localStreamRef.
-    async function setupSfu(stream) {
+    async function setupSfu(stream: MediaStream) {
       if (cancelled) return;
       logSfuStage('setup-started', {
         hasAudioTrack: Boolean(stream?.getAudioTracks()[0]),
@@ -487,7 +564,7 @@ export function useMediasoup(roomId, devices = {}) {
         setPeerConnectionStates((prev) => {
           const ids = Object.keys(prev);
           if (ids.length === 0) return prev;
-          const next = {};
+          const next: Record<string, string> = {};
           for (const sid of ids) next[sid] = state;
           return next;
         });
@@ -503,19 +580,22 @@ export function useMediasoup(roomId, devices = {}) {
         // The user clicked Join to get here, so AudioContext.resume() succeeds.
         const trackSampleRate = audioTrack.getSettings().sampleRate || 48000;
         if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
-          audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContextClass) throw new Error('AudioContext is unavailable.');
+          audioCtxRef.current = new AudioContextClass({
             sampleRate: trackSampleRate,
             latencyHint: 'interactive',
           });
           appLogger.info('audioCtx created', { sampleRate: trackSampleRate, state: audioCtxRef.current.state });
         }
         const ctx = audioCtxRef.current;
+        if (!ctx) throw new Error('AudioContext initialization failed.');
         if (ctx.state !== 'running') {
           try {
             await ctx.resume();
             appLogger.info('audioCtx resumed', { state: ctx.state });
-          } catch (e) {
-            appLogger.warn('audioCtx resume failed', { err: e.message, state: ctx.state });
+          } catch (e: unknown) {
+            appLogger.warn('audioCtx resume failed', { err: errorMessage(e), state: ctx.state });
           }
         }
         const src = ctx.createMediaStreamSource(new MediaStream([audioTrack]));
@@ -601,15 +681,15 @@ export function useMediasoup(roomId, devices = {}) {
         };
         const s = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
         s.getAudioTracks().forEach((t) => stream.addTrack(t));
-      } catch (err) {
-        if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') deniedCount++;
+      } catch (err: unknown) {
+        if (errorName(err) === 'NotAllowedError' || errorName(err) === 'NotFoundError') deniedCount++;
       }
       try {
         const c = videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true;
         const s = await navigator.mediaDevices.getUserMedia({ video: c });
         s.getVideoTracks().forEach((t) => stream.addTrack(t));
-      } catch (err) {
-        if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') deniedCount++;
+      } catch (err: unknown) {
+        if (errorName(err) === 'NotAllowedError' || errorName(err) === 'NotFoundError') deniedCount++;
       }
 
       if (deniedCount === 2) setPermissionDenied(true);
@@ -648,10 +728,10 @@ export function useMediasoup(roomId, devices = {}) {
         initializedRef.current = true;
         appLogger.info('SFU init complete');
         logSfuStage('setup-complete');
-      } catch (err) {
-        appLogger.error('SFU init failed', { err: err.message });
-        logSfuStage('setup-failed', { err: err.message }, 'error');
-        if (!cancelled && import.meta.env.DEV) console.error('[sfu] init failed:', err.message);
+      } catch (err: unknown) {
+        appLogger.error('SFU init failed', { err: errorMessage(err) });
+        logSfuStage('setup-failed', { err: errorMessage(err) }, 'error');
+        if (!cancelled && import.meta.env.DEV) console.error('[sfu] init failed:', errorMessage(err));
       }
     }
 
@@ -682,10 +762,10 @@ export function useMediasoup(roomId, devices = {}) {
       try {
         await setupSfu(localStreamRef.current);
         logSfuStage('reconnect-complete');
-      } catch (err) {
-        appLogger.error('SFU reconnect failed', { err: err.message });
-        logSfuStage('reconnect-failed', { err: err.message }, 'error');
-        if (!cancelled && import.meta.env.DEV) console.error('[sfu] reconnect failed:', err.message);
+      } catch (err: unknown) {
+        appLogger.error('SFU reconnect failed', { err: errorMessage(err) });
+        logSfuStage('reconnect-failed', { err: errorMessage(err) }, 'error');
+        if (!cancelled && import.meta.env.DEV) console.error('[sfu] reconnect failed:', errorMessage(err));
       }
     };
 
@@ -752,15 +832,16 @@ export function useMediasoup(roomId, devices = {}) {
   // for "is audio actually flowing cleanly?" Tree-shaken out of prod builds.
   useEffect(() => {
     if (!import.meta.env.DEV) return undefined;
-    const prev = new Map(); // consumerId → { bytes, ts }
+    const prev = new Map<string, { bytes: number; ts: number }>(); // consumerId → { bytes, ts }
     const id = setInterval(async () => {
       const consumers = consumersRef.current;
-      const out = [];
+      const out: RtcConsumerStat[] = [];
       for (const [cid, entry] of consumers) {
         try {
           const report = await entry.consumer.getStats();
-          report.forEach((s) => {
-            if (s.type !== 'inbound-rtp') return;
+          report.forEach((stat: RTCStats) => {
+            if (stat.type !== 'inbound-rtp') return;
+            const s = stat as InboundRtpStats;
             const last = prev.get(cid);
             let kbps = 0;
             if (last && s.timestamp > last.ts) {

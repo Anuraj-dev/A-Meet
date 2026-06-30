@@ -5,3 +5,4 @@
 export * from './events';
 export * from './dto';
 export * from './sfu';
+export * from './webrtc';

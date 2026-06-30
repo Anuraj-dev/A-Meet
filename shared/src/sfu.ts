@@ -37,6 +37,23 @@ export interface SfuConsumeResponse {
   producerPaused: boolean;
 }
 
+export interface SfuProducerStatePayload {
+  producerId: string;
+  socketId: string;
+}
+
+export interface SfuConsumerClosedPayload {
+  consumerId: string;
+}
+
+export interface SfuPeerLeftPayload {
+  socketId: string;
+}
+
+export interface SfuActiveSpeakerPayload {
+  socketId: string | null;
+}
+
 export interface SfuRequestMap {
   'sfu-get-rtp-capabilities': {
     payload: { roomId: string };
@@ -102,4 +119,6 @@ export type ClientToServerEvents = {
     payload: SfuRequestPayload<E>,
     callback: SfuAckCallback<E>,
   ) => void;
-};
+} & {
+  'sfu-raise-hand': (payload: { raised: boolean }) => void;
+} & import('./webrtc').WebRtcClientToServerEvents;

@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { useScreenShare } from './useScreenShare';
+import { useScreenShare, type ScreenShareOptions } from './useScreenShare';
 
 // Characterization tests for the screen-share / presentation behaviour that used
 // to live inline in RoomPage. They pin down the observable contract so the
@@ -10,7 +10,7 @@ import { useScreenShare } from './useScreenShare';
 //   • pinned-share selection + its derived fallback when the list changes,
 //   • hasScreen / the infinity-mirror reveal lifecycle.
 
-const baseProps = {
+const baseProps: ScreenShareOptions = {
   remoteScreens: {},
   isScreenSharing: false,
   localScreenStream: null,
@@ -20,7 +20,7 @@ const baseProps = {
 };
 
 // A minimal MediaStream stand-in — the hook only ever passes streams through.
-const stream = (label) => ({ label });
+const stream = (label: string) => ({ label }) as unknown as MediaStream;
 
 describe('useScreenShare', () => {
   it('has no shares and no pinned share when nobody is presenting', () => {
@@ -102,11 +102,11 @@ describe('useScreenShare', () => {
   });
 
   it('derives the pin back to a fallback when the pinned share disappears', () => {
-    const { result, rerender } = renderHook((props) => useScreenShare(props), {
+    const { result, rerender } = renderHook((props: ScreenShareOptions) => useScreenShare(props), {
       initialProps: {
         ...baseProps,
         remoteScreens: { peer1: stream('r1'), peer2: stream('r2') },
-      },
+      } as ScreenShareOptions,
     });
 
     act(() => result.current.setPinnedShareKey('peer2'));
@@ -123,8 +123,8 @@ describe('useScreenShare', () => {
   });
 
   it('resets showScreenAnyway when the local share stops', () => {
-    const { result, rerender } = renderHook((props) => useScreenShare(props), {
-      initialProps: { ...baseProps, isScreenSharing: true, localScreenStream: stream('l') },
+    const { result, rerender } = renderHook((props: ScreenShareOptions) => useScreenShare(props), {
+      initialProps: { ...baseProps, isScreenSharing: true, localScreenStream: stream('l') } as ScreenShareOptions,
     });
 
     act(() => result.current.setShowScreenAnyway(true));
@@ -137,8 +137,8 @@ describe('useScreenShare', () => {
 
   it('re-arms the infinity-mirror guard for a fresh share', () => {
     const first = stream('first');
-    const { result, rerender } = renderHook((props) => useScreenShare(props), {
-      initialProps: { ...baseProps, isScreenSharing: true, localScreenStream: first },
+    const { result, rerender } = renderHook((props: ScreenShareOptions) => useScreenShare(props), {
+      initialProps: { ...baseProps, isScreenSharing: true, localScreenStream: first } as ScreenShareOptions,
     });
 
     act(() => result.current.setShowScreenAnyway(true));
