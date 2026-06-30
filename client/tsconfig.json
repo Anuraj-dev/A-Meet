@@ -60,6 +60,16 @@
     "src/components/SpaceCanvas.tsx",
     "src/components/TranscriptPanel.tsx",
     "src/components/BrandMark.test.tsx",
+    "src/components/ChatPanel.tsx",
+    "src/components/ChatPanel.test.tsx",
+    "src/components/ControlBar.tsx",
+    "src/components/ControlBar.test.tsx",
+    "src/components/PeoplePanel.tsx",
+    "src/components/PeoplePanel.test.tsx",
+    "src/components/ScheduleMeetingDialog.tsx",
+    "src/components/UpcomingMeetings.tsx",
+    "src/components/VideoTile.tsx",
+    "src/components/VideoTile.test.tsx",
     "src/theme/theme.ts"
   ]
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   Avatar, Box, Chip, Divider, IconButton, ListItemIcon, MenuList,
   MenuItem, Popover, Slider, Tooltip, Typography,
@@ -20,7 +20,17 @@ const CONNECTION_BADGE = {
   connecting: { label: 'Connecting…', color: 'warning' },
   disconnected: { label: 'Reconnecting…', color: 'warning' },
   failed: { label: 'Connection failed', color: 'error' },
-};
+} as const;
+
+type BadConnectionState = keyof typeof CONNECTION_BADGE;
+interface VideoTileProps {
+  stream?: MediaStream | null; audioStream?: MediaStream | null; muted?: boolean; name: string;
+  avatar?: string; videoOn?: boolean; audioOn?: boolean; connectionState?: RTCPeerConnectionState;
+  handRaised?: boolean; activeReaction?: string | null; activeSpeaker?: boolean;
+  objectFit?: CSSProperties['objectFit']; mirror?: boolean; showVolumeControl?: boolean;
+  peerVolume?: number; onPeerVolumeChange?: (value: number) => void; pinned?: boolean;
+  onPin?: () => void; spotlighted?: boolean; canSpotlight?: boolean; onSpotlight?: () => void;
+}
 
 export default function VideoTile({
   stream,
@@ -44,15 +54,18 @@ export default function VideoTile({
   spotlighted = false,
   canSpotlight = false,
   onSpotlight,
-}) {
-  const videoRef = useRef(null);
-  const rootRef = useRef(null);
-  const volBtnRef = useRef(null);
+}: VideoTileProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const volBtnRef = useRef<HTMLButtonElement | null>(null);
   const offColor = getPeerColor(name);
   const initial = name?.trim()?.[0]?.toUpperCase() ?? '?';
   const levelRef = useAudioLevel(audioStream ?? stream, audioOn);
   const [hovered, setHovered] = useState(false);
   const [volumeMenuOpen, setVolumeMenuOpen] = useState(false);
+  const connectionBadge = connectionState && connectionState in CONNECTION_BADGE
+    ? CONNECTION_BADGE[connectionState as BadConnectionState]
+    : null;
 
   useEffect(() => {
     const el = videoRef.current;
@@ -62,7 +75,7 @@ export default function VideoTile({
   // Root needs two refs: the analyser's `levelRef` (cascades `--lvl`) and our own
   // `rootRef` (the fullscreen target). Merge them in one stable callback so the
   // metering isn't torn down each render. `levelRef` from the hook is stable.
-  const setRootRef = useCallback((node) => {
+  const setRootRef = useCallback((node: HTMLDivElement | null) => {
     rootRef.current = node;
     if (levelRef) levelRef.current = node;
   }, [levelRef]);
@@ -301,11 +314,11 @@ export default function VideoTile({
       )}
 
       {/* Connection badge (top-center) */}
-      {CONNECTION_BADGE[connectionState] && (
+      {connectionBadge && (
         <Box sx={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)' }}>
           <Chip
-            label={CONNECTION_BADGE[connectionState].label}
-            color={CONNECTION_BADGE[connectionState].color}
+            label={connectionBadge.label}
+            color={connectionBadge.color}
             size="small"
             sx={{ fontSize: 11, height: 24 }}
           />

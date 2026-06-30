@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@mui/material/styles';
 import theme from '../theme/theme';
 import ControlBar from './ControlBar';
+import type { ControlBarProps } from './ControlBar';
 
 // ControlBar reads useMediaQuery to decide mobile vs desktop layout. jsdom has no
 // matchMedia, so we stub it to "desktop" (matches: false) — the layout under test,
@@ -23,7 +24,7 @@ beforeAll(() => {
 
 // Every handler ControlBar can invoke, plus sensible "default desktop" state.
 // Tests override only the props relevant to the behavior they assert.
-function makeProps(overrides = {}) {
+function makeProps(overrides: Partial<ControlBarProps> = {}): ControlBarProps {
   return {
     localAudioOn: true,
     hasMic: true,
@@ -77,8 +78,8 @@ function renderBar(overrides = {}) {
 // Each control is an icon-only button whose accessible name comes from its MUI
 // Tooltip title, so we locate it by that user-facing label — the control-bar
 // contract — rather than by icon internals.
-const btn = (name) => screen.getByRole('button', { name });
-const queryBtn = (name) => screen.queryByRole('button', { name });
+const btn = (name: string) => screen.getByRole('button', { name });
+const queryBtn = (name: string) => screen.queryByRole('button', { name });
 
 beforeEach(() => {
   vi.clearAllMocks();

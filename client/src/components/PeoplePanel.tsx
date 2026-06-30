@@ -18,6 +18,18 @@ import {
   VideocamOff as VideocamOffIcon,
 } from '@mui/icons-material';
 
+export interface PersonItem {
+  id: string; name?: string; avatar?: string; audioOn?: boolean; videoOn?: boolean;
+  handRaised?: boolean; isSpeaking?: boolean; isLocal?: boolean; isHost?: boolean; pinned?: boolean;
+}
+interface PeoplePanelProps {
+  people?: PersonItem[]; currentUserIsHost?: boolean; onClose: () => void;
+  onPin?: (person: PersonItem) => void; onSpotlight?: (person: PersonItem) => void;
+  onMute?: (person: PersonItem) => void; onAskUnmute?: (person: PersonItem) => void;
+  onRemove?: (person: PersonItem) => void; onMuteAll?: () => void; onAskUnmuteAll?: () => void;
+}
+interface PersonMenu { anchor: HTMLElement; person: PersonItem }
+
 // In-call participants panel (M12). Shares ChatPanel's responsive shell — a
 // 372px in-flow side column on desktop, a bottom sheet on mobile — and lives in
 // the SAME single right rail (opening People closes Chat/Transcript, Meet-style).
@@ -47,9 +59,9 @@ export default function PeoplePanel({
   onRemove,
   onMuteAll,
   onAskUnmuteAll,
-}) {
+}: PeoplePanelProps) {
   const [query, setQuery] = useState('');
-  const [menuFor, setMenuFor] = useState(null); // { anchor, person }
+  const [menuFor, setMenuFor] = useState<PersonMenu | null>(null); // { anchor, person }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -66,7 +78,7 @@ export default function PeoplePanel({
   const closeMenu = () => setMenuFor(null);
   const menuPerson = menuFor?.person;
   // Moderation menu is only meaningful for the host acting on OTHER people.
-  const showMenuFor = (p) => !p.isLocal && (onPin || (currentUserIsHost && (onSpotlight || onMute || onAskUnmute || onRemove)));
+  const showMenuFor = (p: PersonItem) => !p.isLocal && Boolean(onPin || (currentUserIsHost && (onSpotlight || onMute || onAskUnmute || onRemove)));
 
   return (
     <>
@@ -265,7 +277,7 @@ export default function PeoplePanel({
             <ListItemText>Mute</ListItemText>
           </MenuItem>
         )}
-        {currentUserIsHost && onAskUnmute && !menuPerson?.audioOn && (
+        {currentUserIsHost && onAskUnmute && menuPerson && !menuPerson.audioOn && (
           <MenuItem onClick={() => { onAskUnmute(menuPerson); closeMenu(); }}>
             <ListItemIcon><AskUnmuteIcon fontSize="small" /></ListItemIcon>
             <ListItemText>Ask to unmute</ListItemText>

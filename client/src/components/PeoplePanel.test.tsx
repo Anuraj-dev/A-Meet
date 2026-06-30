@@ -51,7 +51,7 @@ function renderPanel(overrides = {}) {
 }
 
 // Open the per-person moderation menu via its accessible label.
-function openMenuFor(name) {
+function openMenuFor(name: string) {
   fireEvent.click(screen.getByRole('button', { name: `More actions for ${name}` }));
   return screen.getByRole('menu');
 }
