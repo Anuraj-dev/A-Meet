@@ -13,11 +13,36 @@ const OUT_H = 720;
 // How long to wait for a freshly-attached <video> to produce a drawable frame.
 const FRAME_TIMEOUT_MS = 700;
 
+type ScreenshotTile = {
+  key: string;
+  stream?: MediaStream | null;
+  name?: string;
+  videoOn?: boolean;
+  audioOn?: boolean;
+  mirror?: boolean;
+};
+
+type ScreenshotShare = {
+  key: string;
+  stream?: MediaStream | null;
+  name?: string;
+};
+
+type ScreenshotOptions = {
+  tiles?: ScreenshotTile[];
+  share?: ScreenshotShare | null;
+};
+
+type SourceEntry = {
+  video: HTMLVideoElement;
+  stream: MediaStream | null;
+};
+
 // Resolve once the video has a frame ready to draw (readyState >= 2), or after a
 // short timeout so a stalled stream can't hang the whole capture.
-function waitForFrame(video) {
+function waitForFrame(video: HTMLVideoElement): Promise<void> {
   if (video.readyState >= 2 && video.videoWidth > 0) return Promise.resolve();
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     let done = false;
     const finish = () => {
       if (done) return;
@@ -32,7 +57,12 @@ function waitForFrame(video) {
 }
 
 // Presentation layout: big screen share on the left, camera strip on the right.
-function drawShareLayout(canvas, share, tiles, sources) {
+function drawShareLayout(
+  canvas: HTMLCanvasElement,
+  share: ScreenshotShare,
+  tiles: ScreenshotTile[],
+  sources: Map<string, SourceEntry>,
+): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const W = canvas.width;
@@ -80,14 +110,17 @@ function drawShareLayout(canvas, share, tiles, sources) {
 // Build a PNG blob of the current meeting view.
 //   tiles: camera tiles ({ key, stream, name, videoOn, audioOn, mirror })
 //   share: optional on-stage screen share ({ key, stream, name })
-export async function captureMeetingScreenshot({ tiles = [], share = null } = {}) {
+export async function captureMeetingScreenshot({
+  tiles = [],
+  share = null,
+}: ScreenshotOptions = {}): Promise<Blob> {
   const host = document.createElement('div');
   host.setAttribute('aria-hidden', 'true');
   host.style.cssText =
     'position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1';
   document.body.appendChild(host);
 
-  const sources = new Map();
+  const sources = new Map<string, SourceEntry>();
   try {
     const shareTile = share ? { key: share.key, stream: share.stream } : null;
     const allTiles = shareTile ? [shareTile, ...tiles] : tiles;
@@ -104,7 +137,7 @@ export async function captureMeetingScreenshot({ tiles = [], share = null } = {}
     if (share) drawShareLayout(canvas, share, tiles, sources);
     else drawComposite(canvas, tiles, sources);
 
-    return await new Promise((resolve, reject) => {
+    return await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
         (blob) => (blob ? resolve(blob) : reject(new Error('toBlob-failed'))),
         'image/png',
@@ -120,7 +153,7 @@ export async function captureMeetingScreenshot({ tiles = [], share = null } = {}
 // Capture the meeting view and copy it to the clipboard as a PNG.
 // Resolves with 'copied'. Throws if neither clipboard image-write nor the
 // caller-supplied path can complete (caller decides on the fallback/messaging).
-export async function copyMeetingScreenshot(opts) {
+export async function copyMeetingScreenshot(opts?: ScreenshotOptions): Promise<'copied'> {
   if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
     throw new Error('clipboard-image-unsupported');
   }
@@ -133,7 +166,10 @@ export async function copyMeetingScreenshot(opts) {
 }
 
 // Capture the meeting view and trigger a PNG file download (clipboard fallback).
-export async function downloadMeetingScreenshot(opts, filenameBase = 'a-meet') {
+export async function downloadMeetingScreenshot(
+  opts?: ScreenshotOptions,
+  filenameBase = 'a-meet',
+): Promise<void> {
   const blob = await captureMeetingScreenshot(opts);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
