@@ -64,9 +64,12 @@ export default function ScheduleMeetingDialog({ open, onClose, existing = null, 
   const [created, setCreated] = useState(null); // success view payload (create mode)
   const [copied, setCopied] = useState('');
 
-  // (Re)seed the form whenever the dialog opens.
+  // (Re)seed the form whenever the dialog opens. Resetting the form fields to
+  // match `existing` on each open is the intended state sync for this dialog;
+  // it runs only on the open/existing transition, not every render.
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError('');
     setCreated(null);
     setCopied('');

@@ -261,9 +261,13 @@ export default function RoomPage() {
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setControlsVisible(false), 3000);
   };
-  // Reset controls when screen share ends
+  // Reset the auto-hide controls baseline when screen share ends, and cancel any
+  // pending hide timer. This fires only on the hasScreen→false transition so the
+  // next share session starts with controls shown; the setState is the intended
+  // one-shot reset, not a per-render cascade.
   useEffect(() => {
     if (!hasScreen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setControlsVisible(true);
       clearTimeout(hideTimer.current);
     }

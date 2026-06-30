@@ -207,13 +207,13 @@ Run the CI gates that fire on every PR in one command:
 # One-time: download Playwright browsers (not part of npm ci)
 npm run test:e2e:install
 
-# server lint → npm audit (server + client) → typecheck → unit/coverage → client build → E2E smoke
+# lint (server + client) → npm audit (server + client) → typecheck → unit/coverage → client build → E2E smoke
 npm run verify
 ```
 
 `verify` fails fast — the first failing phase stops the run. It mirrors the CI jobs that
-run on every PR: `Server lint`, `npm audit (high)`, `Workspaces typecheck`, `Client tests +
-build`, `Server tests` (coverage ratchet), and the `Playwright smoke`. It does **not** run
+run on every PR: `Server lint`, `Client lint`, `npm audit (high)`, `Workspaces typecheck`,
+`Client tests + build`, `Server tests` (coverage ratchet), and the `Playwright smoke`. It does **not** run
 the path-scoped `Server image smoke` (a ~15-min Docker build that spawns a real mediasoup
 worker), which CI runs only when server-image files change. A green `verify` locally means
 those every-PR gates are satisfied.

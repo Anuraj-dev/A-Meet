@@ -38,7 +38,7 @@ function PeerAudio({ socketId, stream, volume = 1 }) {
     appLogger.info('speaker stream bound', { socketId, ctxState: ctx.state, volume: clamped });
 
     return () => {
-      try { src.disconnect(); gain.disconnect(); } catch {}
+      try { src.disconnect(); gain.disconnect(); } catch { /* nodes already detached */ }
       ctx.close();
       if (ctxRef.current === ctx) { ctxRef.current = null; gainRef.current = null; }
     };

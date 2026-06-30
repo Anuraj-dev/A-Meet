@@ -20,6 +20,10 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // Mount-time session probe. refresh() awaits /auth/me before any setState, so
+  // the user/loading updates land asynchronously (not synchronously in the effect
+  // body) — the cascading-render concern the rule guards against doesn't apply.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh(); }, []);
 
   function login(returnTo) {
@@ -49,6 +53,10 @@ export function AuthProvider({ children }) {
   );
 }
 
+// Provider and its consumer hook are intentionally co-located in this context
+// module; the only-export-components rule is a fast-refresh DX guard, not a
+// correctness rule, and splitting the hook into a separate file buys nothing here.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider');

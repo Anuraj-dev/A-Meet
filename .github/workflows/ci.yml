@@ -25,6 +25,23 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run lint
 
+  client-lint:
+    name: Client lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      # ESLint needs no native build, so --ignore-scripts keeps install fast.
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+
   server:
     name: Server tests
     runs-on: ubuntu-latest
@@ -83,7 +100,3 @@ jobs:
       # vitest.config.js) gates every PR — a coverage drop fails this check.
       - run: npm run test:coverage
       - run: npm run build
-      # Lint is intentionally not a gate yet: RoomPage.jsx has pre-existing
-      # react-hooks/set-state-in-effect errors unrelated to the test setup.
-      # Re-enable this step once those are resolved:
-      # - run: npm run lint

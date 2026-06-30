@@ -29,11 +29,13 @@
     "typecheck:server": "npm --prefix server run typecheck",
     "typecheck:client": "npm --prefix client run typecheck",
     "lint:server": "npm --prefix server run lint",
+    "lint:client": "npm --prefix client run lint",
+    "lint": "npm run lint:server && npm run lint:client",
     "audit:server": "npm audit --audit-level=high --prefix server",
     "audit:client": "npm audit --audit-level=high --prefix client",
     "audit": "npm run audit:server && npm run audit:client",
     "build:client": "npm --prefix client run build",
-    "verify": "npm run lint:server && npm run audit && npm run typecheck && npm run coverage && npm run build:client && npm run test:e2e"
+    "verify": "npm run lint && npm run audit && npm run typecheck && npm run coverage && npm run build:client && npm run test:e2e"
   },
   "devDependencies": {
     "concurrently": "^10.0.0",

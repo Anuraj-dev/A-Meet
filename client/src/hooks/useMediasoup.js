@@ -745,7 +745,7 @@ export function useMediasoup(roomId, devices = {}) {
       setIsScreenSharing(false);
       setLocalScreenStream(null);
     };
-  }, [roomId]);
+  }, [roomId, logSfuStage]);
 
   // Dev-only WebRTC diagnostics: poll each consumer's inbound-rtp stats so the
   // overlay can show packet loss, jitter, bitrate and FEC — the concrete signal
