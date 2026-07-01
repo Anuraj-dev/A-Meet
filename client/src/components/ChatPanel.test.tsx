@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@mui/material/styles';
 import theme from '../theme/theme';
-import ChatPanel from './ChatPanel';
+import ChatPanel, { type ChatMessage } from './ChatPanel';
 
 // ChatPanel uses responsive sx but no useMediaQuery branch in its logic; jsdom
 // still lacks matchMedia, so stub it defensively for any MUI internals.
@@ -26,9 +26,10 @@ beforeAll(() => {
 // ChatPanel is fully controlled (input/setInput/onSend come from the parent, which
 // also clears the input on send). This harness mirrors RoomPage's real wiring so
 // tests exercise the true contract: onSend reads the current input, then clears it.
-function Harness({ onSendSpy = vi.fn(), messages = [], currentUserId = 'me', onClose = vi.fn() }) {
+interface HarnessProps { onSendSpy?: ReturnType<typeof vi.fn>; messages?: ChatMessage[]; currentUserId?: string; onClose?: ReturnType<typeof vi.fn> }
+function Harness({ onSendSpy = vi.fn(), messages = [], currentUserId = 'me', onClose = vi.fn() }: HarnessProps) {
   const [input, setInput] = useState('');
-  const handleSend = (e) => {
+  const handleSend = (e: FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
     onSendSpy(input);

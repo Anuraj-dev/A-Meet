@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type MouseEventHandler, type ReactNode } from 'react';
 import {
   Badge, Box, Divider, IconButton, ListItemIcon, ListItemText,
   Menu, MenuItem, Popover as MuiPopover, Slider, Stack, Tooltip, Typography,
@@ -41,10 +41,39 @@ const LAYOUTS = [
   { key: 'tiled', label: 'Tiled', Icon: TiledIcon },
   { key: 'spotlight', label: 'Spotlight', Icon: SpotlightLayoutIcon },
   { key: 'sidebar', label: 'Sidebar', Icon: SidebarLayoutIcon },
-];
+] as const;
+
+type LayoutMode = 'auto' | 'tiled' | 'spotlight' | 'sidebar';
+type CircleVariant = 'idle' | 'danger' | 'active' | 'warning';
+interface CircleButtonProps {
+  title: string;
+  onClick?: MouseEventHandler<HTMLButtonElement>;
+  disabled?: boolean;
+  variant?: CircleVariant;
+  badge?: number;
+  children: ReactNode;
+}
+
+export interface ControlBarProps {
+  localAudioOn: boolean; hasMic: boolean; onToggleAudio: () => void;
+  localVideoOn: boolean; onToggleVideo: () => void;
+  isScreenSharing: boolean; onToggleShare: () => void;
+  handRaised: boolean; onToggleHand: () => void;
+  onReact: (anchor: HTMLElement | null) => void;
+  showChat: boolean; unreadCount: number; onToggleChat: () => void;
+  transcriptActive: boolean; transcriptAvailable: boolean; showTranscript: boolean; transcriptDisabled: boolean; onToggleTranscript: () => void;
+  showPeople: boolean; peopleCount?: number; onTogglePeople: () => void;
+  layoutMode?: LayoutMode; onLayoutChange: (mode: LayoutMode) => void;
+  soundEnabled: boolean; onToggleSound: () => void;
+  pipSupported: boolean; pipActive: boolean; onTogglePip: () => void;
+  onCopyLink: () => void; onScreenshot: () => void; onLeave: () => void;
+  micGain?: number; onMicGainChange: (value: number) => void;
+  outputVolume?: number; onOutputVolumeChange: (value: number) => void;
+  showPinToggle?: boolean; pinned?: boolean; onTogglePin?: () => void;
+}
 
 // One round control button. `variant` drives the Meet-style color states.
-function CircleButton({ title, onClick, disabled, variant = 'idle', badge = 0, children }) {
+function CircleButton({ title, onClick, disabled = false, variant = 'idle', badge = 0, children }: CircleButtonProps) {
   const styles = {
     idle: { bgcolor: 'control.idle', color: 'text.primary', '&:hover': { bgcolor: 'control.idleHover' } },
     danger: { bgcolor: 'error.main', color: '#fff', '&:hover': { bgcolor: 'error.dark' } },
@@ -94,14 +123,14 @@ export default function ControlBar({
   micGain = 1, onMicGainChange,
   outputVolume = 1, onOutputVolumeChange,
   showPinToggle = false, pinned = false, onTogglePin,
-}) {
+}: ControlBarProps) {
   const isMobile = useMediaQuery((t) => t.breakpoints.down('sm'));
-  const [moreAnchor, setMoreAnchor] = useState(null);
-  const [audioAnchor, setAudioAnchor] = useState(null);
-  const [layoutAnchor, setLayoutAnchor] = useState(null);
-  const moreRef = useRef(null);
-  const audioRef = useRef(null);
-  const layoutRef = useRef(null);
+  const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
+  const [audioAnchor, setAudioAnchor] = useState<HTMLElement | null>(null);
+  const [layoutAnchor, setLayoutAnchor] = useState<HTMLElement | null>(null);
+  const moreRef = useRef<HTMLButtonElement | null>(null);
+  const audioRef = useRef<HTMLButtonElement | null>(null);
+  const layoutRef = useRef<HTMLButtonElement | null>(null);
   const closeMore = () => setMoreAnchor(null);
 
   return (
@@ -198,7 +227,7 @@ export default function ControlBar({
       )}
 
       {/* Layout chooser — desktop only (irrelevant on a phone-sized stage) */}
-      {!isMobile && onLayoutChange && (
+      {!isMobile && (
         <Box ref={layoutRef} sx={{ display: 'inline-flex' }}>
           <CircleButton
             title="Change layout"
@@ -274,7 +303,7 @@ export default function ControlBar({
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
               Microphone volume
             </Typography>
-            <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
               <MicIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
               <Slider
                 size="small"
@@ -292,7 +321,7 @@ export default function ControlBar({
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: 'block', mb: 1 }}>
               Speaker volume
             </Typography>
-            <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
               <VolumeUpIcon sx={{ fontSize: 18, color: 'text.secondary', flexShrink: 0 }} />
               <Slider
                 size="small"

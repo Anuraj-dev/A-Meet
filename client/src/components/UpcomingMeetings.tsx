@@ -17,6 +17,10 @@ import {
 import { getMyMeetings, cancelMeeting } from '../api/meetings';
 import { formatMeetingTime, relativeTime } from '../utils/format-time';
 import { buildJoinUrl, buildGoogleCalendarUrl, buildInviteText } from '../utils/calendar-invite';
+import type { MouseEvent } from 'react';
+import type { ScheduledMeetingDto } from '@a-meet/contracts';
+
+interface UpcomingMeetingsProps { refreshKey?: string | number; onEdit: (meeting: ScheduledMeetingDto) => void }
 
 const DK = {
   surface:  'rgba(255,255,255,0.05)',
@@ -33,15 +37,15 @@ const DK = {
   menuBg:   '#1b1925',
 };
 
-export default function UpcomingMeetings({ refreshKey, onEdit }) {
+export default function UpcomingMeetings({ refreshKey, onEdit }: UpcomingMeetingsProps) {
   const navigate = useNavigate();
-  const [meetings, setMeetings] = useState([]);
+  const [meetings, setMeetings] = useState<ScheduledMeetingDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [anchorEl, setAnchorEl] = useState(null);
-  const [menuFor, setMenuFor] = useState(null);
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [menuFor, setMenuFor] = useState<ScheduledMeetingDto | null>(null);
   const [toast, setToast] = useState('');
-  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState<ScheduledMeetingDto | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(async () => {
@@ -62,7 +66,7 @@ export default function UpcomingMeetings({ refreshKey, onEdit }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load, refreshKey]);
 
-  function openMenu(e, meeting) {
+  function openMenu(e: MouseEvent<HTMLElement>, meeting: ScheduledMeetingDto) {
     setAnchorEl(e.currentTarget);
     setMenuFor(meeting);
   }
@@ -71,7 +75,7 @@ export default function UpcomingMeetings({ refreshKey, onEdit }) {
     setMenuFor(null);
   }
 
-  async function copy(text, label) {
+  async function copy(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
       setToast(label);
@@ -80,11 +84,11 @@ export default function UpcomingMeetings({ refreshKey, onEdit }) {
     }
   }
 
-  function inviteFor(m) {
+  function inviteFor(m: ScheduledMeetingDto) {
     const joinUrl = buildJoinUrl(m.roomId);
     return buildInviteText({ title: m.title, when: formatMeetingTime(m.scheduledFor), joinUrl });
   }
-  function gcalFor(m) {
+  function gcalFor(m: ScheduledMeetingDto) {
     const joinUrl = buildJoinUrl(m.roomId);
     return buildGoogleCalendarUrl({
       title: m.title,
@@ -114,7 +118,7 @@ export default function UpcomingMeetings({ refreshKey, onEdit }) {
 
   return (
     <Box sx={{ mt: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 2 }}>
         <CalendarIcon sx={{ color: DK.coral, fontSize: 20 }} />
         <Typography sx={{ fontFamily: DK.display, fontWeight: 800, fontSize: 18, color: DK.ink }}>
           Upcoming meetings
@@ -209,13 +213,13 @@ export default function UpcomingMeetings({ refreshKey, onEdit }) {
           },
         }}
       >
-        <MenuItem onClick={() => { onEdit?.(menuFor); closeMenu(); }}>
+        <MenuItem onClick={() => { onEdit(menuFor!); closeMenu(); }}>
           <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>Edit
         </MenuItem>
-        <MenuItem onClick={() => { copy(buildJoinUrl(menuFor.roomId), 'Link copied'); closeMenu(); }}>
+        <MenuItem onClick={() => { copy(buildJoinUrl(menuFor!.roomId), 'Link copied'); closeMenu(); }}>
           <ListItemIcon><LinkIcon fontSize="small" /></ListItemIcon>Copy link
         </MenuItem>
-        <MenuItem onClick={() => { copy(inviteFor(menuFor), 'Invite copied'); closeMenu(); }}>
+        <MenuItem onClick={() => { copy(inviteFor(menuFor!), 'Invite copied'); closeMenu(); }}>
           <ListItemIcon><CopyIcon fontSize="small" /></ListItemIcon>Copy invite
         </MenuItem>
         <MenuItem

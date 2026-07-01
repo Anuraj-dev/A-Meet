@@ -1,17 +1,28 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type FormEvent } from 'react';
 import {
   Avatar, Box, Chip, IconButton, InputAdornment, TextField, Tooltip, Typography,
 } from '@mui/material';
 import { Close as CloseIcon, Send as SendIcon } from '@mui/icons-material';
 
-function formatTime(ts) {
+interface ChatSender { id: string; name?: string; avatar?: string }
+export interface ChatMessage { type?: 'event'; text: string; ts: string | number | Date; sender?: ChatSender }
+interface ChatPanelProps {
+  messages: ChatMessage[];
+  input: string;
+  setInput: (value: string) => void;
+  onSend: (event: FormEvent) => void;
+  currentUserId?: string;
+  onClose: () => void;
+}
+
+function formatTime(ts: string | number | Date): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 // In-call chat. Desktop: a 372px wide in-flow side column.
 // Mobile: a bottom sheet (62vh, slides up over the video, with backdrop).
-export default function ChatPanel({ messages, input, setInput, onSend, currentUserId, onClose }) {
-  const bottomRef = useRef(null);
+export default function ChatPanel({ messages, input, setInput, onSend, currentUserId, onClose }: ChatPanelProps) {
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

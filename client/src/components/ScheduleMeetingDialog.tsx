@@ -14,6 +14,15 @@ import {
 import { scheduleMeeting, updateMeeting } from '../api/meetings';
 import { toDatetimeLocalValue, formatMeetingTime } from '../utils/format-time';
 import { buildJoinUrl, buildGoogleCalendarUrl, buildInviteText } from '../utils/calendar-invite';
+import type { ScheduledMeetingDto } from '@a-meet/contracts';
+import type { AxiosError } from 'axios';
+
+interface ScheduleMeetingDialogProps {
+  open: boolean;
+  onClose?: () => void;
+  existing?: ScheduledMeetingDto | null;
+  onSaved?: (meeting: ScheduledMeetingDto) => void;
+}
 
 const DK = {
   bg:       '#16141f',
@@ -54,14 +63,14 @@ const fieldSx = {
   },
 };
 
-export default function ScheduleMeetingDialog({ open, onClose, existing = null, onSaved }) {
+export default function ScheduleMeetingDialog({ open, onClose, existing = null, onSaved }: ScheduleMeetingDialogProps) {
   const isEdit = Boolean(existing);
   const [title, setTitle] = useState('');
   const [when, setWhen] = useState(defaultStart);
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [created, setCreated] = useState(null); // success view payload (create mode)
+  const [created, setCreated] = useState<ScheduledMeetingDto | null>(null); // success view payload (create mode)
   const [copied, setCopied] = useState('');
 
   // (Re)seed the form whenever the dialog opens. Resetting the form fields to
@@ -102,7 +111,7 @@ export default function ScheduleMeetingDialog({ open, onClose, existing = null, 
         description: description.trim(),
       };
       if (isEdit) {
-        const updated = await updateMeeting(existing.roomId, payload);
+        const updated = await updateMeeting(existing!.roomId, payload);
         onSaved?.(updated);
         onClose?.();
       } else {
@@ -110,14 +119,15 @@ export default function ScheduleMeetingDialog({ open, onClose, existing = null, 
         onSaved?.(meeting);
         setCreated(meeting);
       }
-    } catch (err) {
-      setError(err?.response?.data?.error || 'Something went wrong. Try again.');
+    } catch (err: unknown) {
+      const apiError = err as AxiosError<{ error?: string }>;
+      setError(apiError.response?.data?.error || 'Something went wrong. Try again.');
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function copy(kind, text) {
+  async function copy(kind: string, text: string) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(kind);
