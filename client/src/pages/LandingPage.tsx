@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -26,6 +26,7 @@ import BrandMark from "../components/BrandMark";
 import EtherealShadow from "../components/EtherealShadow";
 import ScheduleMeetingDialog from "../components/ScheduleMeetingDialog";
 import UpcomingMeetings from "../components/UpcomingMeetings";
+import type { RoomMetadataDto, ScheduledMeetingDto } from "@a-meet/contracts";
 
 // Warm graphite + ember + dusty sage. Smoke, not glow.
 const DK = {
@@ -44,7 +45,7 @@ const DK = {
   font: '"Plus Jakarta Sans", system-ui, sans-serif',
 };
 
-const EASE = [0.23, 1, 0.32, 1];
+const EASE = [0.23, 1, 0.32, 1] as const;
 
 // One solid, high-contrast CTA — Google-Meet simple. No lift, no glow.
 const primaryBtn = {
@@ -85,14 +86,14 @@ export default function LandingPage() {
   const [joinCode, setJoinCode] = useState("");
   const [creating, setCreating] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [editingMeeting, setEditingMeeting] = useState(null);
+  const [editingMeeting, setEditingMeeting] = useState<ScheduledMeetingDto | null>(null);
   const [meetingsKey, setMeetingsKey] = useState(0);
   const [upcomingOpen, setUpcomingOpen] = useState(false);
 
   async function handleNewMeeting() {
     setCreating(true);
     try {
-      const { data } = await api.post("/rooms");
+      const { data } = await api.post<RoomMetadataDto>("/rooms");
       // The creator instant-joins (Google-Meet behaviour) — straight into the
       // room, no lobby/preview. The `fromCreate` marker is the one-shot signal
       // RoomGuard uses to allow this; anyone opening the shared link later (even
@@ -107,7 +108,7 @@ export default function LandingPage() {
     setEditingMeeting(null);
     setScheduleOpen(true);
   }
-  function handleEditMeeting(meeting) {
+  function handleEditMeeting(meeting: ScheduledMeetingDto) {
     setEditingMeeting(meeting);
     setScheduleOpen(true);
   }
@@ -119,11 +120,11 @@ export default function LandingPage() {
     setMeetingsKey((k) => k + 1);
   }
 
-  function handleJoin(e) {
+  function handleJoin(e: FormEvent) {
     e.preventDefault();
     let code = joinCode.trim();
     if (!code) return;
-    if (code.includes("/")) code = code.split("/").filter(Boolean).pop();
+    if (code.includes("/")) code = code.split("/").filter(Boolean).pop() ?? "";
     code = code.toLowerCase().replace(/\s+/g, "");
     if (code) navigate(`/lobby/${encodeURIComponent(code)}`);
   }
@@ -531,9 +532,7 @@ export default function LandingPage() {
         }}>
         <Stack
           direction="row"
-          alignItems="center"
-          justifyContent="space-between"
-          sx={{ mb: 1 }}>
+          sx={{ alignItems: "center", justifyContent: "space-between", mb: 1 }}>
           <Typography
             sx={{
               fontFamily: DK.display,

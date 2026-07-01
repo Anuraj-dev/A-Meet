@@ -6,7 +6,7 @@ import BrandMark from '../components/BrandMark';
 // Shown when a meeting code in the URL doesn't match an active room
 // (mirrors Google Meet's "Check your meeting code" screen). With `ended`, it
 // instead explains that the host ended the meeting (HTTP 410 from the API).
-export default function CheckMeetingCode({ ended = false }) {
+export default function CheckMeetingCode({ ended = false }: { ended?: boolean }) {
   const navigate = useNavigate();
 
   return (
@@ -57,10 +57,10 @@ export default function CheckMeetingCode({ ended = false }) {
             variant="outlined"
             sx={{ mt: 2, p: 2.5, width: '100%', maxWidth: 420, textAlign: 'left', borderRadius: 3, borderColor: 'divider' }}
           >
-            <Stack direction="row" spacing={2} alignItems="flex-start">
+            <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>
               <SecurityIcon sx={{ color: 'primary.main', fontSize: 40, flexShrink: 0 }} />
               <Box>
-                <Typography variant="subtitle1" fontWeight={600}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                   Your meeting is safe
                 </Typography>
                 <Typography variant="body2" color="text.secondary">

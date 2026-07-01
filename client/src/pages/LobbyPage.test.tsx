@@ -29,20 +29,29 @@ const ROOM_ID = 'abc-defg-hij';
 
 // Minimal MediaStream stand-in (jsdom has none): tracks-in, kind-filtered out.
 class FakeMediaStream {
-  constructor(tracks = []) { this._tracks = [...tracks]; }
-  addTrack(t) { this._tracks.push(t); }
-  removeTrack(t) { this._tracks = this._tracks.filter((x) => x !== t); }
+  _tracks: MediaStreamTrack[];
+  constructor(tracks: MediaStreamTrack[] = []) { this._tracks = [...tracks]; }
+  addTrack(t: MediaStreamTrack) { this._tracks.push(t); }
+  removeTrack(t: MediaStreamTrack) { this._tracks = this._tracks.filter((x) => x !== t); }
   getTracks() { return this._tracks; }
   getVideoTracks() { return this._tracks.filter((t) => t.kind === 'video'); }
   getAudioTracks() { return this._tracks.filter((t) => t.kind === 'audio'); }
 }
 
-function track(kind, deviceId) {
-  return { kind, enabled: true, stop: vi.fn(), getSettings: () => ({ deviceId }) };
+function track(kind: 'audio' | 'video', deviceId: string): MediaStreamTrack {
+  return { kind, enabled: true, stop: vi.fn(), getSettings: () => ({ deviceId }) } as unknown as MediaStreamTrack;
 }
 
 const getUserMedia = vi.fn();
 const enumerateDevices = vi.fn();
+
+function exactDeviceId(constraint: boolean | MediaTrackConstraints | undefined, fallback: string) {
+  if (!constraint || constraint === true) return fallback;
+  const deviceId = constraint.deviceId;
+  return typeof deviceId === 'object' && deviceId && 'exact' in deviceId
+    ? String(deviceId.exact)
+    : fallback;
+}
 
 // Two cameras + two mics, the default device set used by the happy-path tests.
 function mockDeviceSet() {
@@ -52,9 +61,9 @@ function mockDeviceSet() {
     { kind: 'audioinput', deviceId: 'mic-1', label: 'Mic One' },
     { kind: 'audioinput', deviceId: 'mic-2', label: 'Mic Two' },
   ]);
-  getUserMedia.mockImplementation(async (constraints) => {
-    if (constraints.audio) return new FakeMediaStream([track('audio', constraints.audio?.deviceId?.exact ?? 'mic-1')]);
-    if (constraints.video) return new FakeMediaStream([track('video', constraints.video?.deviceId?.exact ?? 'cam-1')]);
+  getUserMedia.mockImplementation(async (constraints: MediaStreamConstraints) => {
+    if (constraints.audio) return new FakeMediaStream([track('audio', exactDeviceId(constraints.audio, 'mic-1'))]);
+    if (constraints.video) return new FakeMediaStream([track('video', exactDeviceId(constraints.video, 'cam-1'))]);
     return new FakeMediaStream([]);
   });
 }
@@ -79,7 +88,7 @@ beforeAll(() => {
     addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
   }));
   globalThis.ResizeObserver ||= class { observe() {} unobserve() {} disconnect() {} };
-  globalThis.MediaStream = FakeMediaStream;
+  globalThis.MediaStream = FakeMediaStream as unknown as typeof MediaStream;
 });
 
 beforeEach(() => {

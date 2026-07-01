@@ -52,13 +52,12 @@ includes all of `server/src`; the client includes migrated files explicitly.
 ## Current status
 
 - Server: all `server/src` modules are strict TypeScript and run through `tsx`.
-- Client: `utils/capture-screenshot.ts`, `utils/peer-color.ts`,
-  `utils/pending-producers.ts`, `utils/room-entry.ts`, `utils/transcript.ts`,
-  `utils/video-composite.ts`, `services/socket.ts`,
-  `services/mediasoup-signal.ts`, and `services/ice-config.ts` are strict
-  TypeScript.
+- Client: every source module through the components layer is strict TypeScript.
+  The non-room pages (`CheckMeetingCode`, `LandingPage`, and `LobbyPage`) are also
+  strict TypeScript; `RoomPage.jsx` remains the final source migration.
 - Shared: SFU request/ack contracts are consumed by real server and client modules.
-- Remaining client order: utilities -> services -> hooks -> components -> pages.
+- Remaining client order: `RoomPage.jsx` last, then any legacy JavaScript test
+  harness files that are intentionally outside the source migration frontier.
 
 ## How to migrate a module (leaf-up)
 
