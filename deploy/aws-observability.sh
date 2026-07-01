@@ -138,7 +138,8 @@ put_alarm() {
     --threshold "$5" \
     --comparison-operator GreaterThanOrEqualToThreshold \
     --treat-missing-data notBreaching \
-    --alarm-actions "$TOPIC_ARN"
+    --alarm-actions "$TOPIC_ARN" \
+    --ok-actions "$TOPIC_ARN"
 }
 
 put_filter fatal-log '{ $.level = 60 }' FatalCount
@@ -178,7 +179,8 @@ aws cloudwatch put-metric-alarm \
   --threshold 1 \
   --comparison-operator LessThanThreshold \
   --treat-missing-data breaching \
-  --alarm-actions "$PROCESS_TOPIC_ARN"
+  --alarm-actions "$PROCESS_TOPIC_ARN" \
+  --ok-actions "$PROCESS_TOPIC_ARN"
 
 # Instance health complements process health by detecting host-level failure.
 if [ -n "${INSTANCE_ID:-}" ]; then
@@ -194,7 +196,8 @@ if [ -n "${INSTANCE_ID:-}" ]; then
     --threshold 1 \
     --comparison-operator GreaterThanOrEqualToThreshold \
     --treat-missing-data missing \
-    --alarm-actions "$TOPIC_ARN"
+    --alarm-actions "$TOPIC_ARN" \
+    --ok-actions "$TOPIC_ARN"
 fi
 
 printf 'Log group: %s (14 days)\nSNS topic: %s\nLambda: %s\nRoute53 alarm region: %s\nRoute53 SNS topic: %s\nRoute53 Lambda: %s\n' \
