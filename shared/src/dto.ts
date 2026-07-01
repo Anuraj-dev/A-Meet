@@ -54,6 +54,8 @@ export interface AuthMeResponse {
 
 export interface RoomIdentityDto {
   _id: string;
+  /** Mongoose/serialization compatibility alias used by older room payloads. */
+  id?: string;
   name?: string;
   avatar?: string;
 }

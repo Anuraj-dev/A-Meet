@@ -13,11 +13,9 @@ export interface RoomLayoutOptions {
   isSoloCall: boolean;
 }
 
-interface LayoutStage {
-  kind: StageKind;
-  focusKey?: string;
-  showRail?: boolean;
-}
+type LayoutStage =
+  | { kind: 'focus'; focusKey: string; showRail: boolean }
+  | { kind: Exclude<StageKind, 'focus'>; focusKey?: undefined; showRail?: undefined };
 
 // Owns the layout / focus concern extracted from RoomPage:
 //   • pinnedKey   — a LOCAL per-viewer pin (any participant); just for me.

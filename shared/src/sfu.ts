@@ -11,7 +11,7 @@ export interface SocketAckError {
   error: string;
 }
 
-export type SocketAck<T> = T | SocketAckError;
+export type SocketAck<T> = (T & { error?: never }) | SocketAckError;
 
 export interface SfuPeerUser {
   id: string;
@@ -125,4 +125,9 @@ export type ClientToServerEvents = {
   'sfu-host-mute': (payload: { socketId: string }) => void;
   'sfu-host-remove': (payload: { socketId: string }) => void;
   'sfu-spotlight': (payload: { socketId: string | null }) => void;
-} & import('./webrtc').WebRtcClientToServerEvents;
+  'sfu-end-meeting': () => void;
+  'sfu-mute-all': () => void;
+  'sfu-request-unmute': (payload: { socketId: string }) => void;
+  'sfu-request-unmute-all': () => void;
+} & import('./webrtc').WebRtcClientToServerEvents
+  & import('./events').RoomClientToServerEvents;

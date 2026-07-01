@@ -1,10 +1,11 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState, type ComponentProps, type FormEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Alert, Avatar, AvatarGroup, Box, Button, Chip, Dialog, DialogActions,
   DialogContent, DialogTitle, IconButton, Popover,
   Snackbar, Stack, Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
+import type { TypographyProps } from '@mui/material';
 import {
   ContentCopy as ContentCopyIcon,
   NavigateBefore as NavigateBeforeIcon,
@@ -16,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { RoomMetaContext } from '../components/RoomGuard';
 import socket from '../services/socket';
 import api from '../api/axios';
-import { useMediasoup } from '../hooks/useMediasoup';
+import { useMediasoup, type PeerState } from '../hooks/useMediasoup';
 import { usePictureInPicture } from '../hooks/usePictureInPicture';
 import { isPcmCaptureSupported, usePcmCapture } from '../hooks/usePcmCapture';
 import { useReactions } from '../hooks/useReactions';
@@ -33,6 +34,17 @@ import TranscriptPanel from '../components/TranscriptPanel';
 import LiveCaptions from '../components/LiveCaptions';
 import CallNotifications from '../components/CallNotifications';
 import ReactionsOverlay from '../components/ReactionsOverlay';
+import type { ChatMessage } from '../components/ChatPanel';
+import type { PersonItem } from '../components/PeoplePanel';
+import type { NotificationNote } from '../components/CallNotifications';
+import type {
+  RoomMetadataDto,
+  RoomUser,
+  TranscriptContributorState,
+  TranscriptEntry,
+  TranscriptInterim,
+  TranscriptState,
+} from '@a-meet/contracts';
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
 import { copyMeetingScreenshot, downloadMeetingScreenshot } from '../utils/capture-screenshot';
 import { appLogger } from '../utils/logger';
@@ -41,13 +53,29 @@ import { downloadTranscript, mergeTranscriptEntries } from '../utils/transcript'
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '👏', '🎉'];
 const TRANSCRIPT_CONSENT_KEY = 'ameet:transcription-consent-v2';
 
+type ActivePanel = 'chat' | 'people' | 'transcript' | null;
+type ContributorViewState = {
+  status: 'idle' | TranscriptContributorState['status'];
+  provider: string | null;
+  error: string;
+};
+type TimedNotificationNote = Omit<NotificationNote, 'id'> & { duration?: number };
+type RoomNotificationNote = Omit<NotificationNote, 'id'> & { id: number };
+type CameraTile = ComponentProps<typeof VideoTile> & { key: string; audioStream?: MediaStream | null };
+interface RoomLocationState {
+  videoDeviceId?: string;
+  audioDeviceId?: string;
+  startVideoOn?: boolean;
+  startAudioOn?: boolean;
+}
+
 function hasTranscriptConsent() {
   try { return localStorage.getItem(TRANSCRIPT_CONSENT_KEY) === 'accepted'; }
   catch { return false; }
 }
 
 // Local clock so the header time updates without re-rendering the call.
-function LiveClock(props) {
+function LiveClock(props: TypographyProps) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 15000);
@@ -61,51 +89,53 @@ function LiveClock(props) {
 }
 
 export default function RoomPage() {
-  const { roomId } = useParams();
+  const { roomId = '' } = useParams();
   const navigate = useNavigate();
-  const { state: locationState } = useLocation();
+  const { state: rawLocationState } = useLocation();
+  const locationState = rawLocationState as RoomLocationState | null;
   const { user } = useAuth();
+  const selfId = socket.id!;
   const isMobile = useMediaQuery((t) => t.breakpoints.down('sm'));
   const roomMeta = useContext(RoomMetaContext);
   const meetingTitle = roomMeta?.title || null;
 
-  const [messages, setMessages] = useState([]);
-  const [users, setUsers] = useState([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [users, setUsers] = useState<RoomUser[]>([]);
   const [input, setInput] = useState('');
   // Single right rail: only one of Chat / People / Transcript is open at a time (Meet-style).
-  const [activePanel, setActivePanel] = useState(null); // 'chat' | 'people' | 'transcript' | null
+  const [activePanel, setActivePanel] = useState<ActivePanel>(null); // 'chat' | 'people' | 'transcript' | null
   const showChat = activePanel === 'chat';
   const showPeople = activePanel === 'people';
   const showTranscript = activePanel === 'transcript';
-  const [transcriptState, setTranscriptState] = useState({
+  const [transcriptState, setTranscriptState] = useState<TranscriptState>({
     active: false, startedAt: null, startedBy: null, stoppedAt: null,
   });
-  const [transcriptEntries, setTranscriptEntries] = useState([]);
-  const [transcriptConfigured, setTranscriptConfigured] = useState(null);
-  const [transcriptInterims, setTranscriptInterims] = useState({});
-  const [contributorState, setContributorState] = useState({ status: 'idle', provider: null, error: '' });
+  const [transcriptEntries, setTranscriptEntries] = useState<TranscriptEntry[]>([]);
+  const [transcriptConfigured, setTranscriptConfigured] = useState<boolean | null>(null);
+  const [transcriptInterims, setTranscriptInterims] = useState<Record<string, TranscriptInterim>>({});
+  const [contributorState, setContributorState] = useState<ContributorViewState>({ status: 'idle', provider: null, error: '' });
   const [transcriptConsent, setTranscriptConsent] = useState(hasTranscriptConsent);
   const [transcriptConsentOpen, setTranscriptConsentOpen] = useState(false);
   const pendingTranscriptStartRef = useRef(false);
-  const [latestCaption, setLatestCaption] = useState(null);
-  const captionTimerRef = useRef(null);
+  const [latestCaption, setLatestCaption] = useState<TranscriptEntry | null>(null);
+  const captionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [unreadCount, setUnreadCount] = useState(0);
   // Host asked us to unmute — surfaced as a one-tap prompt (never forced).
-  const [unmuteRequestFrom, setUnmuteRequestFrom] = useState(null);
-  const [reactionAnchor, setReactionAnchor] = useState(null);
+  const [unmuteRequestFrom, setUnmuteRequestFrom] = useState<string | null>(null);
+  const [reactionAnchor, setReactionAnchor] = useState<HTMLElement | null>(null);
   const [outputVolume, setOutputVolume] = useState(1);
-  const [peerVolumes, setPeerVolumes] = useState({});
+  const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({});
   const [controlsPinned, setControlsPinned] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
-  const hideTimer = useRef(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [meetingEndedSnack, setMeetingEndedSnack] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => isSoundEnabled());
   const [isHost, setIsHost] = useState(false);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   // Bottom-left transient flashes: join/leave, chat previews, copy confirmation.
-  const [notes, setNotes] = useState([]);
+  const [notes, setNotes] = useState<RoomNotificationNote[]>([]);
   const noteIdRef = useRef(0);
-  const noteTimers = useRef({});
+  const noteTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   // Live refs so the mount-only socket effect always sees current values
   // (auth may resolve after mount; chat-open state changes over the call).
   const userIdRef = useRef(user?.id);
@@ -115,7 +145,7 @@ export default function RoomPage() {
   // Refs for stale-closure–safe reads inside the mount-only socket effect
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
-  const peerStatesRef = useRef({});
+  const peerStatesRef = useRef<Record<string, PeerState>>({});
 
   // Reaction feature (per-tile + floating stream + sound) lives in its own hook.
   const { activeReactions, floatingReactions, sendReaction } = useReactions({
@@ -136,7 +166,7 @@ export default function RoomPage() {
     // Use the shared axios instance (honors VITE_SERVER_URL) — a raw relative
     // fetch only reaches the API in dev via the Vite proxy, and would miss the
     // separate API origin in production and the E2E preview harness.
-    api.get(`/rooms/${roomId}`)
+    api.get<RoomMetadataDto>(`/rooms/${roomId}`)
       .then(({ data }) => {
         if (!active) return;
         const adminId = data?.admin?._id ?? data?.admin?.id ?? data?.host?._id ?? data?.host?.id;
@@ -147,7 +177,7 @@ export default function RoomPage() {
   }, [roomId, user?.id]);
 
   // Push a transient notification; auto-dismisses after `duration` ms.
-  const pushNote = useCallback((note) => {
+  const pushNote = useCallback((note: TimedNotificationNote) => {
     const id = (noteIdRef.current += 1);
     setNotes((prev) => {
       const next = [...prev, { id, ...note }];
@@ -155,6 +185,7 @@ export default function RoomPage() {
       // don't linger and fire against a note that's no longer shown.
       while (next.length > 4) {
         const evicted = next.shift();
+        if (!evicted) break;
         clearTimeout(noteTimers.current[evicted.id]);
         delete noteTimers.current[evicted.id];
       }
@@ -166,9 +197,10 @@ export default function RoomPage() {
     }, note.duration ?? 4500);
   }, []);
 
-  const dismissNote = useCallback((id) => {
-    clearTimeout(noteTimers.current[id]);
-    delete noteTimers.current[id];
+  const dismissNote = useCallback((id: string | number) => {
+    const numericId = Number(id);
+    clearTimeout(noteTimers.current[numericId]);
+    delete noteTimers.current[numericId];
     setNotes((prev) => prev.filter((n) => n.id !== id));
   }, []);
 
@@ -179,8 +211,8 @@ export default function RoomPage() {
   }, []);
 
   const devices = {
-    videoDeviceId: locationState?.videoDeviceId ?? null,
-    audioDeviceId: locationState?.audioDeviceId ?? null,
+    videoDeviceId: locationState?.videoDeviceId,
+    audioDeviceId: locationState?.audioDeviceId,
     startVideoOn: locationState?.startVideoOn ?? true,
     startAudioOn: locationState?.startAudioOn ?? true,
   };
@@ -195,7 +227,7 @@ export default function RoomPage() {
     activeSpeaker, socketConnected, permissionDenied, rtcStats,
   } = useMediasoup(roomId, devices);
 
-  const sendTranscriptAudio = useCallback((audio) => {
+  const sendTranscriptAudio = useCallback((audio: ArrayBuffer) => {
     socket.emit('transcript-audio', audio);
   }, []);
   const audioTrack = localStream?.getAudioTracks()[0] ?? null;
@@ -254,7 +286,7 @@ export default function RoomPage() {
     gridPage, setGridPage,
     stage: stageLayout,
   } = useRoomLayout({
-    selfKey: socket.id,
+    selfKey: selfId,
     remoteKeys: Object.keys(remoteStreams),
     activeSpeaker,
     spotlightKey,
@@ -397,7 +429,7 @@ export default function RoomPage() {
     // Separate listener purely for the raise-hand cue (peers only; server
     // excludes the sender, so this never fires for our own toggle). Removed by
     // reference so we don't also detach useMediasoup's own listener.
-    const onPeerHandRaise = ({ raised }) => { if (raised) playSound('raiseHand'); };
+    const onPeerHandRaise = ({ raised }: { raised: boolean }) => { if (raised) playSound('raiseHand'); };
     socket.on('sfu-hand-raise-update', onPeerHandRaise);
 
     return () => {
@@ -432,7 +464,7 @@ export default function RoomPage() {
       if (localAudioOn) { playSound('toggleOff'); toggleAudio(); }
       pushNote({ kind: 'event', variant: 'info', text: 'You were muted by the meeting admin' });
     };
-    const onUnmuteRequest = ({ by } = {}) => setUnmuteRequestFrom(by ?? 'The meeting admin');
+    const onUnmuteRequest = ({ by }: { by: string }) => setUnmuteRequestFrom(by ?? 'The meeting admin');
     const onRemoved = () => {
       playSound('callEnd');
       setMeetingEndedSnack(false);
@@ -460,7 +492,7 @@ export default function RoomPage() {
   };
   const openChat = () => { setActivePanel('chat'); setUnreadCount(0); };
 
-  function sendMessage(e) {
+  function sendMessage(e: FormEvent) {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
@@ -526,7 +558,7 @@ export default function RoomPage() {
     pushNote({ kind: 'event', variant: 'info', text: 'Shared transcript downloaded' });
   }
 
-  const handlePeerVolumeChange = useCallback((peerId, name, volume) => {
+  const handlePeerVolumeChange = useCallback((peerId: string, name: string, volume: number) => {
     setPeerVolumes((prev) => ({ ...prev, [peerId]: volume }));
     appLogger.info('peer-volume-changed', { peerId, name, pct: Math.round(volume * 100) });
   }, []);
@@ -589,8 +621,8 @@ export default function RoomPage() {
   }
 
   // --- Camera tiles (shared by presentation rail) ---
-  function cameraTiles() {
-    const all = [
+  function cameraTiles(): CameraTile[] {
+    const all: Array<CameraTile | null> = [
       localStream && {
         key: 'local',
         stream: localStream,
@@ -601,14 +633,14 @@ export default function RoomPage() {
         videoOn: localVideoOn,
         audioOn: localAudioOn,
         handRaised: handRaised,
-        activeReaction: activeReactions[socket.id],
-        activeSpeaker: activeSpeaker === socket.id,
+        activeReaction: activeReactions[selfId],
+        activeSpeaker: activeSpeaker === selfId,
         mirror: true,
-        pinned: pinnedKey === socket.id,
-        onPin: () => handlePin({ id: socket.id }),
-        spotlighted: spotlightKey === socket.id,
+        pinned: pinnedKey === selfId,
+        onPin: () => handlePin({ id: selfId }),
+        spotlighted: spotlightKey === selfId,
         canSpotlight: isHost,
-        onSpotlight: () => handleSpotlight({ id: socket.id }),
+        onSpotlight: () => handleSpotlight({ id: selfId }),
       },
       ...remoteEntries.map(([peerId, stream]) => {
         const ps = peerStates[peerId];
@@ -623,13 +655,13 @@ export default function RoomPage() {
           avatar: ps?.avatar,
           videoOn: ps ? ps.video : stream.getVideoTracks().length > 0,
           audioOn: ps ? ps.audio : true,
-          connectionState: peerConnectionStates[peerId],
+        connectionState: peerConnectionStates[peerId],
           handRaised: ps?.handRaised ?? false,
           activeReaction: activeReactions[peerId],
           activeSpeaker: activeSpeaker === peerId,
           showVolumeControl: true,
           peerVolume: peerVolumes[peerId] ?? 1,
-          onPeerVolumeChange: (v) => handlePeerVolumeChange(peerId, ps?.name ?? 'Participant', v),
+          onPeerVolumeChange: (v: number) => handlePeerVolumeChange(peerId, ps?.name ?? 'Participant', v),
           pinned: pinnedKey === peerId,
           onPin: () => handlePin({ id: peerId }),
           spotlighted: spotlightKey === peerId,
@@ -637,9 +669,10 @@ export default function RoomPage() {
           onSpotlight: () => handleSpotlight({ id: peerId }),
         };
       }),
-    ].filter(Boolean);
+    ];
+    const present = all.filter((tile): tile is CameraTile => tile !== null);
     // Raised-hand participants pin to the top of the sidebar/grid (stable sort).
-    return all.sort((a, b) => (b.handRaised ? 1 : 0) - (a.handRaised ? 1 : 0));
+    return present.sort((a, b) => (b.handRaised ? 1 : 0) - (a.handRaised ? 1 : 0));
   }
 
   // --- Layouts ---
@@ -659,8 +692,8 @@ export default function RoomPage() {
             videoOn={localVideoOn}
             audioOn={localAudioOn}
             handRaised={handRaised}
-            activeReaction={activeReactions[socket.id]}
-            activeSpeaker={activeSpeaker === socket.id}
+            activeReaction={activeReactions[selfId]}
+            activeSpeaker={activeSpeaker === selfId}
             mirror
             objectFit="cover"
           />
@@ -944,8 +977,8 @@ export default function RoomPage() {
               videoOn={localVideoOn}
               audioOn={localAudioOn}
               handRaised={handRaised}
-              activeReaction={activeReactions[socket.id]}
-              activeSpeaker={activeSpeaker === socket.id}
+              activeReaction={activeReactions[selfId]}
+              activeSpeaker={activeSpeaker === selfId}
               mirror
             />
           </Box>
@@ -1066,15 +1099,15 @@ export default function RoomPage() {
 
   // Focused layout (pin / spotlight / sidebar): one big tile + the rest in a rail
   // (right column on desktop, top strip on mobile — same shape as presentation).
-  function renderFocusLayout(key, { showRail = true } = {}) {
+  function renderFocusLayout(key: string, { showRail = true }: { showRail?: boolean } = {}) {
     const tiles = cameraTiles();
-    const isFocus = (t) => t.key === key || (t.key === 'local' && key === socket.id);
+    const isFocus = (t: CameraTile) => t.key === key || (t.key === 'local' && key === selfId);
     const focus = tiles.find(isFocus);
     if (!focus) return renderGridLayout();
     const rest = tiles.filter((t) => !isFocus(t));
     // Strip `key` so it isn't forwarded as a prop to the single focus tile.
-    const focusProps = { ...focus };
-    delete focusProps.key;
+    const { key: _focusKey, ...focusProps } = focus;
+    void _focusKey;
     return (
       <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: { xs: 'column', sm: 'row' } }}>
         <Box sx={{ flex: 1, p: { xs: 1, sm: 1.5 }, minWidth: 0, minHeight: 0, pt: { xs: 8, sm: 9 }, pb: { sm: 13 } }}>
@@ -1116,11 +1149,11 @@ export default function RoomPage() {
   }
 
   // --- People / focus / moderation (M12) ---
-  const people = [
+  const people: PersonItem[] = [
     {
-      id: socket.id, name: user?.name ?? 'You', avatar: user?.avatar,
+      id: selfId, name: user?.name ?? 'You', avatar: user?.avatar,
       audioOn: localAudioOn, videoOn: localVideoOn, handRaised,
-      isSpeaking: activeSpeaker === socket.id, isLocal: true, isHost, pinned: pinnedKey === socket.id,
+      isSpeaking: activeSpeaker === selfId, isLocal: true, isHost, pinned: pinnedKey === selfId,
     },
     ...remoteEntries.map(([sid, stream]) => {
       const ps = peerStates[sid];
@@ -1139,15 +1172,15 @@ export default function RoomPage() {
     // Keyed by socketId so moderation targets the right socket; peers already
     // listed above via their SFU stream are filtered out to avoid duplicates.
     ...users
-      .filter((u) => u.socketId && u.socketId !== socket.id && !remoteStreams[u.socketId])
+      .filter((u) => u.socketId && u.socketId !== selfId && !remoteStreams[u.socketId!])
       .map((u) => ({
-        id: u.socketId, name: u.name, avatar: u.avatar,
+        id: u.socketId!, name: u.name, avatar: u.avatar,
         audioOn: true, videoOn: false, handRaised: false,
         isSpeaking: false, isLocal: false, isHost: false, pinned: pinnedKey === u.socketId,
       })),
   ];
 
-  const handleAskUnmute = (person) => socket.emit('sfu-request-unmute', { socketId: person.id });
+  const handleAskUnmute = (person: PersonItem) => socket.emit('sfu-request-unmute', { socketId: person.id });
   const handleMuteAll = () => {
     socket.emit('sfu-mute-all');
     pushNote({ kind: 'event', variant: 'info', text: 'Muted everyone' });
@@ -1158,7 +1191,7 @@ export default function RoomPage() {
   };
 
   // Map the derived stage descriptor (from useRoomLayout) to a rendered layout.
-  let stage;
+  let stage: React.ReactNode;
   switch (stageLayout.kind) {
     case 'presentation': stage = renderPresentationLayout(); break;
     case 'focus': stage = renderFocusLayout(stageLayout.focusKey, { showRail: stageLayout.showRail }); break;
@@ -1229,9 +1262,9 @@ export default function RoomPage() {
           >
             <Stack
               direction="row"
-              alignItems="center"
               spacing={1}
               sx={{
+                alignItems: 'center',
                 pointerEvents: 'auto',
                 bgcolor: 'control.surface',
                 backdropFilter: 'blur(12px)',
@@ -1296,9 +1329,9 @@ export default function RoomPage() {
 
             <Stack
               direction="row"
-              alignItems="center"
               spacing={1}
               sx={{
+                alignItems: 'center',
                 pointerEvents: 'auto',
                 bgcolor: 'control.surface',
                 backdropFilter: 'blur(12px)',

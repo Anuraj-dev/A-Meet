@@ -5,7 +5,7 @@ import {
   InfoOutlined as InfoIcon,
 } from '@mui/icons-material';
 
-interface NotificationNote {
+export interface NotificationNote {
   id: string | number;
   kind?: 'chat' | 'event';
   variant?: 'join' | 'leave' | 'info';

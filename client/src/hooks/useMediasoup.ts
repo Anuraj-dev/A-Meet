@@ -39,7 +39,7 @@ interface MediaDevicesOptions {
   startAudioOn?: boolean;
 }
 
-interface PeerState {
+export interface PeerState {
   video: boolean;
   audio: boolean;
   name?: string;
@@ -91,7 +91,7 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [remoteScreens, setRemoteScreens] = useState<Record<string, MediaStream>>({});
   const [peerStates, setPeerStates] = useState<Record<string, PeerState>>({});
-  const [peerConnectionStates, setPeerConnectionStates] = useState<Record<string, string | undefined>>({});
+  const [peerConnectionStates, setPeerConnectionStates] = useState<Record<string, RTCPeerConnectionState | undefined>>({});
   const [localVideoOn, setLocalVideoOn] = useState(false);
   const [localAudioOn, setLocalAudioOn] = useState(false);
   const [hasCamera, setHasCamera] = useState(false);
@@ -564,7 +564,7 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
         setPeerConnectionStates((prev) => {
           const ids = Object.keys(prev);
           if (ids.length === 0) return prev;
-          const next: Record<string, string> = {};
+          const next: Record<string, RTCPeerConnectionState> = {};
           for (const sid of ids) next[sid] = state;
           return next;
         });

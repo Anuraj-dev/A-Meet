@@ -74,6 +74,7 @@
     "src/pages/LandingPage.tsx",
     "src/pages/LobbyPage.tsx",
     "src/pages/LobbyPage.test.tsx",
+    "src/pages/RoomPage.tsx",
     "src/theme/theme.ts"
   ]
 }

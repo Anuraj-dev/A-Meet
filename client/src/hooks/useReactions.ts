@@ -7,7 +7,7 @@ interface ReactionUser { name?: string; avatar?: string }
 interface FloatingReaction extends ReactionUser { id: number; emoji: string }
 interface ReactionsOptions {
   socket: AppSocket;
-  userRef: RefObject<ReactionUser>;
+  userRef: RefObject<ReactionUser | null>;
   peerStatesRef: RefObject<Record<string, ReactionUser>>;
 }
 
