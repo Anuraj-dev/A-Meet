@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef } from 'react';
+import { useContext, useEffect, useRef, type MouseEvent, type ElementType } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -25,6 +25,15 @@ import EtherealShadow from '../components/EtherealShadow';
 import { playSound } from '../services/sounds';
 import { formatMeetingTime } from '../utils/format-time';
 
+interface PreviewToggleProps {
+  title: string;
+  on: boolean;
+  onClick: () => void;
+  OnIcon: ElementType;
+  OffIcon: ElementType;
+  disabled?: boolean;
+}
+
 // Shared ember/smoke palette — identical to LandingPage so both read as one product.
 const DK = {
   bg:        '#140f0c',
@@ -45,7 +54,7 @@ const DK = {
   font:      '"Plus Jakarta Sans", system-ui, sans-serif',
 };
 
-const EASE = [0.23, 1, 0.32, 1];
+const EASE = [0.23, 1, 0.32, 1] as const;
 const EASE_CSS = 'cubic-bezier(0.23,1,0.32,1)';
 
 // framer-motion entrance — same staggered rise the landing uses, so both pages
@@ -74,7 +83,7 @@ const primaryBtn = {
   '&:active': { bgcolor: DK.emberDark },
 };
 
-function PreviewToggle({ title, on, onClick, OnIcon, OffIcon, disabled }) {
+function PreviewToggle({ title, on, onClick, OnIcon, OffIcon, disabled }: PreviewToggleProps) {
   const btn = (
     <IconButton
       onClick={onClick}
@@ -109,10 +118,11 @@ export default function LobbyPage() {
   const { roomId } = useParams();
   const navigate   = useNavigate();
   const { user }   = useAuth();
-  const previewRef = useRef(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
 
   const roomMeta = useContext(RoomMetaContext);
-  const isScheduled = Boolean(roomMeta?.scheduledFor) && Boolean(roomMeta?.title);
+  const scheduledMeta = roomMeta?.scheduledFor && roomMeta.title ? roomMeta : null;
+  const isScheduled = Boolean(scheduledMeta);
 
   const {
     previewStream, videoDevices, audioDevices,
@@ -142,7 +152,7 @@ export default function LobbyPage() {
   const onToggleVideo = () => { playSound(videoOn ? 'toggleOff' : 'toggleOn'); toggleVideo(); };
   const onToggleAudio = () => { playSound(audioOn ? 'toggleOff' : 'toggleOn'); toggleAudio(); };
 
-  function handlePreviewMouseMove(e) {
+  function handlePreviewMouseMove(e: MouseEvent<HTMLDivElement>) {
     const el = previewRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -212,7 +222,7 @@ export default function LobbyPage() {
               <Avatar
                 src={user.avatar}
                 alt={user.name}
-                imgProps={{ referrerPolicy: 'no-referrer' }}
+                slotProps={{ img: { referrerPolicy: 'no-referrer' } }}
                 sx={{ width: 34, height: 34, fontFamily: DK.font, fontWeight: 700, bgcolor: DK.surface2, color: DK.ink }}
               />
             </Box>
@@ -256,7 +266,7 @@ export default function LobbyPage() {
               <VideoTile
                 stream={previewStream}
                 muted
-                name={user?.name}
+                name={user?.name ?? ''}
                 avatar={user?.avatar}
                 videoOn={videoOn}
                 audioOn={audioOn}
@@ -371,7 +381,7 @@ export default function LobbyPage() {
                     '& .MuiSvgIcon-root.MuiSelect-icon': { color: DK.faint },
                   }}
                   MenuProps={{
-                    PaperProps: {
+                    slotProps: { paper: {
                       sx: {
                         bgcolor: DK.panel, borderRadius: '14px',
                         border: `1px solid ${DK.line}`,
@@ -379,7 +389,7 @@ export default function LobbyPage() {
                         backdropFilter: 'blur(20px)',
                         backgroundImage: 'none',
                       },
-                    },
+                    } },
                   }}
                 >
                   {devices.length === 0 ? (
@@ -446,17 +456,17 @@ export default function LobbyPage() {
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 maxWidth: 340,
               }}>
-                {roomMeta.title}
+                {scheduledMeta!.title}
               </Typography>
               <Typography sx={{ fontFamily: DK.font, fontSize: 13, color: DK.dim }}>
-                {formatMeetingTime(roomMeta.scheduledFor)}
+                {formatMeetingTime(scheduledMeta!.scheduledFor!)}
               </Typography>
             </Box>
           )}
 
           {/* Room code */}
           <Box component={motion.div} variants={item} sx={{ mb: 3.5 }}>
-            <Stack direction="row" alignItems="center" spacing={0.75}>
+            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
               <LockIcon sx={{ fontSize: 14, color: DK.sage }} />
               <Typography sx={{
                 fontFamily: '"JetBrains Mono", monospace',

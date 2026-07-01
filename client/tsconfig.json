@@ -70,6 +70,10 @@
     "src/components/UpcomingMeetings.tsx",
     "src/components/VideoTile.tsx",
     "src/components/VideoTile.test.tsx",
+    "src/pages/CheckMeetingCode.tsx",
+    "src/pages/LandingPage.tsx",
+    "src/pages/LobbyPage.tsx",
+    "src/pages/LobbyPage.test.tsx",
     "src/theme/theme.ts"
   ]
 }
