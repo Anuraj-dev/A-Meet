@@ -5,7 +5,7 @@ import {
 import { Close as CloseIcon, Send as SendIcon } from '@mui/icons-material';
 
 interface ChatSender { id: string; name?: string; avatar?: string }
-export interface ChatMessage { type?: 'event'; text: string; ts: string | number | Date; sender?: ChatSender }
+export interface ChatMessage { type?: 'event' | 'chat'; text: string; ts: string | number | Date; sender?: ChatSender }
 interface ChatPanelProps {
   messages: ChatMessage[];
   input: string;

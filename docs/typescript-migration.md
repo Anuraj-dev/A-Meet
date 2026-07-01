@@ -52,12 +52,12 @@ includes all of `server/src`; the client includes migrated files explicitly.
 ## Current status
 
 - Server: all `server/src` modules are strict TypeScript and run through `tsx`.
-- Client: every source module through the components layer is strict TypeScript.
-  The non-room pages (`CheckMeetingCode`, `LandingPage`, and `LobbyPage`) are also
-  strict TypeScript; `RoomPage.jsx` remains the final source migration.
+- Client: every source module, including the final `RoomPage.tsx` composition
+  layer, is strict TypeScript. Room presence, chat, transcription, and host
+  moderation events now consume the shared Socket.io contract map.
 - Shared: SFU request/ack contracts are consumed by real server and client modules.
-- Remaining client order: `RoomPage.jsx` last, then any legacy JavaScript test
-  harness files that are intentionally outside the source migration frontier.
+- Remaining JavaScript is limited to legacy test/setup harness files; production
+  client source is fully migrated.
 
 ## How to migrate a module (leaf-up)
 

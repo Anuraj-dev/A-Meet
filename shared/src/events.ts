@@ -3,6 +3,47 @@
 // land — the compiler flags a mismatch the moment one side changes.
 
 import type { WebRtcServerToClientEvents } from './webrtc';
+import type { AuthUserDto } from './dto';
+import type { SocketAck } from './sfu';
+
+export interface RoomUser extends AuthUserDto { socketId?: string }
+export interface ChatMessagePayload {
+  sender: AuthUserDto;
+  text: string;
+  ts: number;
+}
+export interface TranscriptState {
+  active: boolean;
+  startedAt: number | null;
+  startedBy: { id: string; name: string } | null;
+  stoppedAt: number | null;
+}
+export interface TranscriptEntry {
+  id: string;
+  sequence: number;
+  speaker: { id: string; name: string; avatar: string };
+  text: string;
+  ts: number;
+  provider: string;
+  provisional: boolean;
+  revisedAt?: number;
+}
+export interface TranscriptInterim {
+  utteranceId: string;
+  speaker: { id: string; name: string; avatar: string };
+  text: string;
+  ts: number;
+}
+export interface TranscriptSnapshot extends TranscriptState {
+  entries: TranscriptEntry[];
+  configured: boolean;
+}
+export interface TranscriptContributorState {
+  status: 'connecting' | 'listening' | 'error';
+  provider?: string;
+  message?: string;
+}
+type TranscriptControlAck = SocketAck<{ ok: true; state?: TranscriptState }>;
 
 /**
  * Canonical Socket.io event names. Both ends import these constants instead of
@@ -52,4 +93,28 @@ export interface ServerToClientEvents extends WebRtcServerToClientEvents {
   'sfu-active-speaker': (payload: import('./sfu').SfuActiveSpeakerPayload) => void;
   'sfu-reaction': (payload: { emoji: string; socketId: string }) => void;
   'sfu-spotlight': (payload: { socketId: string | null }) => void;
+  'room-users': (users: RoomUser[]) => void;
+  'user-joined': (user: RoomUser) => void;
+  'user-left': (user: RoomUser) => void;
+  'chat-message': (message: ChatMessagePayload) => void;
+  'transcript-snapshot': (snapshot: TranscriptSnapshot) => void;
+  'transcript-state': (state: TranscriptState) => void;
+  'transcript-segment': (entry: TranscriptEntry) => void;
+  'transcript-interim': (interim: TranscriptInterim) => void;
+  'transcript-contributor-state': (state: TranscriptContributorState) => void;
+  'sfu-meeting-ended': () => void;
+  'sfu-force-muted': () => void;
+  'sfu-unmute-request': (payload: { by: string }) => void;
+  'sfu-removed': () => void;
+}
+
+export interface RoomClientToServerEvents {
+  'join-room': (roomId: string) => void;
+  'leave-room': (roomId?: string) => void;
+  'chat-message': (payload: { roomId: string; text: string }) => void;
+  'transcript-start': (payload: Record<string, never>, callback: (response: TranscriptControlAck) => void) => void;
+  'transcript-stop': (payload: Record<string, never>, callback: (response: TranscriptControlAck) => void) => void;
+  'transcript-contributor-start': (payload: Record<string, never>, callback: (response: SocketAck<{ ok: true }>) => void) => void;
+  'transcript-audio': (audio: ArrayBuffer) => void;
+  'transcript-contributor-stop': () => void;
 }
