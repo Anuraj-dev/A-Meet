@@ -1,9 +1,0 @@
-// ICE config now lives in one place (services/ice-config) so the SFU and
-// this legacy P2P helper can't drift apart.
-import { ICE_SERVERS } from './ice-config';
-
-export { ICE_SERVERS };
-
-export function createPeerConnection(): RTCPeerConnection {
-  return new RTCPeerConnection({ iceServers: ICE_SERVERS });
-}
