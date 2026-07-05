@@ -83,6 +83,11 @@ function CircleButton({ title, onClick, disabled = false, variant = 'idle', badg
 
   const btn = (
     <IconButton
+      // Explicit accessible name so the control isn't reliant on the Tooltip
+      // alone. A disabled control is wrapped in a focusable <span> that carries
+      // the Tooltip's label instead (the button is inert), so we skip it there
+      // to avoid labelling the same control twice.
+      aria-label={disabled ? undefined : title}
       onClick={onClick}
       disabled={disabled}
       sx={{
@@ -273,6 +278,7 @@ export default function ControlBar({
       {/* End call — wider red pill, like Meet */}
       <Tooltip title="Leave call">
         <IconButton
+          aria-label="Leave call"
           onClick={onLeave}
           sx={{
             ml: { xs: 0.25, sm: 0.5 },

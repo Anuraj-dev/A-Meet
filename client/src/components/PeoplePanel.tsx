@@ -135,7 +135,7 @@ export default function PeoplePanel({
             </Box>
           </Typography>
           <Tooltip title="Close">
-            <IconButton size="small" onClick={onClose} sx={{ color: 'text.secondary' }}>
+            <IconButton aria-label="Close" size="small" onClick={onClose} sx={{ color: 'text.secondary' }}>
               <CloseIcon fontSize="small" />
             </IconButton>
           </Tooltip>
