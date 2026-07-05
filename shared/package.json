@@ -8,6 +8,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json"

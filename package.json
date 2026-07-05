@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "A-Meet — a Google Meet clone (MERN + Socket.io + mediasoup SFU)",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "workspaces": [
     "client",
     "server",
