@@ -24,6 +24,8 @@ import BrandMark from '../components/BrandMark';
 import EtherealShadow from '../components/EtherealShadow';
 import { playSound } from '../services/sounds';
 import { formatMeetingTime } from '../utils/format-time';
+// Shared ember/smoke palette — the same tokens the landing uses, so both read as one product.
+import { DK } from '../theme/theme';
 
 interface PreviewToggleProps {
   title: string;
@@ -33,26 +35,6 @@ interface PreviewToggleProps {
   OffIcon: ElementType;
   disabled?: boolean;
 }
-
-// Shared ember/smoke palette — identical to LandingPage so both read as one product.
-const DK = {
-  bg:        '#140f0c',
-  surface:   'rgba(255,255,255,0.05)',
-  surface2:  'rgba(255,255,255,0.09)',
-  ink:       '#f4efe9',
-  dim:       '#a89f97',
-  faint:     '#6f675f',
-  line:      'rgba(255,255,255,0.09)',
-  line2:     'rgba(255,255,255,0.16)',
-  ember:     '#e8623d',
-  emberDark: '#d4502c',
-  emberSoft: 'rgba(232,98,61,0.16)',
-  sage:      '#7d9183',
-  sageSoft:  'rgba(125,145,131,0.16)',
-  panel:     '#1b140f',
-  display:   '"Bricolage Grotesque", system-ui, sans-serif',
-  font:      '"Plus Jakarta Sans", system-ui, sans-serif',
-};
 
 const EASE = [0.23, 1, 0.32, 1] as const;
 const EASE_CSS = 'cubic-bezier(0.23,1,0.32,1)';
