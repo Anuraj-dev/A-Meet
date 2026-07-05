@@ -198,8 +198,7 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
 
       if (allowed) {
         state.violations = 0;
-        handler(...args);
-        return;
+        return handler(...args);
       }
 
       state.violations += 1;

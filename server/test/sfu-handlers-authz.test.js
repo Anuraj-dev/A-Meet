@@ -32,7 +32,9 @@ import { getOrCreateRoom, getRoom, getPeer } from '../src/sfu/sfu-rooms.js';
 import { addUser, removeUser } from '../src/socket/room-manager.js';
 import { Room } from '../src/models/Room.js';
 
-const ROOM = 'room-1';
+// A well-formed Google Meet-style room code (xxx-xxxx-xxx); the SFU entry point
+// validates this format and DB existence before seeding the socket→room map.
+const ROOM = 'abc-defg-hij';
 const HOST_ID = 'host-user';
 const TARGET = 'target-sock';
 
@@ -90,6 +92,9 @@ beforeEach(() => {
   // get-rtp-capabilities only needs a room with a router and an existing
   // audioLevelObserver (truthy → skip the observer-creation branch).
   getOrCreateRoom.mockResolvedValue({ router: { rtpCapabilities: {} }, audioLevelObserver: {} });
+  // The entry handler validates the room's DB existence before seeding the map;
+  // asHost()/asNonHost() override this per test for the moderation authz check.
+  Room.findOne.mockResolvedValue({ active: true, admin: HOST_ID });
 });
 
 describe('SFU host-moderation authorization', () => {
