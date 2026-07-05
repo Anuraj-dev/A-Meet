@@ -1,9 +1,9 @@
 name: Typecheck
 
 # Runs the strict TypeScript type-checker across all workspaces on every PR and
-# on pushes to main. While the codebase is still mostly JavaScript this only
-# checks the shared contracts and each package's migrated TypeScript (allowJs is
-# on, checkJs is off), so it stays green until modules are converted leaf-up.
+# on pushes to main. It checks the shared contracts and each package's migrated
+# TypeScript (allowJs is on, checkJs is off), so it stays green while any
+# remaining JavaScript modules are converted leaf-up.
 on:
   push:
     branches: [main]

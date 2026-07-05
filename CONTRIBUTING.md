@@ -33,7 +33,7 @@ migration) because it only breaks when *behavior* breaks.
 
 **Prior art — match this style:**
 
-- `client/src/components/VideoTile.test.jsx` — opens the volume menu and asserts on the
+- `client/src/components/VideoTile.test.tsx` — opens the volume menu and asserts on the
   rendered result without reaching into or mutating call state.
 - `server/test/sfu-handlers-authz.test.js` — the capture-and-invoke pattern: register the
   handlers, capture the socket callbacks, invoke them, and assert the *effect* (host action
@@ -67,6 +67,6 @@ npm run verify
 coverage ratchet, and the `Playwright smoke`). A green `verify` means those gates are satisfied. It does **not** run
 the path-scoped `Server image smoke` job (a ~15-min Docker build of the production image
 that spawns a real mediasoup worker) — CI only runs that when server-image files change
-(`server/src/**`, `server/Dockerfile`, `server/.dockerignore`, `server/package*.json`,
-`docker-compose.prod.yml`).
+(`server/src/**`, `server/Dockerfile`, `.dockerignore`, `server/package.json`, `shared/**`,
+`package.json`, `package-lock.json`, `docker-compose.prod.yml`).
 The `test:e2e:install` step is a one-time prerequisite — it is *not* part of `npm ci`.
