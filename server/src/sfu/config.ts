@@ -31,6 +31,18 @@ export const mediaCodecs: MediasoupTypes.RouterRtpCodecCapability[] = [
   },
 ];
 
+// Per-peer resource caps (DoS guard). Without these an authenticated peer can
+// spam `sfu-create-transport` / `sfu-produce` to exhaust the Worker's bounded RTC
+// port range and file descriptors, degrading the SFU for everyone.
+//   • Transports: a legitimate client opens exactly two — one send, one recv. The
+//     extra headroom covers a transport recreated after an ICE/DTLS failure before
+//     the stale one is garbage-collected.
+export const MAX_TRANSPORTS_PER_PEER = 4;
+//   • Producers: a legitimate client produces at most four tracks — mic, camera,
+//     screen-share video, and screen-share audio. One slot of headroom covers a
+//     produce that races an old producer's teardown.
+export const MAX_PRODUCERS_PER_PEER = 5;
+
 // Per-Worker settings. The RTC port range is the band of UDP/TCP ports the
 // Worker binds for media — it must be open in the firewall on LAN/prod.
 export const workerSettings: MediasoupTypes.WorkerSettings = {
