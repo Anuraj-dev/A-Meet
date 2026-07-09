@@ -10,10 +10,6 @@ export function parseSnsAlarm(event, environment) {
     state: alarm.NewStateValue,
     reason: alarm.NewStateReason,
     stateChangeTime: alarm.StateChangeTime ?? null,
-    // CloudWatch carries the timestamp of the state it is transitioning out of,
-    // so a quick ALARM->OK flap can be measured without any external store.
-    previousStateChangeTime:
-      alarm.OldStateTransitionedTimestamp ?? alarm.PreviousStateChangeTime ?? null,
   };
 }
 
@@ -40,8 +36,10 @@ export function formatRecoveryMessage({ alarmName, environment, durationMs }) {
 // Pure delivery decision: ALARMs always pass through unchanged for instant
 // paging. A quick recovery (OK within the suppression window of the ALARM it
 // clears) collapses into one compact line instead of a full ALARM/OK pair.
-// When the recovery duration can't be determined, we fall back to the full OK
-// block so a genuine recovery is never silently dropped.
+// The CloudWatch SNS payload only carries StateChangeTime, so the caller
+// supplies previousStateChangeTime (the matching ALARM's timestamp, persisted
+// by the Lambda). When the recovery duration can't be determined, we fall back
+// to the full OK block so a genuine recovery is never silently dropped.
 export function decideNotification(parsed, options = {}) {
   const windowMs = options.suppressionWindowMs ?? DEFAULT_SUPPRESSION_WINDOW_MS;
 
@@ -49,7 +47,10 @@ export function decideNotification(parsed, options = {}) {
     return { text: formatAlarmMessage(parsed) };
   }
 
-  const durationMs = recoveryDurationMs(parsed);
+  const durationMs = recoveryDurationMs({
+    stateChangeTime: parsed.stateChangeTime,
+    previousStateChangeTime: options.previousStateChangeTime ?? null,
+  });
   if (durationMs !== null && durationMs <= windowMs) {
     return {
       text: formatRecoveryMessage({
