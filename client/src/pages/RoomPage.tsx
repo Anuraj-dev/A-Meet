@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, type ComponentProps, type FormEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Alert, Avatar, AvatarGroup, Box, Button, Chip, Dialog, DialogActions,
+  Alert, Avatar, AvatarGroup, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
   DialogContent, DialogTitle, IconButton, Popover,
   Snackbar, Stack, Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
@@ -224,7 +224,7 @@ export default function RoomPage() {
     isScreenSharing, localScreenStream, localScreenSurface, shareScreen, stopScreenShare,
     micGain, setMicGain,
     handRaised, toggleHand,
-    activeSpeaker, socketConnected, permissionDenied, rtcStats,
+    activeSpeaker, socketConnected, mediaRecovery, retryMedia, permissionDenied, rtcStats,
   } = useMediasoup(roomId, devices);
 
   const sendTranscriptAudio = useCallback((audio: ArrayBuffer) => {
@@ -1219,11 +1219,51 @@ export default function RoomPage() {
       <RtcStatsOverlay stats={rtcStats} />
 
       {/* Floating status banners */}
-      {(!socketConnected || permissionDenied) && (
+      {(() => {
+        // Media recovery only surfaces while the socket itself is up: a dropped
+        // socket already shows its own "Connection lost" banner below, and the
+        // media ladder pauses until it reconnects, so showing both would be noise.
+        const mediaReconnecting = socketConnected && mediaRecovery.status === 'reconnecting';
+        const mediaExhausted = socketConnected && mediaRecovery.status === 'exhausted';
+        const showBanner = !socketConnected || mediaReconnecting || mediaExhausted || permissionDenied;
+        if (!showBanner) return null;
+        return (
         <Box sx={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 1400, width: 'min(92%, 520px)' }}>
           {!socketConnected && (
             <Alert severity="warning" variant="filled" sx={{ borderRadius: 2, mb: 1 }}>
               Connection lost — reconnecting…
+            </Alert>
+          )}
+          {mediaReconnecting && (
+            <Alert
+              severity="warning"
+              variant="filled"
+              icon={<CircularProgress size={18} thickness={5} sx={{ color: 'inherit' }} />}
+              sx={{ borderRadius: 2, mb: 1, bgcolor: 'ember.dark', color: '#fff', '& .MuiAlert-icon': { color: '#fff' } }}
+            >
+              Reconnecting media…
+            </Alert>
+          )}
+          {mediaExhausted && (
+            <Alert
+              severity="error"
+              variant="filled"
+              sx={{ borderRadius: 2, mb: 1, alignItems: 'center' }}
+              action={
+                <Button
+                  size="small"
+                  onClick={retryMedia}
+                  sx={{
+                    color: '#fff', borderColor: 'rgba(255,255,255,0.6)', fontWeight: 700,
+                    '&:hover': { borderColor: '#fff', bgcolor: 'ember.soft' },
+                  }}
+                  variant="outlined"
+                >
+                  Retry
+                </Button>
+              }
+            >
+              Couldn’t connect your media. Check your connection and retry.
             </Alert>
           )}
           {permissionDenied && (
@@ -1232,7 +1272,8 @@ export default function RoomPage() {
             </Alert>
           )}
         </Box>
-      )}
+        );
+      })()}
 
       {/* Stage + chat */}
       <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
