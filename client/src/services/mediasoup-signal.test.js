@@ -14,12 +14,16 @@ const h = vi.hoisted(() => {
     state.timer = setTimeout(() => cb(new Error('operation has timed out')), state.timeoutMs);
   });
   const timeout = vi.fn((ms) => { state.timeoutMs = ms; return { emit }; });
-  return { state, emit, timeout };
+  // `connected` mirrors socket.io's live state; request() reads it to tell a
+  // real ack timeout (socket up) from a mid-handshake disconnect (socket down).
+  const socket = { timeout, emit: vi.fn(), connected: true };
+  return { state, emit, timeout, socket };
 });
 
-vi.mock('./socket', () => ({ default: { timeout: h.timeout, emit: vi.fn() } }));
+const socketMock = h.socket;
+vi.mock('./socket', () => ({ default: h.socket }));
 
-import { request } from './mediasoup-signal';
+import { request, SignalError } from './mediasoup-signal';
 
 // Deliver an ack the way socket.io would (err-first), cancelling the pending
 // timeout first so it can't also fire.
@@ -35,6 +39,7 @@ function ackError(message) {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  socketMock.connected = true;
   h.state.event = h.state.data = h.state.cb = h.state.timeoutMs = h.state.timer = null;
 });
 
@@ -65,18 +70,36 @@ describe('services/mediasoup-signal request()', () => {
     await expect(p).resolves.toEqual({ id: 'producer-1' });
   });
 
-  it('rejects with the server error when the ack carries one', async () => {
+  it('rejects with a server-reason SignalError when the ack carries an error', async () => {
     const p = request('sfu-connect-transport', { dtlsParameters: {} });
     ackError('transport already connected');
     await expect(p).rejects.toThrow('transport already connected');
+    await expect(p).rejects.toMatchObject({ reason: 'server', event: 'sfu-connect-transport' });
   });
 
-  it('rejects with a "<event> timed out" error when the ack never arrives', async () => {
+  it('labels a real ack timeout (socket still connected) as reason "timeout"', async () => {
+    socketMock.connected = true;
     const p = request('sfu-produce', { kind: 'audio' }, 5000);
     // Attach the rejection expectation before advancing so the rejection is
     // always observed (no unhandled-rejection window).
-    const settled = expect(p).rejects.toThrow('sfu-produce timed out');
+    const settled = Promise.all([
+      expect(p).rejects.toThrow('sfu-produce timed out'),
+      expect(p).rejects.toBeInstanceOf(SignalError),
+      expect(p).rejects.toMatchObject({ reason: 'timeout', socketConnected: true }),
+    ]);
     await vi.advanceTimersByTimeAsync(5000);
+    await settled;
+  });
+
+  it('labels a mid-handshake drop (socket disconnected) as reason "disconnect", not timeout', async () => {
+    const p = request('sfu-get-rtp-capabilities', { roomId: 'r1' });
+    // Socket dropped before the ack — the incident's failure mode.
+    socketMock.connected = false;
+    const settled = Promise.all([
+      expect(p).rejects.toMatchObject({ reason: 'disconnect', socketConnected: false, event: 'sfu-get-rtp-capabilities' }),
+      expect(p).rejects.toThrow(/socket disconnected/),
+    ]);
+    await vi.advanceTimersByTimeAsync(10000);
     await settled;
   });
 });

@@ -32,6 +32,21 @@ const CAM_VIDEO_ENCODINGS = [
 ];
 const CAM_VIDEO_CODEC_OPTIONS = { videoGoogleStartBitrate: 1000 };
 
+// First-connection recovery: a failed setup (incl. the very first one, which the
+// 2026-07-05 incident stranded media-less) is retried with capped exponential
+// backoff while the socket is connected. A socket drop pauses the ladder — the
+// next `connect` restarts it with a fresh budget. After MEDIA_MAX_RETRIES the
+// hook reports `exhausted` so the UI can offer a manual retry.
+const MEDIA_RETRY_BASE_MS = 500;
+const MEDIA_RETRY_MAX_MS = 8000;
+const MEDIA_MAX_RETRIES = 5;
+
+export type MediaRecoveryStatus = 'connecting' | 'ready' | 'reconnecting' | 'exhausted';
+export interface MediaRecoveryState {
+  status: MediaRecoveryStatus;
+  attempt: number; // number of retries scheduled so far (0 on the first attempt)
+}
+
 interface MediaDevicesOptions {
   videoDeviceId?: string;
   audioDeviceId?: string;
@@ -103,6 +118,7 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
   const [handRaised, setHandRaised] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
+  const [mediaRecovery, setMediaRecovery] = useState<MediaRecoveryState>({ status: 'connecting', attempt: 0 });
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [rtcStats, setRtcStats] = useState<RtcStatsState | null>(null); // dev-only diagnostics
 
@@ -132,7 +148,15 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
   const desiredAudioOnRef = useRef(devices.startAudioOn ?? true);
   const desiredVideoOnRef = useRef(devices.startVideoOn ?? true);
   const initializedRef = useRef(false);
+  const retryAttemptRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryMediaRef = useRef<(() => void) | null>(null);
   useEffect(() => { devicesRef.current = devices; }, [devices]);
+
+  // Stable manual-retry handle for the room UI (used when auto-retries are
+  // exhausted). Delegates to the current effect's retry function via a ref so
+  // the callback identity never changes.
+  const retryMedia = useCallback(() => { retryMediaRef.current?.(); }, []);
 
   const logSfuStage = useCallback((stage: string, data: Record<string, unknown> = {}, level: LoggerLevel = 'info') => {
     const fn = appLogger[level] ?? appLogger.info;
@@ -496,6 +520,12 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
         hasVideoTrack: Boolean(stream?.getVideoTracks()[0]),
       });
 
+      // Never emit on a connecting socket: the first request would race the
+      // handshake and "time out" in <1s (the 2026-07-05 incident). Wait for the
+      // socket's connected state before the first signaling round-trip.
+      await waitForSocketConnect();
+      if (cancelled) return;
+
       // Close any stale transports from a previous session before signaling.
       try { sendTransportRef.current?.close(); } catch { /* gone */ }
       try { recvTransportRef.current?.close(); } catch { /* gone */ }
@@ -662,6 +692,106 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
       if (handRaisedRef.current) socket.emit('sfu-raise-hand', { raised: true });
     }
 
+    // Resolve once the socket reports connected. If it already is, resolve
+    // synchronously; otherwise wait for the next `connect` (self-removing so we
+    // don't leak a listener). setupSfu awaits this before its first emit.
+    function waitForSocketConnect(): Promise<void> {
+      if (socket.connected) return Promise.resolve();
+      return new Promise((resolve) => {
+        const onConnect = () => { socket.off('connect', onConnect); resolve(); };
+        socket.on('connect', onConnect);
+      });
+    }
+
+    function clearRemoteState() {
+      consumers.clear();
+      peerStreams.clear();
+      screenStreams.clear();
+      producerInfo.clear();
+      pendingProducers.clear();
+      producers.clear();
+      setRemoteStreams({});
+      setRemoteScreens({});
+      setPeerStates({});
+      setPeerConnectionStates({});
+    }
+
+    function teardownGainGraph() {
+      try { gainSrcRef.current?.disconnect(); } catch { /* ignore */ }
+      try { gainNodeRef.current?.disconnect(); } catch { /* ignore */ }
+      try { gainDestRef.current?.disconnect(); } catch { /* ignore */ }
+      gainSrcRef.current = null;
+      gainNodeRef.current = null;
+      gainDestRef.current = null;
+    }
+
+    // Serializes setup so a `connect` event can't kick off a second pass while
+    // init's first pass is still awaiting the socket handshake.
+    let setupRunning = false;
+
+    async function runSetup() {
+      if (cancelled || !localStreamRef.current || setupRunning) return;
+      setupRunning = true;
+      if (retryTimerRef.current !== null) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+
+      // Drop stale remote state and the dead gain graph from any prior session
+      // before re-signaling (harmless no-op on the very first setup).
+      clearRemoteState();
+      if (gainNodeRef.current) {
+        appLogger.info('media setup — tearing down previous gain graph', { savedGain: micGainRef.current });
+        teardownGainGraph();
+      }
+
+      const attempt = retryAttemptRef.current;
+      setMediaRecovery({ status: attempt === 0 ? 'connecting' : 'reconnecting', attempt });
+
+      try {
+        await setupSfu(localStreamRef.current);
+        if (cancelled) return;
+        initializedRef.current = true;
+        retryAttemptRef.current = 0;
+        setMediaRecovery({ status: 'ready', attempt: 0 });
+        appLogger.info('SFU setup complete');
+        logSfuStage('setup-complete');
+      } catch (err: unknown) {
+        appLogger.error('SFU setup failed', { err: errorMessage(err), attempt });
+        logSfuStage('setup-failed', { err: errorMessage(err), attempt }, 'error');
+        if (!cancelled && import.meta.env.DEV) console.error('[sfu] setup failed:', errorMessage(err));
+        scheduleRetry();
+      } finally {
+        setupRunning = false;
+      }
+    }
+
+    function scheduleRetry() {
+      if (cancelled) return;
+      // A dropped socket pauses the ladder; the `connect` handler restarts it
+      // with a fresh budget, so don't burn retries hammering a dead socket.
+      if (!socket.connected) {
+        setMediaRecovery({ status: 'reconnecting', attempt: retryAttemptRef.current });
+        return;
+      }
+      if (retryAttemptRef.current >= MEDIA_MAX_RETRIES) {
+        setMediaRecovery({ status: 'exhausted', attempt: retryAttemptRef.current });
+        logSfuStage('setup-retries-exhausted', { attempts: retryAttemptRef.current }, 'error');
+        return;
+      }
+      const attempt = retryAttemptRef.current;
+      const delay = Math.min(MEDIA_RETRY_MAX_MS, MEDIA_RETRY_BASE_MS * 2 ** attempt);
+      retryAttemptRef.current = attempt + 1;
+      setMediaRecovery({ status: 'reconnecting', attempt: retryAttemptRef.current });
+      logSfuStage('setup-retry-scheduled', { attempt: retryAttemptRef.current, delay });
+      retryTimerRef.current = setTimeout(() => { retryTimerRef.current = null; runSetup(); }, delay);
+    }
+
+    // Manual retry (used when auto-retries are exhausted): reset the budget and
+    // try again immediately if the socket is up.
+    retryMediaRef.current = () => {
+      retryAttemptRef.current = 0;
+      if (socket.connected) runSetup();
+      else setMediaRecovery({ status: 'reconnecting', attempt: 0 });
+    };
+
     async function init() {
       const { videoDeviceId, audioDeviceId } = devicesRef.current;
       const stream = new MediaStream();
@@ -723,53 +853,29 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
       socket.on('sfu-hand-raise-update', onHandRaiseUpdate);
       socket.on('sfu-active-speaker', onActiveSpeaker);
 
-      try {
-        await setupSfu(stream);
-        initializedRef.current = true;
-        appLogger.info('SFU init complete');
-        logSfuStage('setup-complete');
-      } catch (err: unknown) {
-        appLogger.error('SFU init failed', { err: errorMessage(err) });
-        logSfuStage('setup-failed', { err: errorMessage(err) }, 'error');
-        if (!cancelled && import.meta.env.DEV) console.error('[sfu] init failed:', errorMessage(err));
-      }
+      // First setup. runSetup awaits the socket's connected state internally, so
+      // it never races the handshake; a failure schedules a backoff retry.
+      await runSetup();
     }
 
-    const onSocketConnect = async () => {
+    const onSocketConnect = () => {
       setSocketConnected(true);
-      if (!initializedRef.current || !localStreamRef.current || cancelled) return;
-
-      // Stale remote state — clear it so reconnect starts fresh.
-      consumers.clear();
-      peerStreams.clear();
-      screenStreams.clear();
-      producerInfo.clear();
-      pendingProducers.clear();
-      producers.clear();
-      setRemoteStreams({});
-      setRemoteScreens({});
-      setPeerStates({});
-      setPeerConnectionStates({});
-
-      // The gain graph feeds the old producer which is now dead. Tear it down;
-      // setupSfu will rebuild it against the fresh producer using micGainRef.current.
-      appLogger.info('socket reconnect — tearing down gain graph', { savedGain: micGainRef.current });
-      try { gainSrcRef.current?.disconnect(); } catch { /* ignore */ }
-      try { gainNodeRef.current?.disconnect(); } catch { /* ignore */ }
-      try { gainDestRef.current?.disconnect(); } catch { /* ignore */ }
-      gainSrcRef.current = null; gainNodeRef.current = null; gainDestRef.current = null;
-
-      try {
-        await setupSfu(localStreamRef.current);
-        logSfuStage('reconnect-complete');
-      } catch (err: unknown) {
-        appLogger.error('SFU reconnect failed', { err: errorMessage(err) });
-        logSfuStage('reconnect-failed', { err: errorMessage(err) }, 'error');
-        if (!cancelled && import.meta.env.DEV) console.error('[sfu] reconnect failed:', errorMessage(err));
-      }
+      if (cancelled || !localStreamRef.current) return;
+      // Retry setup on every reconnect regardless of whether the FIRST setup
+      // ever completed — that gap is exactly what stranded users media-less.
+      // A fresh connection resets the backoff budget.
+      retryAttemptRef.current = 0;
+      runSetup();
     };
 
-    const onSocketDisconnect = () => setSocketConnected(false);
+    const onSocketDisconnect = () => {
+      setSocketConnected(false);
+      // Surface the drop while socket.io auto-reconnects; keep an exhausted state
+      // sticky so the manual-retry affordance doesn't flicker away.
+      setMediaRecovery((r) => (r.status === 'ready' || r.status === 'connecting'
+        ? { status: 'reconnecting', attempt: r.attempt }
+        : r));
+    };
 
     socket.on('connect', onSocketConnect);
     socket.on('disconnect', onSocketDisconnect);
@@ -779,6 +885,9 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
     return () => {
       cancelled = true;
       initializedRef.current = false;
+      if (retryTimerRef.current !== null) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+      retryAttemptRef.current = 0;
+      retryMediaRef.current = null;
 
       socket.off('sfu-new-producer', onNewProducer);
       socket.off('sfu-consumer-closed', onConsumerClosed);
@@ -888,6 +997,8 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
     toggleHand,
     activeSpeaker,
     socketConnected,
+    mediaRecovery,
+    retryMedia,
     permissionDenied,
     rtcStats,
   };
