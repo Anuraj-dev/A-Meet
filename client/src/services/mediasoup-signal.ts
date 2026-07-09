@@ -44,10 +44,23 @@ export class SignalError extends Error {
   readonly event: string;
   readonly socketConnected: boolean;
   readonly elapsedMs: number;
+  /**
+   * Present on 'server' rejections that were rate-limit denials: milliseconds
+   * the server asked us to wait before retrying (mirrors the HTTP 429 body's
+   * retryAfterMs). Carried through from the structured ack error so callers
+   * can back off intelligently instead of hammering.
+   */
+  readonly retryAfterMs?: number;
 
   constructor(
     message: string,
-    details: { reason: SignalErrorReason; event: string; socketConnected: boolean; elapsedMs: number },
+    details: {
+      reason: SignalErrorReason;
+      event: string;
+      socketConnected: boolean;
+      elapsedMs: number;
+      retryAfterMs?: number;
+    },
   ) {
     super(message);
     this.name = 'SignalError';
@@ -55,6 +68,7 @@ export class SignalError extends Error {
     this.event = details.event;
     this.socketConnected = details.socketConnected;
     this.elapsedMs = details.elapsedMs;
+    this.retryAfterMs = details.retryAfterMs;
   }
 }
 
@@ -107,6 +121,8 @@ export function request<E extends SfuRequestEvent>(
           event,
           socketConnected: socket.connected,
           elapsedMs,
+          // Rate-limit denials carry a structured back-off hint — keep it.
+          retryAfterMs: response.retryAfterMs,
         }));
       }
       resolve(response);

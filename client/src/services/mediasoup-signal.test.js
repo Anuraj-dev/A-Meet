@@ -135,4 +135,20 @@ describe('services/mediasoup-signal request()', () => {
     await p;
     expect((socketMock._handlers.disconnect ?? []).length).toBe(0);
   });
+
+  it('surfaces retryAfterMs from a rate-limit ack error on the SignalError', async () => {
+    const p = request('sfu-produce', { kind: 'audio' });
+    // Server-side rate limiter answers the ack with the structured shape.
+    clearTimeout(h.state.timer);
+    h.state.cb(null, { error: 'Rate limit exceeded — slow down and try again.', retryAfterMs: 750 });
+
+    await expect(p).rejects.toBeInstanceOf(SignalError);
+    await expect(p).rejects.toMatchObject({ reason: 'server', retryAfterMs: 750 });
+  });
+
+  it('leaves retryAfterMs undefined on ordinary server ack errors', async () => {
+    const p = request('sfu-connect-transport', { dtlsParameters: {} });
+    ackError('transport already connected');
+    await expect(p).rejects.toMatchObject({ reason: 'server', retryAfterMs: undefined });
+  });
 });

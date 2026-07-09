@@ -18,6 +18,7 @@ import {
   transcriptionConfigured,
 } from '../transcription/meeting-transcription.js';
 import { logger } from '../config/logger.js';
+import { socketRateLimiter } from './rate-limit.js';
 import type { Server } from 'socket.io';
 
 // A dropped connection (network blip, reload, server restart) makes Socket.IO
@@ -46,7 +47,7 @@ export function registerHandlers(io: Server) {
     registerWebrtcHandlers(io, socket);
     registerSfuHandlers(io, socket);
 
-    socket.on('join-room', (roomId) => {
+    socket.on('join-room', socketRateLimiter.guard(socket, 'signaling', 'join-room', (roomId) => {
       if (!roomId || typeof roomId !== 'string') return;
 
       // Cancel any pending leave for this user — a reconnect within the grace
@@ -82,7 +83,7 @@ export function registerHandlers(io: Server) {
         // same-room guard would reject it).
         socket.to(roomId).emit('room-users', getRoomUsers(roomId));
       }
-    });
+    }));
 
     socket.on('leave-room', () => {
       // Intentional leave: the "Leave call" button emits this just before
@@ -103,7 +104,7 @@ export function registerHandlers(io: Server) {
       if (getRoomUsers(roomId).length === 0) scheduleTranscriptExpiry(roomId);
     });
 
-    socket.on('chat-message', ({ roomId, text }) => {
+    socket.on('chat-message', socketRateLimiter.guard(socket, 'chat', 'chat-message', ({ roomId, text }) => {
       if (!roomId || !text || typeof text !== 'string') return;
       const trimmed = text.trim().slice(0, 1000);
       if (!trimmed) return;
@@ -113,7 +114,7 @@ export function registerHandlers(io: Server) {
         text: trimmed,
         ts: Date.now(),
       });
-    });
+    }));
 
     // Shared transcription is host-controlled and server-authoritative. Clients
     // recognize only their own microphone; the server supplies identity, ordering
