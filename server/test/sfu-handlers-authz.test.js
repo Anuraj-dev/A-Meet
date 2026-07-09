@@ -191,6 +191,35 @@ describe('SFU host-moderation authorization', () => {
     });
   });
 
+  describe('sfu-request-unmute-all', () => {
+    it('host: broadcasts an unmute request to the room — never force-resumes a mic', async () => {
+      const { handlers, socketEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+      // A live (paused) mic must NOT be resumed — the contract is prompt-only.
+      const { peer, producer } = makeMicPeer();
+      producer.paused = true;
+      getPeer.mockImplementation((_room, sid) => (sid === TARGET ? peer : null));
+
+      await handlers['sfu-request-unmute-all']();
+
+      // Sent room-wide via `socket.to(roomId)` (excludes the host themselves).
+      expect(emittedTo(socketEmits, ROOM, 'sfu-unmute-request')).toBe(true);
+      // Consent-based: no producer is ever resumed by the server.
+      expect(producer.resume).not.toHaveBeenCalled();
+    });
+
+    it('non-host: broadcasts no unmute request', async () => {
+      const { handlers, socketEmits } = setup({ userId: 'rando' });
+      await joinRoom(handlers);
+      asNonHost();
+
+      await handlers['sfu-request-unmute-all']();
+
+      expect(emittedTo(socketEmits, ROOM, 'sfu-unmute-request')).toBe(false);
+    });
+  });
+
   describe('sfu-host-remove', () => {
     // The target must be a presence member of the host's room. Seed/clean it.
     beforeEach(() => addUser(ROOM, TARGET, { id: 'target-user', name: 'Target' }));
