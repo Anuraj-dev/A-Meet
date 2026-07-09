@@ -192,21 +192,40 @@ describe('SFU host-moderation authorization', () => {
   });
 
   describe('sfu-request-unmute-all', () => {
-    it('host: broadcasts an unmute request to the room — never force-resumes a mic', async () => {
+    it('host: broadcasts an unmute request to the room — never touches any producer', async () => {
       const { handlers, socketEmits } = setup({ userId: HOST_ID });
       await joinRoom(handlers);
       asHost();
-      // A live (paused) mic must NOT be resumed — the contract is prompt-only.
-      const { peer, producer } = makeMicPeer();
-      producer.paused = true;
-      getPeer.mockImplementation((_room, sid) => (sid === TARGET ? peer : null));
+      // Wire real (paused) producers into the room state. The prompt-only
+      // contract means the handler must never even reach for them.
+      const t1 = makeMicPeer();
+      const t2 = makeMicPeer();
+      t1.producer.paused = true;
+      t2.producer.paused = true;
+      getRoom.mockReturnValue({ peers: new Map([['caller-sock', {}], ['t1', {}], ['t2', {}]]) });
+      getPeer.mockImplementation((_room, sid) => {
+        if (sid === 't1') return t1.peer;
+        if (sid === 't2') return t2.peer;
+        return null;
+      });
+      // Only count lookups made by the handler under test (joinRoom is setup).
+      getRoom.mockClear();
+      getPeer.mockClear();
 
       await handlers['sfu-request-unmute-all']();
 
-      // Sent room-wide via `socket.to(roomId)` (excludes the host themselves).
-      expect(emittedTo(socketEmits, ROOM, 'sfu-unmute-request')).toBe(true);
-      // Consent-based: no producer is ever resumed by the server.
-      expect(producer.resume).not.toHaveBeenCalled();
+      // Sent room-wide via `socket.to(roomId)` (excludes the host themselves),
+      // carrying who asked so the target's prompt can name the requester.
+      const evt = socketEmits.find((e) => e.target === ROOM && e.event === 'sfu-unmute-request');
+      expect(evt?.payload).toEqual({ by: 'Caller' });
+      // Consent-based: the handler performs NO peer/producer operations at all —
+      // it never looks up room peers, and no producer is resumed or paused.
+      expect(getRoom).not.toHaveBeenCalled();
+      expect(getPeer).not.toHaveBeenCalled();
+      for (const { producer } of [t1, t2]) {
+        expect(producer.resume).not.toHaveBeenCalled();
+        expect(producer.pause).not.toHaveBeenCalled();
+      }
     });
 
     it('non-host: broadcasts no unmute request', async () => {

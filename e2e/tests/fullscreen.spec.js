@@ -6,7 +6,9 @@ import { stubAuth } from '../helpers/auth.js';
 // tile with no options menu, so we first switch to the tiled layout — that
 // renders the self tile with its per-tile options menu (pin/spotlight/
 // fullscreen). We then assert the observable effect: document.fullscreenElement
-// becomes set on enter and clears on exit.
+// becomes set on enter and clears on exit. Exit uses Escape (the standard user
+// gesture): once the tile is fullscreen, the MUI menu portals OUTSIDE the
+// fullscreen element's top layer, so re-clicking the menu item is unreliable.
 
 const AVATAR =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -20,13 +22,8 @@ async function createRoomAsHost(page) {
 
 const inFullscreen = (page) => page.evaluate(() => document.fullscreenElement !== null);
 
-async function toggleFullscreenViaTileMenu(page) {
-  await page.getByRole('button', { name: 'Tile options' }).click();
-  await page.getByRole('menuitem', { name: 'Fullscreen' }).click();
-}
-
 test.describe('tile fullscreen', () => {
-  test('the tile menu enters and exits fullscreen', async ({ browser }) => {
+  test('the tile menu enters fullscreen and Escape exits it', async ({ browser }) => {
     const context = await browser.newContext();
     await stubAuth(context, user);
     const page = await context.newPage();
@@ -41,11 +38,13 @@ test.describe('tile fullscreen', () => {
     expect(await inFullscreen(page)).toBe(false);
 
     // Enter fullscreen from the tile menu.
-    await toggleFullscreenViaTileMenu(page);
+    await page.getByRole('button', { name: 'Tile options' }).click();
+    await page.getByRole('menuitem', { name: 'Fullscreen' }).click();
     await expect.poll(() => inFullscreen(page), { timeout: 10_000 }).toBe(true);
 
-    // Exit fullscreen from the tile menu.
-    await toggleFullscreenViaTileMenu(page);
+    // Exit with Escape — the standard user gesture. The tile menu can't be
+    // re-used here: MUI portals it outside the fullscreen element's top layer.
+    await page.keyboard.press('Escape');
     await expect.poll(() => inFullscreen(page), { timeout: 10_000 }).toBe(false);
 
     await context.close();
