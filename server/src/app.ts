@@ -4,6 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import type { Options as RateLimitOptions } from 'express-rate-limit';
 import pinoHttp from 'pino-http';
 import mongoose from 'mongoose';
 import { env } from './config/env.js';
@@ -14,11 +15,45 @@ import authRoutes from './routes/auth.routes.js';
 import roomRoutes from './routes/room.routes.js';
 import logRoutes from './routes/log.routes.js';
 
-const authLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });
-const roomLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
+// Structured 429 handler shared by every limiter. Body mirrors the socket ack
+// error shape ({ error, retryAfterMs }) so both transports report back-off the
+// same way; also sets the standard `Retry-After` header (seconds) and logs the
+// hit at warn with the route + client IP so abuse shows up in CloudWatch.
+function rateLimitHandler(route: string): RateLimitOptions['handler'] {
+  return (req, res, _next, options) => {
+    const resetMs = (req as { rateLimit?: { resetTime?: Date } }).rateLimit?.resetTime?.getTime();
+    const retryAfterMs = typeof resetMs === 'number' ? Math.max(0, resetMs - Date.now()) : options.windowMs;
+    logger.warn(
+      { event: 'ratelimit.http', route, method: req.method, url: req.originalUrl, ip: req.ip, retryAfterMs },
+      'http rate limit hit',
+    );
+    res.setHeader('Retry-After', Math.ceil(retryAfterMs / 1000));
+    res.status(options.statusCode).json({ error: 'Too many requests — please slow down.', retryAfterMs });
+  };
+}
 
-export function createApp() {
+/** Optional per-limit overrides, primarily to let tests pin tight limits. */
+export interface RateLimitOverrides {
+  auth?: { windowMs?: number; max?: number };
+  room?: { windowMs?: number; max?: number };
+}
+
+export function createApp(overrides: RateLimitOverrides = {}) {
   const app = express();
+
+  const authCfg = { ...env.rateLimit.http.auth, ...overrides.auth };
+  const roomCfg = { ...env.rateLimit.http.room, ...overrides.room };
+
+  // Per-app (fresh in-memory store) so each createApp() gets an isolated
+  // window — tests don't bleed counts into one another.
+  const authLimiter = rateLimit({
+    windowMs: authCfg.windowMs, limit: authCfg.max,
+    standardHeaders: true, legacyHeaders: false, handler: rateLimitHandler('auth'),
+  });
+  const roomLimiter = rateLimit({
+    windowMs: roomCfg.windowMs, limit: roomCfg.max,
+    standardHeaders: true, legacyHeaders: false, handler: rateLimitHandler('room'),
+  });
 
   // Behind nginx/the reverse proxy — trust 1 hop so express-rate-limit
   // reads the real client IP from X-Forwarded-For instead of erroring.

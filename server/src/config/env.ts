@@ -2,6 +2,14 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Env-int helper: parse a numeric env var, falling back to the baked-in default
+// when unset, empty, or non-numeric (Number('') === 0, so `|| fallback` covers
+// unset/empty; a NaN from garbage also falls back).
+const num = (key: string, fallback: number): number => {
+  const parsed = Number(process.env[key]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const required = ['MONGO_URI', 'JWT_SECRET'];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) {
@@ -35,6 +43,36 @@ export const env = {
     maxPort: Number(process.env.MEDIASOUP_MAX_PORT) || 40100,
     // Empty → one worker per CPU core (decided in workers.js).
     numWorkers: Number(process.env.MEDIASOUP_NUM_WORKERS) || 0,
+  },
+  // Rate limiting. Defaults are deliberately generous — a legitimate meeting
+  // participant never hits them; they only bite scripted abuse. Documented in
+  // docs/conventions.md. HTTP: per-IP fixed windows (express-rate-limit,
+  // in-memory). Socket: per-connection token buckets (capacity = burst,
+  // refillPerSec = sustained rate).
+  rateLimit: {
+    http: {
+      auth: {
+        windowMs: num('RATE_LIMIT_AUTH_WINDOW_MS', 60_000),
+        max: num('RATE_LIMIT_AUTH_MAX', 60),
+      },
+      room: {
+        windowMs: num('RATE_LIMIT_ROOM_WINDOW_MS', 60_000),
+        max: num('RATE_LIMIT_ROOM_MAX', 100),
+      },
+    },
+    socket: {
+      signaling: {
+        capacity: num('RATE_LIMIT_SOCKET_SIGNALING_CAPACITY', 300),
+        refillPerSec: num('RATE_LIMIT_SOCKET_SIGNALING_REFILL', 100),
+      },
+      chat: {
+        capacity: num('RATE_LIMIT_SOCKET_CHAT_CAPACITY', 20),
+        refillPerSec: num('RATE_LIMIT_SOCKET_CHAT_REFILL', 5),
+      },
+      // Consecutive denials on one socket before it is force-disconnected —
+      // only sustained egregious flooding, never an occasional over-limit blip.
+      floodDisconnectThreshold: num('RATE_LIMIT_SOCKET_FLOOD_DISCONNECT', 100),
+    },
   },
   transcription: {
     deepgramApiKey: process.env.DEEPGRAM_API_KEY || '',

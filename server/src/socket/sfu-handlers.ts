@@ -15,6 +15,7 @@ import { Room } from '../models/Room.js';
 import { isRoomAdmin } from '../rooms/room-admin.js';
 import { getUserRoom } from './room-manager.js';
 import { logger } from '../config/logger.js';
+import { socketRateLimiter } from './rate-limit.js';
 import type { Server, Socket } from 'socket.io';
 import type { SfuHandRaiseUpdatePayload } from '@a-meet/contracts';
 
@@ -24,10 +25,18 @@ import type { SfuHandRaiseUpdatePayload } from '@a-meet/contracts';
 const socketRoom = new Map<string, string>();
 
 export function registerSfuHandlers(io: Server, socket: Socket) {
+  // Register a rate-limited event handler: each invocation spends a token from
+  // the named per-socket bucket before the handler runs. `signaling` covers the
+  // high-frequency SFU handshake; `chat` covers reactions/raise-hand. Host
+  // moderation + teardown events stay unguarded (host-gated and low-frequency).
+  const on = (event: string, bucket: 'signaling' | 'chat', handler: (...args: any[]) => void): void => {
+    socket.on(event as never, socketRateLimiter.guard(socket, bucket, event, handler) as never);
+  };
+
   // 1) Entry point: lazily create the room's Router, register this peer, and
   //    return the Router's rtpCapabilities so the client can load its Device.
   //    Also lazily creates the AudioLevelObserver on first peer join.
-  socket.on('sfu-get-rtp-capabilities', async ({ roomId } = {}, callback) => {
+  on('sfu-get-rtp-capabilities', 'signaling', async ({ roomId } = {}, callback) => {
     try {
       if (!roomId || typeof roomId !== 'string') throw new Error('roomId required');
       const room = await getOrCreateRoom(roomId);
@@ -62,7 +71,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
 
   // 2) Create a send or recv WebRtcTransport for this peer. We return only the
   //    client-needed bits; the server keeps the Transport object.
-  socket.on('sfu-create-transport', async ({ direction } = {}, callback) => {
+  on('sfu-create-transport', 'signaling', async ({ direction } = {}, callback) => {
     try {
       const roomId = socketRoom.get(socket.id);
       const room = getRoom(roomId);
@@ -118,7 +127,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
 
   // 3) Complete the DTLS handshake using the client's dtlsParameters. Fires
   //    once per transport, the first time it's used.
-  socket.on('sfu-connect-transport', async ({ transportId, dtlsParameters } = {}, callback) => {
+  on('sfu-connect-transport', 'signaling', async ({ transportId, dtlsParameters } = {}, callback) => {
     try {
       const peer = getPeer(socketRoom.get(socket.id), socket.id);
       const transport = peer?.transports.get(transportId);
@@ -132,7 +141,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
 
   // 4) The client produces a local track on its send transport. We create the
   //    server-side Producer, then tell everyone else to consume it.
-  socket.on('sfu-produce', async ({ transportId, kind, rtpParameters, appData } = {}, callback) => {
+  on('sfu-produce', 'signaling', async ({ transportId, kind, rtpParameters, appData } = {}, callback) => {
     try {
       const roomId = socketRoom.get(socket.id);
       const room = getRoom(roomId);
@@ -176,7 +185,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   // 5) The client consumes someone else's producer on its recv transport.
   //    Created PAUSED — the client resumes (step 6) once the track is wired up,
   //    so the first keyframe isn't lost into a not-yet-ready element.
-  socket.on('sfu-consume', async ({ transportId, producerId, rtpCapabilities } = {}, callback) => {
+  on('sfu-consume', 'signaling', async ({ transportId, producerId, rtpCapabilities } = {}, callback) => {
     try {
       const roomId = socketRoom.get(socket.id);
       const room = getRoom(roomId);
@@ -219,7 +228,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   });
 
   // 6) Resume a consumer once the client has attached its track.
-  socket.on('sfu-resume-consumer', async ({ consumerId } = {}, callback) => {
+  on('sfu-resume-consumer', 'signaling', async ({ consumerId } = {}, callback) => {
     try {
       const peer = getPeer(socketRoom.get(socket.id), socket.id);
       const consumer = peer?.consumers.get(consumerId);
@@ -232,13 +241,13 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   });
 
   // 7) A newcomer asks for producers already present so it can consume them.
-  socket.on('sfu-get-producers', (_payload, callback) => {
+  on('sfu-get-producers', 'signaling', (_payload, callback) => {
     callback(listOtherProducers(socketRoom.get(socket.id), socket.id));
   });
 
   // 8) Mic-mute / camera-off = pause the producer (track stays, RTP stops).
   //    We broadcast so others can show a muted/placeholder tile.
-  socket.on('sfu-pause-producer', async ({ producerId } = {}, callback) => {
+  on('sfu-pause-producer', 'signaling', async ({ producerId } = {}, callback) => {
     try {
       const roomId = socketRoom.get(socket.id);
       const producer = getPeer(roomId, socket.id)?.producers.get(producerId);
@@ -252,7 +261,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
     }
   });
 
-  socket.on('sfu-resume-producer', async ({ producerId } = {}, callback) => {
+  on('sfu-resume-producer', 'signaling', async ({ producerId } = {}, callback) => {
     try {
       const roomId = socketRoom.get(socket.id);
       const producer = getPeer(roomId, socket.id)?.producers.get(producerId);
@@ -269,7 +278,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   // 9) Close a producer outright (used for screen-share stop). Closing the
   //    server-side Producer cascades `producerclose` to every consumer →
   //    each client receives `sfu-consumer-closed` and drops the tile.
-  socket.on('sfu-close-producer', async ({ producerId } = {}, callback) => {
+  on('sfu-close-producer', 'signaling', async ({ producerId } = {}, callback) => {
     try {
       const roomId = socketRoom.get(socket.id);
       const peer = getPeer(roomId, socket.id);
@@ -284,7 +293,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   });
 
   // 10) Raise hand: toggle for this peer; broadcast state to the room.
-  socket.on('sfu-raise-hand', ({ raised } = {}, callback) => {
+  on('sfu-raise-hand', 'chat', ({ raised } = {}, callback) => {
     const roomId = socketRoom.get(socket.id);
     const peer = getPeer(roomId, socket.id);
     if (!peer) return;
@@ -296,7 +305,7 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
 
   // 11) Emoji reaction: ephemeral relay only, no persistence. Use io.in so the
   //     sender also receives the event (for local feedback).
-  socket.on('sfu-reaction', ({ emoji } = {}) => {
+  on('sfu-reaction', 'chat', ({ emoji } = {}) => {
     // A reaction is a pure room broadcast, not a media operation. Resolve the
     // room from canonical presence (room-manager) with the SFU map as a fast
     // path, so a reaction still relays before the SFU handshake completes — and
