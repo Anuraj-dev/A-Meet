@@ -69,8 +69,9 @@ export const env = {
         capacity: num('RATE_LIMIT_SOCKET_CHAT_CAPACITY', 20),
         refillPerSec: num('RATE_LIMIT_SOCKET_CHAT_REFILL', 5),
       },
-      // Consecutive denials on one socket before it is force-disconnected —
-      // only sustained egregious flooding, never an occasional over-limit blip.
+      // Consecutive denials by one actor before the offending socket is
+      // force-disconnected — only sustained egregious flooding, never an
+      // occasional over-limit blip.
       floodDisconnectThreshold: num('RATE_LIMIT_SOCKET_FLOOD_DISCONNECT', 100),
     },
   },

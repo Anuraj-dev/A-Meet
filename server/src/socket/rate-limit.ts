@@ -1,16 +1,24 @@
-// Per-socket token-bucket rate limiting for Socket.io event handlers.
+// Per-actor token-bucket rate limiting for Socket.io event handlers.
 //
-// Each socket carries its own set of named buckets (e.g. `signaling`, `chat`).
+// Buckets are keyed by a stable ACTOR identity — the authenticated user id
+// (sockets pass socketAuth, so it is normally present) with the handshake
+// client IP as the fallback — NOT by the Socket instance. Keying per socket
+// would let an attacker bypass every limit by reconnecting or opening parallel
+// sockets: each new connection would mint a fresh bucket and reset the flood
+// counter. All of one actor's sockets share the same buckets, and a reconnect
+// resumes the drained bucket instead of resetting it.
+//
 // A bucket holds up to `capacity` tokens and refills at `refillPerSec`; every
 // guarded event spends one token. When a bucket runs dry the event is DROPPED —
 // the handler never runs — and, if the event carried an ack callback, that
 // callback receives a structured `{ error, retryAfterMs }` (the same shape the
 // HTTP 429 body uses) so the client can back off. We never disconnect on an
 // ordinary over-limit blip; only sustained egregious flooding (many consecutive
-// denials on one socket) trips a disconnect.
+// denials by one actor) trips a disconnect of the offending socket.
 //
-// In-memory and per-connection by design: the single-node deployment needs no
-// shared store, and buckets die with the socket.
+// Memory: actor entries are refcounted by their live sockets and evicted when
+// the actor's last socket disconnects, so the store cannot grow unboundedly.
+// In-memory by design — the single-node deployment needs no shared store.
 
 import { logger } from '../config/logger.js';
 import { env } from '../config/env.js';
@@ -56,9 +64,32 @@ export function consumeToken(state: BucketState, config: BucketConfig, now: numb
   return { allowed: false, retryAfterMs };
 }
 
-// Buckets live on the socket under a symbol key so they can't collide with
-// Socket.io internals or app data, and are GC'd with the socket.
-const BUCKETS = Symbol.for('a-meet.rateLimitBuckets');
+/**
+ * Stable identity a bucket is keyed on: the authenticated user id when present
+ * (socketAuth runs before any handler, so it normally is), else the handshake
+ * client IP. For the IP we honor the same one-trusted-hop topology as the HTTP
+ * `trust proxy: 1` setting: nginx appends the real client to X-Forwarded-For,
+ * so the RIGHTMOST entry is trustworthy (left entries are client-forgeable).
+ */
+export function actorKeyFor(socket: Socket): string {
+  const userId = socket.user?.id;
+  if (userId) return `user:${userId}`;
+  const xff = socket.handshake?.headers?.['x-forwarded-for'];
+  const xffList = Array.isArray(xff) ? xff.join(',') : xff;
+  const lastHop = xffList?.split(',').pop()?.trim();
+  const ip = lastHop || socket.handshake?.address || 'unknown';
+  return `ip:${ip}`;
+}
+
+interface ActorEntry {
+  /** Live socket ids attached to this actor — the refcount for eviction. */
+  sockets: Set<string>;
+  buckets: Record<string, BucketState>;
+}
+
+// Per-socket "already tracked by the limiter" flag, so each socket registers
+// its disconnect cleanup exactly once no matter how many handlers it guards.
+const TRACKED = Symbol.for('a-meet.rateLimitTracked');
 
 export interface SocketRateLimiterOptions {
   buckets: Record<string, BucketConfig>;
@@ -69,8 +100,8 @@ export interface SocketRateLimiterOptions {
 
 export interface SocketRateLimiter {
   /**
-   * Wrap an event handler so each invocation spends a token from `bucket`.
-   * Returns a drop-in replacement handler with the same call signature.
+   * Wrap an event handler so each invocation spends a token from the actor's
+   * `bucket`. Returns a drop-in replacement handler with the same signature.
    */
   guard<A extends unknown[]>(
     socket: Socket,
@@ -78,19 +109,49 @@ export interface SocketRateLimiter {
     event: string,
     handler: (...args: A) => void,
   ): (...args: A) => void;
-  /** Exposed for tests: current bucket state for a socket (created on demand). */
+  /** Exposed for tests: the actor's bucket state (created on demand). */
   getState(socket: Socket, bucket: string): BucketState;
+  /** Exposed for tests: number of actors currently held in the store. */
+  actorCount(): number;
 }
 
 export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketRateLimiter {
   const now = opts.now ?? Date.now;
+  const actors = new Map<string, ActorEntry>();
 
-  function getState(socket: Socket, bucket: string): BucketState {
+  // Attach this socket to its actor entry (creating it if needed) and register
+  // a one-time disconnect cleanup: drop the socket from the refcount and evict
+  // the whole entry once the actor's last socket is gone.
+  function track(socket: Socket): ActorEntry {
+    const key = actorKeyFor(socket);
+    let entry = actors.get(key);
+    if (!entry) {
+      entry = { sockets: new Set(), buckets: {} };
+      actors.set(key, entry);
+    }
+
+    const socketAny = socket as unknown as Record<symbol, boolean>;
+    if (!socketAny[TRACKED]) {
+      socketAny[TRACKED] = true;
+      entry.sockets.add(socket.id);
+      socket.on('disconnect', () => {
+        const current = actors.get(key);
+        if (!current) return;
+        current.sockets.delete(socket.id);
+        if (current.sockets.size === 0) actors.delete(key);
+      });
+    }
+    return entry;
+  }
+
+  function bucketState(entry: ActorEntry, bucket: string): BucketState {
     const config = opts.buckets[bucket];
     if (!config) throw new Error(`Unknown rate-limit bucket: ${bucket}`);
-    const socketAny = socket as unknown as Record<symbol, Record<string, BucketState>>;
-    const store = (socketAny[BUCKETS] ??= {});
-    return (store[bucket] ??= { tokens: config.capacity, last: now(), violations: 0 });
+    return (entry.buckets[bucket] ??= { tokens: config.capacity, last: now(), violations: 0 });
+  }
+
+  function getState(socket: Socket, bucket: string): BucketState {
+    return bucketState(track(socket), bucket);
   }
 
   function guard<A extends unknown[]>(
@@ -101,6 +162,9 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
   ): (...args: A) => void {
     const config = opts.buckets[bucket];
     if (!config) throw new Error(`Unknown rate-limit bucket: ${bucket}`);
+    // Track at registration time (connection setup), so the disconnect cleanup
+    // is in place even for a socket that never sends a guarded event.
+    track(socket);
 
     return (...args: A): void => {
       const state = getState(socket, bucket);
@@ -118,6 +182,7 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
           event: 'ratelimit.socket',
           socketEvent: event,
           bucket,
+          actor: actorKeyFor(socket),
           socketId: socket.id,
           userId: socket.user?.id,
           retryAfterMs,
@@ -126,8 +191,10 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
         'socket rate limit hit',
       );
 
-      // Sustained egregious flooding → cut the socket. An occasional over-limit
-      // event just gets dropped (below).
+      // Sustained egregious flooding → cut the offending socket. The actor's
+      // bucket (and violation count) survives eviction only if another of the
+      // actor's sockets is still connected — but a drained bucket refills slowly
+      // either way, so reconnect-and-flood keeps getting denied.
       if (state.violations >= opts.floodDisconnectThreshold) {
         socket.disconnect(true);
         return;
@@ -145,7 +212,7 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
     };
   }
 
-  return { guard, getState };
+  return { guard, getState, actorCount: () => actors.size };
 }
 
 /**
