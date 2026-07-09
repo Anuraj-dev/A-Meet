@@ -11,18 +11,23 @@
 const turnDomain = import.meta.env.VITE_TURN_DOMAIN;
 const turnUsername = import.meta.env.VITE_TURN_USERNAME;
 const turnSecret = import.meta.env.VITE_TURN_SECRET;
+const turnTransport = import.meta.env.VITE_TURN_TRANSPORT;
 
 const hasTurn = Boolean(turnDomain && turnSecret);
 
-const turnServers: RTCIceServer[] = hasTurn
-  ? [
+const configuredTurnServers = [
       // UDP relay (lowest latency) ...
-      { urls: `turn:${turnDomain}:3478?transport=udp`, username: turnUsername, credential: turnSecret },
+      { transport: 'udp', server: { urls: `turn:${turnDomain}:3478?transport=udp`, username: turnUsername, credential: turnSecret } },
       // ... TCP relay for when UDP is blocked ...
-      { urls: `turn:${turnDomain}:3478?transport=tcp`, username: turnUsername, credential: turnSecret },
+      { transport: 'tcp', server: { urls: `turn:${turnDomain}:3478?transport=tcp`, username: turnUsername, credential: turnSecret } },
       // ... and TLS relay on 5349 for networks that only allow outbound 443/TLS.
-      { urls: `turns:${turnDomain}:5349?transport=tcp`, username: turnUsername, credential: turnSecret },
-    ]
+      { transport: 'tls', server: { urls: `turns:${turnDomain}:5349?transport=tcp`, username: turnUsername, credential: turnSecret } },
+    ];
+
+const turnServers: RTCIceServer[] = hasTurn
+  ? configuredTurnServers
+      .filter(({ transport }) => !turnTransport || transport === turnTransport)
+      .map(({ server }) => server)
   : [];
 
 export const ICE_SERVERS: RTCIceServer[] = [
@@ -35,5 +40,7 @@ export const ICE_SERVERS: RTCIceServer[] = [
 // through the relay. Proves the coturn path works end-to-end during testing.
 // Ignored unless TURN is actually configured, so it can't accidentally break a
 // dev build with no relay candidates.
+// Set VITE_TURN_TRANSPORT to udp, tcp, or tls only while verifying one relay
+// path at a time; omit it in normal builds to advertise every transport.
 export const ICE_TRANSPORT_POLICY: RTCIceTransportPolicy =
   hasTurn && import.meta.env.VITE_FORCE_RELAY === '1' ? 'relay' : 'all';

@@ -66,4 +66,22 @@ describe('services/ice-config', () => {
     const { ICE_TRANSPORT_POLICY } = await loadIce();
     expect(ICE_TRANSPORT_POLICY).toBe('relay');
   });
+
+  it.each([
+    ['udp', 'turn:turn.example.com:3478?transport=udp'],
+    ['tcp', 'turn:turn.example.com:3478?transport=tcp'],
+    ['tls', 'turns:turn.example.com:5349?transport=tcp'],
+  ])('uses only the requested %s TURN transport during a force-relay verification', async (transport, expectedUrl) => {
+    vi.stubEnv('VITE_FORCE_RELAY', '1');
+    vi.stubEnv('VITE_TURN_TRANSPORT', transport);
+    vi.stubEnv('VITE_TURN_DOMAIN', 'turn.example.com');
+    vi.stubEnv('VITE_TURN_USERNAME', 'relay-user');
+    vi.stubEnv('VITE_TURN_SECRET', 'relay-secret');
+
+    const { ICE_SERVERS, ICE_TRANSPORT_POLICY } = await loadIce();
+
+    expect(ICE_TRANSPORT_POLICY).toBe('relay');
+    expect(ICE_SERVERS).toHaveLength(3);
+    expect(ICE_SERVERS[2]).toMatchObject({ urls: expectedUrl });
+  });
 });
