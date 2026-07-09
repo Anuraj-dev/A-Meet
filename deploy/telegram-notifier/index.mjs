@@ -1,5 +1,5 @@
 import { GetParametersCommand, SSMClient } from '@aws-sdk/client-ssm';
-import { formatAlarmMessage, parseSnsAlarm } from './formatter.mjs';
+import { decideNotification, parseSnsAlarm } from './formatter.mjs';
 
 const ssm = new SSMClient({ region: process.env.SSM_REGION });
 
@@ -26,13 +26,14 @@ async function readTelegramConfig() {
 
 export async function handler(event) {
   const alarm = parseSnsAlarm(event, process.env.ENVIRONMENT ?? 'unknown');
+  const { text } = decideNotification(alarm);
   const { token, chatId } = await readTelegramConfig();
   const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: formatAlarmMessage(alarm),
+      text,
     }),
   });
   if (!response.ok) throw new Error(`Telegram API failed with ${response.status}`);

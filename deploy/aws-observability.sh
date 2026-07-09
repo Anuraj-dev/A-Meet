@@ -148,13 +148,22 @@ put_filter error-rate '{ $.level >= 50 }' ErrorCount
 put_alarm fatal-log FatalCount 60 1 1
 # "MongoDB disconnected" is logged once per disconnect event, not every minute it
 # stays down, so a single datapoint must trip the alarm. Requiring multiple
-# consecutive breaching periods would never fire for a real sustained outage.
+# consecutive breaching periods (e.g. 2-of-2) would never fire for a real
+# sustained outage, which emits only one disconnect line. We therefore KEEP
+# 1-of-1 for fastest real-outage detection and rely on the Telegram notifier's
+# flap suppression to collapse a sub-minute Atlas blip's ALARM/OK pair into a
+# single compact "recovered after Xs" line (see deploy/telegram-notifier).
 put_alarm mongo-disconnect MongoDisconnectCount 60 1 1
 put_alarm error-rate-5m ErrorCount 300 1 5
 
 # App process health checks the public readiness endpoint and alarms through
 # the same SNS route. This catches process/container downtime while EC2 itself
 # is still healthy.
+#
+# Tuning (issue #159): require 5 consecutive unhealthy minutes (5-of-5) so a
+# single Route53 probe-path transient can't page us; a real process/container
+# outage stays down far longer and still fires within minutes. treat-missing-data
+# is notBreaching (was breaching) so a probe data gap is not counted as an outage.
 HEALTH_CHECK_ID=$(aws route53 list-health-checks \
   --query "HealthChecks[?CallerReference=='${READINESS_CALLER_REFERENCE}'].Id | [0]" \
   --output text)
@@ -174,11 +183,11 @@ aws cloudwatch put-metric-alarm \
   --dimensions "Name=HealthCheckId,Value=${HEALTH_CHECK_ID}" \
   --statistic Minimum \
   --period 60 \
-  --evaluation-periods 3 \
-  --datapoints-to-alarm 3 \
+  --evaluation-periods 5 \
+  --datapoints-to-alarm 5 \
   --threshold 1 \
   --comparison-operator LessThanThreshold \
-  --treat-missing-data breaching \
+  --treat-missing-data notBreaching \
   --alarm-actions "$PROCESS_TOPIC_ARN" \
   --ok-actions "$PROCESS_TOPIC_ARN"
 
@@ -193,6 +202,7 @@ if [ -n "${INSTANCE_ID:-}" ]; then
     --statistic Maximum \
     --period 60 \
     --evaluation-periods 2 \
+    --datapoints-to-alarm 2 \
     --threshold 1 \
     --comparison-operator GreaterThanOrEqualToThreshold \
     --treat-missing-data missing \
