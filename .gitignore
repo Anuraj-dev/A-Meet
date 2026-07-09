@@ -13,6 +13,9 @@ node_modules/
 # Track only the placeholder template; the live file is server-local.
 coturn/turnserver.conf
 
+# Let's Encrypt material copied from the host into the coturn bind mount.
+coturn/certs/
+
 # Build output
 dist/
 build/

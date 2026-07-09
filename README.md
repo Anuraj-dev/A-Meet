@@ -435,6 +435,71 @@ Staging smoke:
    then `ALARM`, and confirm a new notification.
 5. Confirm local `docker-compose.yml` still runs Loki/Grafana/Promtail without AWS settings.
 
+### TURN over TLS (5349)
+
+coturn exposes UDP and TCP on `3478` plus TURN-over-TLS on `5349`. The TLS
+certificate is for the public TURN hostname (for example, `turn.example.com`), which must
+have an A record pointing to the node's Elastic IP before issuance. The certificate is
+obtained with **HTTP-01**, not DNS-01: the existing Nginx configuration already owns port
+80, so `deploy/nginx.conf` serves only `/.well-known/acme-challenge/` from
+`/var/www/certbot` and redirects every other HTTP request to HTTPS. This avoids DNS
+provider credentials while retaining the current API redirect.
+
+Before provisioning, ensure the EC2 security group allows TCP `80` (ACME), UDP and TCP
+`3478`, TCP `5349`, and UDP `49160-49200` (the configured relay range). Copy the coturn
+template into the ignored host-local config and replace its placeholders, including the
+public/private `external-ip` mapping and TURN secret:
+
+```bash
+cd ~/ameet
+cp coturn/turnserver.conf.example coturn/turnserver.conf
+# edit coturn/turnserver.conf: YOUR_DOMAIN, YOUR_PUBLIC_IP, TURN_SECRET_PLACEHOLDER
+
+# Apply deploy/nginx.conf with API_DOMAIN replaced, then make its ACME webroot available.
+sudo install -d -m 0755 /var/www/certbot
+sudo nginx -t && sudo systemctl reload nginx
+
+# Installs certbot if needed, obtains/reuses the certificate, copies the certificate and
+# private key to coturn/certs/, starts coturn, and enables the standard certbot.timer.
+sudo env TURN_DOMAIN=turn.example.com TURN_EMAIL=ops@example.com \
+  A_MEET_DIR="$HOME/ameet" ./deploy/setup-coturn-tls.sh setup
+```
+
+`setup-coturn-tls.sh` is idempotent and safe after a recovery or rebuild: Certbot retains a
+valid certificate, then the script copies it into the bind-mounted `coturn/certs/` directory
+and recreates only the coturn container. It also installs a Certbot deploy hook at
+`/etc/letsencrypt/renewal-hooks/deploy/a-meet-coturn`; the normal `certbot.timer` invokes
+that hook only after a successful renewal, so coturn restarts with the new keypair. The
+certificate files and the generated coturn config remain host-local and are gitignored.
+
+Verify the listener certificate itself before testing media:
+
+```bash
+openssl s_client -connect turn.example.com:5349 -servername turn.example.com </dev/null
+sudo systemctl status certbot.timer
+docker compose -f docker-compose.coturn.yml logs --tail=100 coturn
+```
+
+#### Force-relay verification: UDP, TCP, and TLS
+
+Build a test client with the real `VITE_TURN_DOMAIN`, `VITE_TURN_USERNAME`, and
+`VITE_TURN_SECRET`, then set `VITE_FORCE_RELAY=1`. For each row below, rebuild/redeploy the
+client with the listed `VITE_TURN_TRANSPORT`, join the same meeting from two independent
+networks, and confirm two-way audio and video. `VITE_FORCE_RELAY=1` makes the call fail
+instead of silently falling back to direct SFU media; `VITE_TURN_TRANSPORT` narrows the
+candidate list to prove the named path. Omit `VITE_TURN_TRANSPORT` in normal production
+builds so browsers receive all three fallback URIs.
+
+| Path | Build-time environment | Expected URI |
+|---|---|---|
+| UDP | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=udp` | `turn:turn.example.com:3478?transport=udp` |
+| TCP | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=tcp` | `turn:turn.example.com:3478?transport=tcp` |
+| TLS | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=tls` | `turns:turn.example.com:5349?transport=tcp` |
+
+For each successful call, browser `chrome://webrtc-internals` should show the selected ICE
+candidate pair using a `relay` candidate; coturn logs should show an allocation for that test.
+Clear both verification variables and rebuild before returning the client to normal operation.
+
 ### Host identity & automatic recovery
 
 The production node has a **stable identity** so it survives host failure without manual
