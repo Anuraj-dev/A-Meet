@@ -40,7 +40,9 @@ event handlers. Buckets are keyed by a stable **actor** identity — the
 authenticated user id (fallback: handshake client IP, honoring the same one-hop
 X-Forwarded-For trust as HTTP) — so parallel sockets or reconnects share one
 bucket instead of minting fresh ones. Actor entries are refcounted by live
-sockets and evicted when the actor's last socket disconnects. `capacity` = largest instantaneous burst,
+sockets and evicted only after a **grace period** (default 10 min) past the last
+socket's disconnect, so a serial disconnect→reconnect resumes its drained bucket
+rather than minting a fresh one. `capacity` = largest instantaneous burst,
 `refillPerSec` = sustained allowed rate. Over-limit → the event is **dropped**
 (handler never runs); if the event carried an ack callback it gets a structured
 `{ error, retryAfterMs }`, otherwise it is silently dropped. Only **sustained
