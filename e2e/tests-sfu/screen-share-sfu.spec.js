@@ -43,6 +43,14 @@ async function joinRoom(page, roomId) {
   await page.waitForURL(new RegExp(`/room/${roomId}$`));
 }
 
+// The share/unshare control in the bottom control bar. While presenting, THREE
+// elements carry the accessible name "Stop presenting" (the control-bar
+// IconButton, the "You are presenting" overlay Button, and the header Chip), so
+// a role+name lookup is a strict-mode violation. Only the control-bar
+// IconButton gets an aria-label (from its MUI Tooltip title) — the other two
+// are named by their text content — so the attribute selector is unique.
+const shareControl = (page, label) => page.locator(`button[aria-label="${label}"]`);
+
 test.describe('SFU screen share (real media)', () => {
   test('the host presents → the guest sees the presentation; stopping tears it down', async ({ browser }) => {
     const { pageA, pageB, close } = await createPeers(browser, { users: [host, guest] });
@@ -58,17 +66,17 @@ test.describe('SFU screen share (real media)', () => {
     // No presentation yet on the guest's side.
     await expect(pageB.getByText(`${host.name}'s screen`)).toHaveCount(0);
 
-    // Host presents. Its control flips to the "stop" state…
-    await pageA.getByRole('button', { name: 'Present now' }).click();
-    await expect(pageA.getByRole('button', { name: 'Stop presenting' })).toBeVisible({ timeout: 30_000 });
+    // Host presents. Its control-bar button flips to the "stop" state…
+    await shareControl(pageA, 'Present now').click();
+    await expect(shareControl(pageA, 'Stop presenting')).toBeVisible({ timeout: 30_000 });
 
     // …and the guest's layout switches to the presentation stage, labelled with
     // the sharer — proof the screen track was forwarded and consumed.
     await expect(pageB.getByText(`${host.name}'s screen`)).toBeVisible({ timeout: 30_000 });
 
     // Host stops presenting → the guest's presentation stage is torn down.
-    await pageA.getByRole('button', { name: 'Stop presenting' }).click();
-    await expect(pageA.getByRole('button', { name: 'Present now' })).toBeVisible({ timeout: 30_000 });
+    await shareControl(pageA, 'Stop presenting').click();
+    await expect(shareControl(pageA, 'Present now')).toBeVisible({ timeout: 30_000 });
     await expect(pageB.getByText(`${host.name}'s screen`)).toHaveCount(0, { timeout: 30_000 });
 
     await close();
