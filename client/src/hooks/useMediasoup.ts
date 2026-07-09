@@ -693,12 +693,21 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
     }
 
     // Resolve once the socket reports connected. If it already is, resolve
-    // synchronously; otherwise wait for the next `connect` (self-removing so we
-    // don't leak a listener). setupSfu awaits this before its first emit.
+    // synchronously; otherwise wait for the next `connect`. The pending
+    // listener is tracked so the effect's cleanup can remove it if the hook
+    // unmounts before the socket ever reconnects — otherwise every offline
+    // mount/unmount would leak a listener on the singleton socket.
+    // setupSfu awaits this before its first emit.
+    let pendingConnectWaiter: (() => void) | null = null;
     function waitForSocketConnect(): Promise<void> {
       if (socket.connected) return Promise.resolve();
       return new Promise((resolve) => {
-        const onConnect = () => { socket.off('connect', onConnect); resolve(); };
+        const onConnect = () => {
+          socket.off('connect', onConnect);
+          pendingConnectWaiter = null;
+          resolve();
+        };
+        pendingConnectWaiter = onConnect;
         socket.on('connect', onConnect);
       });
     }
@@ -888,6 +897,9 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
       if (retryTimerRef.current !== null) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
       retryAttemptRef.current = 0;
       retryMediaRef.current = null;
+      // A setup parked on waitForSocketConnect leaves its promise unresolved
+      // (harmless — cancelled short-circuits it), but its listener must go.
+      if (pendingConnectWaiter) { socket.off('connect', pendingConnectWaiter); pendingConnectWaiter = null; }
 
       socket.off('sfu-new-producer', onNewProducer);
       socket.off('sfu-consumer-closed', onConsumerClosed);

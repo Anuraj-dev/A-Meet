@@ -10,8 +10,10 @@
 // pointed weeks of debugging at TURN when the real cause was a socket that
 // dropped mid-handshake). We also attach `socketConnected` and `elapsedMs` so
 // logs/alarms can tell an honest 10s timeout from a sub-second disconnect:
-//   - 'disconnect' — the socket.io error fired while the socket was down.
-//   - 'timeout'    — the socket.io error fired while still connected (real ack timeout).
+//   - 'disconnect' — the socket dropped at any point while the request was in
+//                     flight (tracked via a one-shot `disconnect` listener, so a
+//                     drop that heals before the timeout fires still counts).
+//   - 'timeout'    — the ack never arrived and the socket stayed up throughout.
 //   - 'server'     — the ack carried an `{ error }` payload (server rejection).
 
 import socket from './socket';
@@ -67,6 +69,13 @@ export function request<E extends SfuRequestEvent>(
   const payload = (data ?? {}) as SfuRequestPayload<E>;
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
+    // Record any drop during the request's lifetime. Sampling socket.connected
+    // only when the timeout callback fires would mislabel a drop-then-reconnect
+    // as a real timeout — exactly the misleading telemetry this module fixes.
+    let disconnectedInFlight = false;
+    const onDisconnect = () => { disconnectedInFlight = true; };
+    socket.on('disconnect', onDisconnect);
+
     const timedSocket = socket.timeout(timeoutMs);
     // Socket.IO loses the payload/ack correlation for a generic event key.
     const emit = timedSocket.emit.bind(timedSocket) as SfuTimedEmit;
@@ -74,16 +83,17 @@ export function request<E extends SfuRequestEvent>(
       err: Error,
       response: SocketAck<SfuRequestResponse<E>>,
     ) => {
+      socket.off('disconnect', onDisconnect);
       const elapsedMs = Date.now() - startedAt;
       if (err) {
-        // socket.io fires an error both on a genuine ack timeout and when the
-        // socket is down. `socket.connected` at callback time is the honest
-        // discriminator: a request that "timed out" in 200ms is really a drop.
-        const connected = socket.connected;
-        if (!connected) {
+        // socket.io fires this error both on a genuine ack timeout and when the
+        // socket drops. A drop at ANY point during the request (or a socket
+        // already down when it fires) is a disconnect, not a timeout: a request
+        // that "timed out" in 200ms is really a drop.
+        if (disconnectedInFlight || !socket.connected) {
           return reject(new SignalError(
             `${event} failed: socket disconnected after ${elapsedMs}ms`,
-            { reason: 'disconnect', event, socketConnected: false, elapsedMs },
+            { reason: 'disconnect', event, socketConnected: socket.connected, elapsedMs },
           ));
         }
         return reject(new SignalError(

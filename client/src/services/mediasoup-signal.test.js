@@ -14,9 +14,19 @@ const h = vi.hoisted(() => {
     state.timer = setTimeout(() => cb(new Error('operation has timed out')), state.timeoutMs);
   });
   const timeout = vi.fn((ms) => { state.timeoutMs = ms; return { emit }; });
-  // `connected` mirrors socket.io's live state; request() reads it to tell a
-  // real ack timeout (socket up) from a mid-handshake disconnect (socket down).
-  const socket = { timeout, emit: vi.fn(), connected: true };
+  // `connected` mirrors socket.io's live state. `on`/`off` back the one-shot
+  // in-flight `disconnect` listener request() attaches so a drop that heals
+  // before the ack-timeout fires is still classified as a disconnect.
+  const handlers = {};
+  const socket = {
+    timeout,
+    emit: vi.fn(),
+    connected: true,
+    on: vi.fn((event, cb) => { (handlers[event] ||= []).push(cb); }),
+    off: vi.fn((event, cb) => { if (handlers[event]) handlers[event] = handlers[event].filter((fn) => fn !== cb); }),
+    _handlers: handlers,
+    _emit(event, payload) { (handlers[event] || []).slice().forEach((cb) => cb(payload)); },
+  };
   return { state, emit, timeout, socket };
 });
 
@@ -40,6 +50,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   socketMock.connected = true;
+  Object.keys(socketMock._handlers).forEach((k) => delete socketMock._handlers[k]);
   h.state.event = h.state.data = h.state.cb = h.state.timeoutMs = h.state.timer = null;
 });
 
@@ -101,5 +112,27 @@ describe('services/mediasoup-signal request()', () => {
     ]);
     await vi.advanceTimersByTimeAsync(10000);
     await settled;
+  });
+
+  it('still labels the failure "disconnect" when the socket drops and RECONNECTS before the timeout fires', async () => {
+    const p = request('sfu-get-rtp-capabilities', { roomId: 'r1' });
+    // The socket drops mid-request…
+    socketMock.connected = false;
+    socketMock._emit('disconnect', 'transport close');
+    // …then heals before the ack-timeout callback fires. Sampling
+    // socket.connected at fire time would mislabel this as a real timeout.
+    socketMock.connected = true;
+    socketMock._emit('connect');
+    const settled = expect(p).rejects.toMatchObject({ reason: 'disconnect', event: 'sfu-get-rtp-capabilities' });
+    await vi.advanceTimersByTimeAsync(10000);
+    await settled;
+  });
+
+  it('removes its in-flight disconnect listener once the request settles', async () => {
+    const p = request('sfu-get-rtp-capabilities', { roomId: 'r1' });
+    expect((socketMock._handlers.disconnect ?? []).length).toBe(1);
+    ackSuccess({ rtpCapabilities: { codecs: [] } });
+    await p;
+    expect((socketMock._handlers.disconnect ?? []).length).toBe(0);
   });
 });

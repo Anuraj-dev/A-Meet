@@ -442,6 +442,22 @@ describe('useMediasoup', () => {
     await waitFor(() => expect(H.request).toHaveBeenCalledWith('sfu-get-rtp-capabilities', { roomId: 'room-1' }));
   });
 
+  it('leaves no residual connect listener when unmounted while the socket is still disconnected', async () => {
+    // Socket never finishes connecting; setupSfu is parked on its connect gate.
+    H.socket.connect.mockImplementationOnce(() => { /* still connecting */ });
+
+    const { unmount } = mount();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(H.request).not.toHaveBeenCalled();
+
+    unmount();
+
+    // The hook's own onSocketConnect AND the pending waitForSocketConnect
+    // closure must both be gone — otherwise each mount/unmount while offline
+    // leaks a listener on the singleton socket.
+    expect(H.socket._handlers['connect'] ?? []).toHaveLength(0);
+  });
+
   it('retries the FIRST setup on reconnect after it failed mid-handshake, and reaches ready', async () => {
     // First setup fails on its very first request (socket dropped mid-handshake:
     // the initialized flag is never set — the incident's un-retried failure).
