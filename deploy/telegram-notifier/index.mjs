@@ -36,14 +36,21 @@ function alarmStateParameterName(environment, alarmName) {
   return `/a-meet/${environment}/alarm-state/${alarmName}`;
 }
 
+// Alarm-state persistence is best-effort: paging must never depend on SSM
+// being writable/readable. A failed write only means the eventual OK can't be
+// collapsed; a failed read only means the OK is delivered as the full block.
 async function storeAlarmTimestamp(environment, alarmName, stateChangeTime) {
   if (!stateChangeTime) return;
-  await ssm.send(new PutParameterCommand({
-    Name: alarmStateParameterName(environment, alarmName),
-    Value: stateChangeTime,
-    Type: 'String',
-    Overwrite: true,
-  }));
+  try {
+    await ssm.send(new PutParameterCommand({
+      Name: alarmStateParameterName(environment, alarmName),
+      Value: stateChangeTime,
+      Type: 'String',
+      Overwrite: true,
+    }));
+  } catch (error) {
+    console.warn(`Failed to store alarm-state parameter: ${error?.message ?? error}`);
+  }
 }
 
 async function readAlarmTimestamp(environment, alarmName) {
@@ -53,8 +60,10 @@ async function readAlarmTimestamp(environment, alarmName) {
     }));
     return response.Parameter?.Value ?? null;
   } catch (error) {
-    if (error?.name === 'ParameterNotFound') return null;
-    throw error;
+    if (error?.name !== 'ParameterNotFound') {
+      console.warn(`Failed to read alarm-state parameter: ${error?.message ?? error}`);
+    }
+    return null;
   }
 }
 
