@@ -16,9 +16,12 @@
 // ordinary over-limit blip; only sustained egregious flooding (many consecutive
 // denials by one actor) trips a disconnect of the offending socket.
 //
-// Memory: actor entries are refcounted by their live sockets and evicted when
-// the actor's last socket disconnects, so the store cannot grow unboundedly.
-// In-memory by design — the single-node deployment needs no shared store.
+// Memory: actor entries are refcounted by their live sockets, but eviction is
+// DELAYED by a grace period after the last socket disconnects — evicting
+// immediately would hand a serial reconnect a fresh bucket, reopening the very
+// bypass actor keying exists to close. Idle entries are swept lazily once the
+// grace has passed (by then every bucket has fully refilled anyway, so evicting
+// loses nothing). In-memory by design — single-node needs no shared store.
 
 import { logger } from '../config/logger.js';
 import { env } from '../config/env.js';
@@ -85,6 +88,8 @@ interface ActorEntry {
   /** Live socket ids attached to this actor — the refcount for eviction. */
   sockets: Set<string>;
   buckets: Record<string, BucketState>;
+  /** Epoch ms since the actor has had zero live sockets; null while connected. */
+  emptySince: number | null;
 }
 
 // Per-socket "already tracked by the limiter" flag, so each socket registers
@@ -94,6 +99,12 @@ const TRACKED = Symbol.for('a-meet.rateLimitTracked');
 export interface SocketRateLimiterOptions {
   buckets: Record<string, BucketConfig>;
   floodDisconnectThreshold: number;
+  /**
+   * How long a disconnected actor's entry survives before eviction, so a
+   * serial disconnect→reconnect resumes its drained bucket instead of minting
+   * a fresh one. Defaults to 10 minutes.
+   */
+  evictionGraceMs?: number;
   /** Injectable clock for tests. Defaults to Date.now. */
   now?: () => number;
 }
@@ -117,16 +128,30 @@ export interface SocketRateLimiter {
 
 export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketRateLimiter {
   const now = opts.now ?? Date.now;
+  const evictionGraceMs = opts.evictionGraceMs ?? 10 * 60 * 1000;
   const actors = new Map<string, ActorEntry>();
 
+  // Lazy sweep, amortized over track() calls: evict actors whose last socket
+  // disconnected longer than the grace period ago. By then their buckets have
+  // long since refilled to capacity, so nothing meaningful is lost.
+  function sweep(): void {
+    const cutoff = now() - evictionGraceMs;
+    for (const [key, entry] of actors) {
+      if (entry.sockets.size === 0 && entry.emptySince !== null && entry.emptySince <= cutoff) {
+        actors.delete(key);
+      }
+    }
+  }
+
   // Attach this socket to its actor entry (creating it if needed) and register
-  // a one-time disconnect cleanup: drop the socket from the refcount and evict
-  // the whole entry once the actor's last socket is gone.
+  // a one-time disconnect cleanup. A reconnecting actor re-attaches to its
+  // surviving entry — drained buckets and violation counts carry over.
   function track(socket: Socket): ActorEntry {
+    sweep();
     const key = actorKeyFor(socket);
     let entry = actors.get(key);
     if (!entry) {
-      entry = { sockets: new Set(), buckets: {} };
+      entry = { sockets: new Set(), buckets: {}, emptySince: null };
       actors.set(key, entry);
     }
 
@@ -134,11 +159,12 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
     if (!socketAny[TRACKED]) {
       socketAny[TRACKED] = true;
       entry.sockets.add(socket.id);
+      entry.emptySince = null;
       socket.on('disconnect', () => {
         const current = actors.get(key);
         if (!current) return;
         current.sockets.delete(socket.id);
-        if (current.sockets.size === 0) actors.delete(key);
+        if (current.sockets.size === 0) current.emptySince = now();
       });
     }
     return entry;
@@ -192,9 +218,9 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
       );
 
       // Sustained egregious flooding → cut the offending socket. The actor's
-      // bucket (and violation count) survives eviction only if another of the
-      // actor's sockets is still connected — but a drained bucket refills slowly
-      // either way, so reconnect-and-flood keeps getting denied.
+      // bucket and violation count survive the disconnect for the eviction
+      // grace period, so reconnect-and-flood resumes the drained bucket and
+      // keeps getting denied.
       if (state.violations >= opts.floodDisconnectThreshold) {
         socket.disconnect(true);
         return;

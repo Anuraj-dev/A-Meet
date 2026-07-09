@@ -196,19 +196,21 @@ describe('createSocketRateLimiter — actor keying (bypass resistance)', () => {
     expect(h2).not.toHaveBeenCalled();
   });
 
-  it('a reconnect (new socket, same user) resumes the drained bucket instead of resetting it', () => {
+  it('a SERIAL reconnect (disconnect fully, then a new socket) resumes the drained bucket', () => {
     const limiter = createSocketRateLimiter(opts());
     const s1 = makeSocket({ id: 's1', userId: 'user-x' });
-    const s2 = makeSocket({ id: 's2', userId: 'user-x' }); // reconnect overlaps briefly
     const h1 = vi.fn();
-    const h2 = vi.fn();
     const w1 = limiter.guard(s1, 'chat', 'chat-message', h1);
-    const w2 = limiter.guard(s2, 'chat', 'chat-message', h2); // registered while s1 alive
 
-    w1({}); w1({});         // drain via the old socket
-    s1._fire('disconnect'); // old socket goes away — actor entry survives via s2
+    w1({}); w1({});         // drain the bucket
+    s1._fire('disconnect'); // actor has ZERO live sockets now
 
-    w2({});                 // still denied: the bucket did NOT reset on reconnect
+    now += 100; // reconnect shortly after — well inside the eviction grace
+    const s2 = makeSocket({ id: 's2', userId: 'user-x' });
+    const h2 = vi.fn();
+    const w2 = limiter.guard(s2, 'chat', 'chat-message', h2);
+
+    w2({}); // must be denied: dropping the socket must not mint a fresh bucket
     expect(h2).not.toHaveBeenCalled();
   });
 
@@ -227,8 +229,9 @@ describe('createSocketRateLimiter — actor keying (bypass resistance)', () => {
     expect(h2).not.toHaveBeenCalled();
   });
 
-  it('evicts the actor entry when its LAST socket disconnects (no unbounded growth)', () => {
-    const limiter = createSocketRateLimiter(opts());
+  it('evicts a fully-disconnected actor only after the grace period (no unbounded growth)', () => {
+    const graceMs = 60_000;
+    const limiter = createSocketRateLimiter({ ...opts(), evictionGraceMs: graceMs });
     const s1 = makeSocket({ id: 's1', userId: 'user-x' });
     const s2 = makeSocket({ id: 's2', userId: 'user-x' });
     limiter.guard(s1, 'chat', 'chat-message', vi.fn());
@@ -237,9 +240,30 @@ describe('createSocketRateLimiter — actor keying (bypass resistance)', () => {
     expect(limiter.actorCount()).toBe(1);
 
     s1._fire('disconnect');
-    expect(limiter.actorCount()).toBe(1); // s2 still holds the entry
+    s2._fire('disconnect'); // all sockets gone — entry lingers for the grace period
 
-    s2._fire('disconnect');
-    expect(limiter.actorCount()).toBe(0); // last socket gone → evicted
+    now += graceMs / 2;
+    limiter.guard(makeSocket({ id: 'other', userId: 'user-y' }), 'chat', 'chat-message', vi.fn());
+    expect(limiter.actorCount()).toBe(2); // user-x still held (inside grace) + user-y
+
+    now += graceMs; // past the grace for user-x
+    limiter.guard(makeSocket({ id: 'other2', userId: 'user-z' }), 'chat', 'chat-message', vi.fn());
+    expect(limiter.actorCount()).toBe(2); // user-x swept; user-y (still connected) + user-z
+  });
+
+  it('a reconnect during the grace period cancels the pending eviction', () => {
+    const graceMs = 60_000;
+    const limiter = createSocketRateLimiter({ ...opts(), evictionGraceMs: graceMs });
+    const s1 = makeSocket({ id: 's1', userId: 'user-x' });
+    limiter.guard(s1, 'chat', 'chat-message', vi.fn());
+    s1._fire('disconnect');
+
+    now += graceMs / 2;
+    const s2 = makeSocket({ id: 's2', userId: 'user-x' }); // reconnects inside grace
+    limiter.guard(s2, 'chat', 'chat-message', vi.fn());
+
+    now += graceMs * 2; // long after the original disconnect
+    limiter.guard(makeSocket({ id: 'p', userId: 'user-p' }), 'chat', 'chat-message', vi.fn());
+    expect(limiter.actorCount()).toBe(2); // user-x survives — it has a live socket
   });
 });
