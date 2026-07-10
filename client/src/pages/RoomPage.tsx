@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, type ComponentProps, type FormEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Alert, Avatar, AvatarGroup, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
+  Alert, Avatar, AvatarGroup, Box, Button, Chip, Dialog, DialogActions,
   DialogContent, DialogTitle, IconButton, Popover,
   Snackbar, Stack, Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
@@ -30,6 +30,7 @@ import RtcStatsOverlay from '../components/RtcStatsOverlay';
 import ControlBar from '../components/ControlBar';
 import ChatPanel from '../components/ChatPanel';
 import PeoplePanel from '../components/PeoplePanel';
+import MediaReconnectingAlert from '../components/MediaReconnectingAlert';
 import TranscriptPanel from '../components/TranscriptPanel';
 import LiveCaptions from '../components/LiveCaptions';
 import CallNotifications from '../components/CallNotifications';
@@ -122,6 +123,7 @@ export default function RoomPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   // Host asked us to unmute — surfaced as a one-tap prompt (never forced).
   const [unmuteRequestFrom, setUnmuteRequestFrom] = useState<string | null>(null);
+  const [forcedMuteCount, setForcedMuteCount] = useState(0);
   const [reactionAnchor, setReactionAnchor] = useState<HTMLElement | null>(null);
   const [outputVolume, setOutputVolume] = useState(1);
   const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({});
@@ -461,6 +463,7 @@ export default function RoomPage() {
   // socket effect so they can close over fresh `localAudioOn` / `toggleAudio`.
   useEffect(() => {
     const onForceMuted = () => {
+      setForcedMuteCount((count) => count + 1);
       if (localAudioOn) { playSound('toggleOff'); toggleAudio(); }
       pushNote({ kind: 'event', variant: 'info', text: 'You were muted by the meeting admin' });
     };
@@ -1235,14 +1238,7 @@ export default function RoomPage() {
             </Alert>
           )}
           {mediaReconnecting && (
-            <Alert
-              severity="warning"
-              variant="filled"
-              icon={<CircularProgress size={18} thickness={5} sx={{ color: 'inherit' }} />}
-              sx={{ borderRadius: 2, mb: 1, bgcolor: 'ember.dark', color: '#fff', '& .MuiAlert-icon': { color: '#fff' } }}
-            >
-              Reconnecting media…
-            </Alert>
+            <MediaReconnectingAlert />
           )}
           {mediaExhausted && (
             <Alert
@@ -1411,6 +1407,7 @@ export default function RoomPage() {
           >
             <ControlBar
               localAudioOn={localAudioOn} hasMic={hasMic} onToggleAudio={handleToggleAudio}
+              forcedMuteCount={forcedMuteCount}
               localVideoOn={localVideoOn} onToggleVideo={handleToggleVideo}
               isScreenSharing={isScreenSharing} onToggleShare={handleToggleShare}
               handRaised={handRaised} onToggleHand={handleToggleHand}

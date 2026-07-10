@@ -1,8 +1,10 @@
 import { useEffect, useRef, type FormEvent } from 'react';
 import {
-  Avatar, Box, Chip, IconButton, InputAdornment, TextField, Tooltip, Typography,
+  Avatar, Box, Chip, IconButton, InputAdornment, Modal, TextField, Tooltip, Typography,
+  useMediaQuery,
 } from '@mui/material';
 import { Close as CloseIcon, Send as SendIcon } from '@mui/icons-material';
+import { usePanelDialog } from '../hooks/usePanelDialog';
 
 interface ChatSender { id: string; name?: string; avatar?: string }
 export interface ChatMessage { type?: 'event' | 'chat'; text: string; ts: string | number | Date; sender?: ChatSender }
@@ -23,26 +25,20 @@ function formatTime(ts: string | number | Date): string {
 // Mobile: a bottom sheet (62vh, slides up over the video, with backdrop).
 export default function ChatPanel({ messages, input, setInput, onSend, currentUserId, onClose }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const isMobile = useMediaQuery((theme) => theme.breakpoints.down('sm'));
+  const { initialFocusRef, panelRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  return (
-    <>
-      {/* Mobile backdrop */}
-      <Box
-        onClick={onClose}
-        sx={{
-          display: { xs: 'block', sm: 'none' },
-          position: 'fixed',
-          inset: 0,
-          zIndex: 1299,
-          bgcolor: 'rgba(0,0,0,0.55)',
-        }}
-      />
-      <Box
+  const panel = (
+    <Box
+        ref={panelRef}
         data-testid="chat-panel"
+        role="dialog"
+        aria-label="In-call messages"
+        onKeyDown={onKeyDown}
         sx={{
           // Mobile: bottom sheet. Desktop: in-flow side column.
           position: { xs: 'fixed', sm: 'relative' },
@@ -85,7 +81,12 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
           borderBottom: '1px solid', borderColor: 'divider',
         }}
       >
-        <Typography sx={{ fontFamily: '"Outfit", sans-serif', fontWeight: 600 }}>
+        <Typography
+          component="h2"
+          ref={initialFocusRef}
+          tabIndex={-1}
+          sx={{ fontFamily: '"Outfit", sans-serif', fontWeight: 600 }}
+        >
           In-call messages
         </Typography>
         <Tooltip title="Close">
@@ -95,8 +96,8 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
         </Tooltip>
       </Box>
 
-      {/* Messages */}
-      <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1.5 }}>
+      {/* Messages — role="log" so assistive tech politely announces new entries */}
+      <Box role="log" aria-label="Chat messages" sx={{ flex: 1, overflowY: 'auto', px: 2, py: 1.5 }}>
         {messages.length === 0 && (
           <Box sx={{ textAlign: 'center', mt: 6, px: 2 }}>
             <Typography variant="body2" color="text.secondary">
@@ -192,6 +193,18 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
         />
       </Box>
     </Box>
-    </>
+  );
+
+  if (!isMobile) return panel;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      keepMounted={false}
+      slotProps={{ backdrop: { sx: { bgcolor: 'rgba(0,0,0,0.55)' } } }}
+    >
+      {panel}
+    </Modal>
   );
 }
