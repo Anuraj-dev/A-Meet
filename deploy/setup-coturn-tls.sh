@@ -87,6 +87,8 @@ install_renewal_hook() {
     printf 'A_MEET_DIR=%q\n' "$A_MEET_DIR"
     printf 'TURN_DOMAIN=%q\n' "$TURN_DOMAIN"
     printf 'COTURN_CERT_DIR=%q\n' "$COTURN_CERT_DIR"
+    printf 'COTURN_RUNTIME_UID=%q\n' "$COTURN_RUNTIME_UID"
+    printf 'COTURN_RUNTIME_GID=%q\n' "$COTURN_RUNTIME_GID"
   } > "$RUNTIME_CONFIG"
   chmod 0600 "$RUNTIME_CONFIG"
 }

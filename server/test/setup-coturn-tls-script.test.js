@@ -17,8 +17,19 @@ describe('deploy/setup-coturn-tls.sh', () => {
   it('installs renewed key material into coturn and cleanly recreates the TLS listener', async () => {
     const script = await readFile(new URL('../../deploy/setup-coturn-tls.sh', import.meta.url), 'utf8');
 
-    expect(script).toContain('install -m 0600 "$CERT_LINEAGE/fullchain.pem" "$COTURN_CERT_DIR/fullchain.pem"');
-    expect(script).toContain('install -m 0600 "$CERT_LINEAGE/privkey.pem" "$COTURN_CERT_DIR/privkey.pem"');
+    // coturn/coturn runs as nobody:nogroup (65534); root-owned 0600 copies are
+    // unreadable in the container and the TLS listener silently fails to start.
+    expect(script).toContain(
+      'install -m 0600 -o "$COTURN_RUNTIME_UID" -g "$COTURN_RUNTIME_GID" "$CERT_LINEAGE/fullchain.pem" "$COTURN_CERT_DIR/fullchain.pem"'
+    );
+    expect(script).toContain(
+      'install -m 0600 -o "$COTURN_RUNTIME_UID" -g "$COTURN_RUNTIME_GID" "$CERT_LINEAGE/privkey.pem" "$COTURN_CERT_DIR/privkey.pem"'
+    );
+    expect(script).toContain('COTURN_RUNTIME_UID="${COTURN_RUNTIME_UID:-65534}"');
+    // Renewals run the script through the certbot hook with only
+    // /etc/a-meet/coturn-tls.env for context — UID/GID overrides must persist there.
+    expect(script).toContain("printf 'COTURN_RUNTIME_UID=%q\\n' \"$COTURN_RUNTIME_UID\"");
+    expect(script).toContain("printf 'COTURN_RUNTIME_GID=%q\\n' \"$COTURN_RUNTIME_GID\"");
     expect(script).toContain('docker compose -f "$A_MEET_DIR/docker-compose.coturn.yml" up -d --force-recreate coturn');
     expect(script).toContain('CERT_LINEAGE=/etc/letsencrypt/live/$TURN_DOMAIN');
     expect(script).not.toContain('CERT_LINEAGE="${RENEWED_LINEAGE:-');
@@ -32,6 +43,14 @@ describe('deploy/coturn-renew-hook.sh', () => {
     expect(hook).toContain('TURN_LINEAGE="/etc/letsencrypt/live/$TURN_DOMAIN"');
     expect(hook).toContain('[ "${RENEWED_LINEAGE:-}" != "$TURN_LINEAGE" ]');
     expect(hook).toContain('exit 0');
+  });
+
+  it('exports the runtime config so the exec-ed installer inherits it', async () => {
+    const hook = await readFile(new URL('../../deploy/coturn-renew-hook.sh', import.meta.url), 'utf8');
+
+    // Without set -a the sourced variables stay shell-local and the exec'd
+    // setup-coturn-tls.sh dies at its TURN_DOMAIN guard on the first renewal.
+    expect(hook).toMatch(/set -a\n(# shellcheck[^\n]*\n)?\. \/etc\/a-meet\/coturn-tls\.env\nset \+a/);
   });
 });
 
