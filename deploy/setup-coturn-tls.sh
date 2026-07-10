@@ -25,6 +25,8 @@ COTURN_CERT_DIR="${COTURN_CERT_DIR:-$A_MEET_DIR/coturn/certs}"
 CERT_LINEAGE=/etc/letsencrypt/live/$TURN_DOMAIN
 RENEWAL_HOOK=/etc/letsencrypt/renewal-hooks/deploy/a-meet-coturn
 RUNTIME_CONFIG=/etc/a-meet/coturn-tls.env
+COTURN_RUNTIME_UID="${COTURN_RUNTIME_UID:-65534}"
+COTURN_RUNTIME_GID="${COTURN_RUNTIME_GID:-65534}"
 
 ensure_certbot() {
   if command -v certbot >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
@@ -66,9 +68,12 @@ install_certificate() {
     exit 1
   fi
 
-  install -d -m 0700 "$COTURN_CERT_DIR"
-  install -m 0600 "$CERT_LINEAGE/fullchain.pem" "$COTURN_CERT_DIR/fullchain.pem"
-  install -m 0600 "$CERT_LINEAGE/privkey.pem" "$COTURN_CERT_DIR/privkey.pem"
+  # The coturn/coturn image drops to nobody:nogroup (65534:65534); certificates
+  # installed as root-only are unreadable inside the container and the TLS
+  # listener silently fails to start. Own the copies by that uid/gid.
+  install -d -m 0700 -o "$COTURN_RUNTIME_UID" -g "$COTURN_RUNTIME_GID" "$COTURN_CERT_DIR"
+  install -m 0600 -o "$COTURN_RUNTIME_UID" -g "$COTURN_RUNTIME_GID" "$CERT_LINEAGE/fullchain.pem" "$COTURN_CERT_DIR/fullchain.pem"
+  install -m 0600 -o "$COTURN_RUNTIME_UID" -g "$COTURN_RUNTIME_GID" "$CERT_LINEAGE/privkey.pem" "$COTURN_CERT_DIR/privkey.pem"
 
   # coturn reads certificates on startup. Recreate only this container so the
   # new certificate is live without disturbing the application container.
