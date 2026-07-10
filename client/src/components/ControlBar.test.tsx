@@ -205,4 +205,84 @@ describe('ControlBar', () => {
       expect(props.onLayoutChange).toHaveBeenCalledWith('spotlight');
     });
   });
+
+  // A11y baseline (#164): toggles expose pressed state, menu triggers expose
+  // popup/expanded state, and local state flips are narrated via a polite
+  // live region — the contract screen readers depend on.
+  describe('accessibility', () => {
+    function renderRerenderable(overrides: Partial<ControlBarProps> = {}) {
+      const view = render(
+        <ThemeProvider theme={theme}>
+          <ControlBar {...makeProps(overrides)} />
+        </ThemeProvider>,
+      );
+      const update = (next: Partial<ControlBarProps>) =>
+        view.rerender(
+          <ThemeProvider theme={theme}>
+            <ControlBar {...makeProps(next)} />
+          </ThemeProvider>,
+        );
+      return { update };
+    }
+
+    it('exposes aria-pressed on the mic toggle matching the live/muted state', () => {
+      const { update } = renderRerenderable({ localAudioOn: true });
+      expect(btn('Turn off microphone')).toHaveAttribute('aria-pressed', 'true');
+
+      update({ localAudioOn: false });
+      expect(btn('Turn on microphone')).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('exposes aria-pressed on camera, hand, screen-share, chat and people toggles', () => {
+      renderBar({ localVideoOn: false, handRaised: true, isScreenSharing: true, showChat: true, showPeople: false });
+
+      expect(btn('Turn on camera')).toHaveAttribute('aria-pressed', 'false');
+      expect(btn('Lower hand')).toHaveAttribute('aria-pressed', 'true');
+      expect(btn('Stop presenting')).toHaveAttribute('aria-pressed', 'true');
+      expect(btn('Hide chat')).toHaveAttribute('aria-pressed', 'true');
+      expect(btn('Show people')).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('marks the layout chooser as a menu trigger and reflects expanded state', () => {
+      renderBar();
+
+      const layoutBtn = btn('Change layout');
+      expect(layoutBtn).toHaveAttribute('aria-haspopup', 'menu');
+      expect(layoutBtn).toHaveAttribute('aria-expanded', 'false');
+
+      fireEvent.click(layoutBtn);
+      // While the menu is open MUI hides the background from assistive tech,
+      // so re-query including hidden elements to check the trigger's state.
+      expect(screen.getByRole('button', { name: 'Change layout', hidden: true })).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('marks More options and Audio settings as popup triggers', () => {
+      renderBar();
+
+      expect(btn('More options')).toHaveAttribute('aria-haspopup', 'menu');
+      expect(btn('Audio settings')).toHaveAttribute('aria-haspopup', 'dialog');
+    });
+
+    it('announces microphone state changes through a polite live region', () => {
+      const { update } = renderRerenderable({ localAudioOn: true });
+      const region = screen.getByRole('status');
+      expect(region).toHaveTextContent('');
+
+      update({ localAudioOn: false });
+      expect(region).toHaveTextContent('Microphone muted');
+
+      update({ localAudioOn: true });
+      expect(region).toHaveTextContent('Microphone on');
+    });
+
+    it('announces raise-hand and screen-share changes', () => {
+      const { update } = renderRerenderable({ handRaised: false, isScreenSharing: false });
+
+      update({ handRaised: true, isScreenSharing: false });
+      expect(screen.getByRole('status')).toHaveTextContent('Hand raised');
+
+      update({ handRaised: true, isScreenSharing: true });
+      expect(screen.getByRole('status')).toHaveTextContent('Presenting your screen');
+    });
+  });
 });

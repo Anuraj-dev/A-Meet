@@ -4,6 +4,7 @@ import {
   Menu, MenuItem, Popover as MuiPopover, Slider, Stack, Tooltip, Typography,
   useMediaQuery,
 } from '@mui/material';
+import { visuallyHidden } from '@mui/utils';
 import {
   CallEnd as CallEndIcon,
   Chat as ChatIcon,
@@ -51,6 +52,15 @@ interface CircleButtonProps {
   disabled?: boolean;
   variant?: CircleVariant;
   badge?: number;
+  // Accessibility (see docs/conventions.md → Accessibility):
+  //  • `pressed` marks a toggle control and exposes aria-pressed = "is the
+  //    feature currently engaged" (mic live, camera live, hand raised, panel
+  //    open, presenting). The tooltip/label still describes the *action*.
+  //  • `hasPopup` + `expanded` mark a control that opens a menu/popover so
+  //    assistive tech announces "has menu, collapsed/expanded".
+  pressed?: boolean;
+  hasPopup?: 'menu' | 'dialog';
+  expanded?: boolean;
   children: ReactNode;
 }
 
@@ -73,7 +83,7 @@ export interface ControlBarProps {
 }
 
 // One round control button. `variant` drives the Meet-style color states.
-function CircleButton({ title, onClick, disabled = false, variant = 'idle', badge = 0, children }: CircleButtonProps) {
+function CircleButton({ title, onClick, disabled = false, variant = 'idle', badge = 0, pressed, hasPopup, expanded, children }: CircleButtonProps) {
   const styles = {
     idle: { bgcolor: 'control.idle', color: 'text.primary', '&:hover': { bgcolor: 'control.idleHover' } },
     danger: { bgcolor: 'error.main', color: '#fff', '&:hover': { bgcolor: 'error.dark' } },
@@ -85,6 +95,9 @@ function CircleButton({ title, onClick, disabled = false, variant = 'idle', badg
     <IconButton
       onClick={onClick}
       disabled={disabled}
+      aria-pressed={pressed}
+      aria-haspopup={hasPopup}
+      aria-expanded={hasPopup ? Boolean(expanded) : undefined}
       sx={{
         width: { xs: 44, sm: 50 },
         height: { xs: 44, sm: 50 },
@@ -133,6 +146,30 @@ export default function ControlBar({
   const layoutRef = useRef<HTMLButtonElement | null>(null);
   const closeMore = () => setMoreAnchor(null);
 
+  // Polite screen-reader announcements for the local user's own control-state
+  // changes. A keyboard/SR user toggling a control hears the aria-pressed flip,
+  // but state can also change *without* the button focused (e.g. the host mutes
+  // you, or a hotkey toggles the camera) — this live region narrates those.
+  // Implemented with the derived-state-during-render pattern (compare against
+  // the previous render's values and update state during render) rather than an
+  // effect, per react-hooks/set-state-in-effect.
+  const [announcement, setAnnouncement] = useState('');
+  const [prevState, setPrevState] = useState({ localAudioOn, localVideoOn, handRaised, isScreenSharing });
+  if (
+    prevState.localAudioOn !== localAudioOn ||
+    prevState.localVideoOn !== localVideoOn ||
+    prevState.handRaised !== handRaised ||
+    prevState.isScreenSharing !== isScreenSharing
+  ) {
+    const messages: string[] = [];
+    if (hasMic && localAudioOn !== prevState.localAudioOn) messages.push(localAudioOn ? 'Microphone on' : 'Microphone muted');
+    if (localVideoOn !== prevState.localVideoOn) messages.push(localVideoOn ? 'Camera on' : 'Camera off');
+    if (handRaised !== prevState.handRaised) messages.push(handRaised ? 'Hand raised' : 'Hand lowered');
+    if (isScreenSharing !== prevState.isScreenSharing) messages.push(isScreenSharing ? 'Presenting your screen' : 'Stopped presenting');
+    setPrevState({ localAudioOn, localVideoOn, handRaised, isScreenSharing });
+    if (messages.length) setAnnouncement(messages.join('. '));
+  }
+
   return (
     <Box
       sx={{
@@ -151,11 +188,17 @@ export default function ControlBar({
         maxWidth: '100%',
       }}
     >
+      {/* Off-screen polite live region — narrates local control-state changes. */}
+      <Box component="span" role="status" aria-live="polite" sx={visuallyHidden}>
+        {announcement}
+      </Box>
+
       <CircleButton
         title={!hasMic ? 'No microphone' : localAudioOn ? 'Turn off microphone' : 'Turn on microphone'}
         onClick={onToggleAudio}
         disabled={!hasMic}
         variant={localAudioOn ? 'idle' : 'danger'}
+        pressed={localAudioOn}
       >
         {localAudioOn ? <MicIcon /> : <MicOffIcon />}
       </CircleButton>
@@ -166,6 +209,7 @@ export default function ControlBar({
           onClick={onToggleTranscript}
           disabled={transcriptDisabled}
           variant={transcriptActive ? 'active' : 'idle'}
+          pressed={transcriptActive}
         >
           {transcriptActive ? <CaptionIcon /> : <CaptionOffIcon />}
         </CircleButton>
@@ -175,6 +219,7 @@ export default function ControlBar({
         title={localVideoOn ? 'Turn off camera' : 'Turn on camera'}
         onClick={onToggleVideo}
         variant={localVideoOn ? 'idle' : 'danger'}
+        pressed={localVideoOn}
       >
         {localVideoOn ? <VideocamIcon /> : <VideocamOffIcon />}
       </CircleButton>
@@ -185,6 +230,7 @@ export default function ControlBar({
           title={isScreenSharing ? 'Stop presenting' : 'Present now'}
           onClick={onToggleShare}
           variant={isScreenSharing ? 'active' : 'idle'}
+          pressed={isScreenSharing}
         >
           {isScreenSharing ? <StopPresentIcon /> : <PresentIcon />}
         </CircleButton>
@@ -201,6 +247,7 @@ export default function ControlBar({
         title={handRaised ? 'Lower hand' : 'Raise hand'}
         onClick={onToggleHand}
         variant={handRaised ? 'warning' : 'idle'}
+        pressed={handRaised}
       >
         <PanToolIcon />
       </CircleButton>
@@ -209,6 +256,7 @@ export default function ControlBar({
         title={showChat ? 'Hide chat' : 'Show chat'}
         onClick={onToggleChat}
         variant={showChat ? 'active' : 'idle'}
+        pressed={showChat}
         badge={!showChat ? unreadCount : 0}
       >
         {showChat ? <ChatIcon /> : <ChatOutlineIcon />}
@@ -220,6 +268,7 @@ export default function ControlBar({
           title={showPeople ? 'Hide people' : 'Show people'}
           onClick={onTogglePeople}
           variant={showPeople ? 'active' : 'idle'}
+          pressed={showPeople}
           badge={peopleCount > 1 ? peopleCount : 0}
         >
           <PeopleAltIcon />
@@ -233,6 +282,8 @@ export default function ControlBar({
             title="Change layout"
             onClick={() => setLayoutAnchor(layoutAnchor ? null : layoutRef.current)}
             variant={layoutAnchor ? 'active' : 'idle'}
+            hasPopup="menu"
+            expanded={Boolean(layoutAnchor)}
           >
             <LayoutIcon />
           </CircleButton>
@@ -248,6 +299,8 @@ export default function ControlBar({
           title="Audio settings"
           onClick={() => setAudioAnchor(audioAnchor ? null : audioRef.current)}
           variant={audioAnchor ? 'active' : 'idle'}
+          hasPopup="dialog"
+          expanded={Boolean(audioAnchor)}
         >
           <TuneIcon />
         </CircleButton>
@@ -259,13 +312,14 @@ export default function ControlBar({
           title={pinned ? 'Auto-hide controls' : 'Keep controls visible'}
           onClick={onTogglePin}
           variant={pinned ? 'active' : 'idle'}
+          pressed={pinned}
         >
           {pinned ? <KeyboardArrowDownIcon /> : <KeyboardArrowUpIcon />}
         </CircleButton>
       )}
 
       <Box ref={moreRef} sx={{ display: 'inline-flex' }}>
-        <CircleButton title="More options" onClick={() => setMoreAnchor(moreRef.current)} variant="idle">
+        <CircleButton title="More options" onClick={() => setMoreAnchor(moreRef.current)} variant="idle" hasPopup="menu" expanded={Boolean(moreAnchor)}>
           <MoreVertIcon />
         </CircleButton>
       </Box>
