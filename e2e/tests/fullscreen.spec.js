@@ -9,9 +9,8 @@ import { stubAuth } from '../helpers/auth.js';
 // to the Spotlight layout — its focus falls back to the self tile — wait for the
 // focus stage to mount, and drive fullscreen from that tile's menu. We assert
 // the observable effect: document.fullscreenElement becomes set on enter and
-// clears on exit. Exit uses Escape (the standard user
-// gesture): once the tile is fullscreen, the MUI menu portals OUTSIDE the
-// fullscreen element's top layer, so re-clicking the menu item is unreliable.
+// clears on exit (see the exit step for why the exit goes through the
+// Fullscreen API rather than a synthesized Escape or the portalled menu).
 
 const AVATAR =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
@@ -26,7 +25,7 @@ async function createRoomAsHost(page) {
 const inFullscreen = (page) => page.evaluate(() => document.fullscreenElement !== null);
 
 test.describe('tile fullscreen', () => {
-  test('the tile menu enters fullscreen and Escape exits it', async ({ browser }) => {
+  test('the tile menu enters fullscreen and exiting clears it', async ({ browser }) => {
     const context = await browser.newContext();
     await stubAuth(context, user);
     const page = await context.newPage();
@@ -49,9 +48,14 @@ test.describe('tile fullscreen', () => {
     await page.getByRole('menuitem', { name: 'Fullscreen' }).click();
     await expect.poll(() => inFullscreen(page), { timeout: 10_000 }).toBe(true);
 
-    // Exit with Escape — the standard user gesture. The tile menu can't be
-    // re-used here: MUI portals it outside the fullscreen element's top layer.
-    await page.keyboard.press('Escape');
+    // Exit via the Fullscreen API directly. Neither user affordance is drivable
+    // headless: the tile menu is portalled OUTSIDE the fullscreen element's top
+    // layer, and CDP's synthesized Escape never reaches the browser-chrome layer
+    // that handles "Escape exits fullscreen" (the app has no page-level Escape
+    // handler). document.exitFullscreen() is the same native API the browser's
+    // own Escape invokes, so this still proves the app entered real fullscreen
+    // and that teardown cleanly clears document.fullscreenElement.
+    await page.evaluate(() => document.exitFullscreen());
     await expect.poll(() => inFullscreen(page), { timeout: 10_000 }).toBe(false);
 
     await context.close();
