@@ -62,3 +62,31 @@ Host-moderation and teardown socket events are intentionally **not** rate-limite
 > Out of scope (per PRD #161): CAPTCHA, report/block moderation, and distributed
 > (Redis) limiting. In-memory is correct while the deployment is a single node;
 > revisit on horizontal scale-out.
+
+## Accessibility (room surface)
+
+Baseline landed with #164; the conventions below apply to any new room UI.
+
+- **Labels**: every icon-only control gets its accessible name from its MUI
+  Tooltip `title` (or an explicit `aria-label`). The label describes the
+  **action** ("Turn off microphone"), not the state.
+- **Toggle state**: toggle controls expose `aria-pressed` = *is the feature
+  currently engaged* (mic live, camera live, presenting, hand raised, panel
+  open). This is the project's chosen convention — don't switch a control to
+  the label-includes-state style.
+- **Menu/popover triggers**: expose `aria-haspopup` (`menu`/`dialog`) and
+  `aria-expanded`.
+- **Announcements**: one polite live region per concern — CallNotifications
+  (join/leave/moderation toasts, `role="status"`), the ControlBar's hidden
+  `role="status"` region (local mic/camera/hand/share state flips), and the
+  chat history (`role="log"`). Prefer reusing these over adding new regions.
+- **Panels**: the in-flow side panels (People/Chat) are labeled
+  `role="dialog"`s wired through `client/src/hooks/usePanelDialog.ts` — focus
+  moves to the panel heading on open, Escape closes, and focus returns to the
+  invoking control on close. Real modals keep using MUI `Dialog`.
+- **Focus ring**: the global `:focus-visible` ember outline lives in the theme
+  (`MuiCssBaseline`). Never remove an outline without a replacement.
+- **Tests**: component tests locate controls by role + accessible name
+  (Testing Library `getByRole`) so the a11y contract is asserted alongside
+  behavior; `e2e/tests/a11y.spec.js` keeps an axe-core scan (zero
+  serious/critical) and a keyboard-only control-bar pass as the CI gate.
