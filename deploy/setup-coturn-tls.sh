@@ -22,18 +22,42 @@ A_MEET_DIR="${A_MEET_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 TURN_DOMAIN="${TURN_DOMAIN:?set TURN_DOMAIN to the public TURN hostname}"
 CERTBOT_WEBROOT="${CERTBOT_WEBROOT:-/var/www/certbot}"
 COTURN_CERT_DIR="${COTURN_CERT_DIR:-$A_MEET_DIR/coturn/certs}"
-CERT_LINEAGE="${RENEWED_LINEAGE:-/etc/letsencrypt/live/$TURN_DOMAIN}"
+CERT_LINEAGE=/etc/letsencrypt/live/$TURN_DOMAIN
 RENEWAL_HOOK=/etc/letsencrypt/renewal-hooks/deploy/a-meet-coturn
 RUNTIME_CONFIG=/etc/a-meet/coturn-tls.env
 
 ensure_certbot() {
-  if command -v certbot >/dev/null 2>&1; then
+  if command -v certbot >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     return
   fi
 
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y certbot
+  apt-get install -y certbot curl
+}
+
+verify_acme_challenge() {
+  local challenge_dir="$CERTBOT_WEBROOT/.well-known/acme-challenge"
+  local challenge_token="a-meet-acme-${RANDOM}-${RANDOM}"
+  local challenge_file="$challenge_dir/$challenge_token"
+  local challenge_value="a-meet-acme-ready"
+  local response
+
+  install -d -m 0755 "$challenge_dir"
+  printf '%s' "$challenge_value" > "$challenge_file"
+
+  if ! response=$(curl --fail --silent --show-error --connect-timeout 5 --max-time 10 \
+    "http://$TURN_DOMAIN/.well-known/acme-challenge/$challenge_token"); then
+    rm -f "$challenge_file"
+    echo "TURN HTTP-01 challenge is not reachable at http://$TURN_DOMAIN/.well-known/acme-challenge/" >&2
+    exit 1
+  fi
+  rm -f "$challenge_file"
+
+  if [ "$response" != "$challenge_value" ]; then
+    echo "TURN HTTP-01 challenge returned an unexpected response; check DNS, nginx, and TCP 80." >&2
+    exit 1
+  fi
 }
 
 install_certificate() {
@@ -71,6 +95,7 @@ setup() {
   # nginx serves CERTBOT_WEBROOT/.well-known/acme-challenge on port 80. Unlike
   # certbot's standalone mode, this is safe while the existing API redirect is
   # already bound to port 80.
+  verify_acme_challenge
   certbot certonly --webroot \
     --webroot-path "$CERTBOT_WEBROOT" \
     --domain "$TURN_DOMAIN" \

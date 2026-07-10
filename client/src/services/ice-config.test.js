@@ -12,6 +12,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe('services/ice-config', () => {
@@ -83,5 +84,20 @@ describe('services/ice-config', () => {
     expect(ICE_TRANSPORT_POLICY).toBe('relay');
     expect(ICE_SERVERS).toHaveLength(3);
     expect(ICE_SERVERS[2]).toMatchObject({ urls: expectedUrl });
+  });
+
+  it('keeps all TURN transports and warns when VITE_TURN_TRANSPORT is invalid', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('VITE_FORCE_RELAY', '1');
+    vi.stubEnv('VITE_TURN_TRANSPORT', 'quic');
+    vi.stubEnv('VITE_TURN_DOMAIN', 'turn.example.com');
+    vi.stubEnv('VITE_TURN_USERNAME', 'relay-user');
+    vi.stubEnv('VITE_TURN_SECRET', 'relay-secret');
+
+    const { ICE_SERVERS, ICE_TRANSPORT_POLICY } = await loadIce();
+
+    expect(ICE_TRANSPORT_POLICY).toBe('relay');
+    expect(ICE_SERVERS).toHaveLength(5);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Invalid VITE_TURN_TRANSPORT "quic"'));
   });
 });

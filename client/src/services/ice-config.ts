@@ -12,6 +12,12 @@ const turnDomain = import.meta.env.VITE_TURN_DOMAIN;
 const turnUsername = import.meta.env.VITE_TURN_USERNAME;
 const turnSecret = import.meta.env.VITE_TURN_SECRET;
 const turnTransport = import.meta.env.VITE_TURN_TRANSPORT;
+const validTurnTransports = ['udp', 'tcp', 'tls'] as const;
+const selectedTurnTransport = validTurnTransports.find((transport) => transport === turnTransport);
+
+if (turnTransport && !selectedTurnTransport) {
+  console.warn(`Invalid VITE_TURN_TRANSPORT "${turnTransport}"; advertising all TURN transports.`);
+}
 
 const hasTurn = Boolean(turnDomain && turnSecret);
 
@@ -20,13 +26,13 @@ const configuredTurnServers = [
       { transport: 'udp', server: { urls: `turn:${turnDomain}:3478?transport=udp`, username: turnUsername, credential: turnSecret } },
       // ... TCP relay for when UDP is blocked ...
       { transport: 'tcp', server: { urls: `turn:${turnDomain}:3478?transport=tcp`, username: turnUsername, credential: turnSecret } },
-      // ... and TLS relay on 5349 for networks that only allow outbound 443/TLS.
+      // ... and TLS relay on TCP 5349 for networks that allow that port.
       { transport: 'tls', server: { urls: `turns:${turnDomain}:5349?transport=tcp`, username: turnUsername, credential: turnSecret } },
     ];
 
 const turnServers: RTCIceServer[] = hasTurn
   ? configuredTurnServers
-      .filter(({ transport }) => !turnTransport || transport === turnTransport)
+      .filter(({ transport }) => !selectedTurnTransport || transport === selectedTurnTransport)
       .map(({ server }) => server)
   : [];
 

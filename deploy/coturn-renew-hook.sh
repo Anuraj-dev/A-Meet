@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Installed by setup-coturn-tls.sh as Certbot's deploy hook. Certbot provides
-# RENEWED_LINEAGE so the setup script copies the just-renewed certificate.
+# RENEWED_LINEAGE. Only the configured TURN lineage may update coturn.
 set -euo pipefail
 
 # shellcheck disable=SC1091
 . /etc/a-meet/coturn-tls.env
+
+TURN_LINEAGE="/etc/letsencrypt/live/$TURN_DOMAIN"
+if [ "${RENEWED_LINEAGE:-}" != "$TURN_LINEAGE" ]; then
+  exit 0
+fi
 
 exec "$A_MEET_DIR/deploy/setup-coturn-tls.sh" install-certificate

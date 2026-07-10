@@ -441,7 +441,8 @@ coturn exposes UDP and TCP on `3478` plus TURN-over-TLS on `5349`. The TLS
 certificate is for the public TURN hostname (for example, `turn.example.com`), which must
 have an A record pointing to the node's Elastic IP before issuance. The certificate is
 obtained with **HTTP-01**, not DNS-01: the existing Nginx configuration already owns port
-80, so `deploy/nginx.conf` serves only `/.well-known/acme-challenge/` from
+80, so `deploy/nginx.conf` explicitly lists both the API and TURN hostnames and serves only
+`/.well-known/acme-challenge/` from
 `/var/www/certbot` and redirects every other HTTP request to HTTPS. This avoids DNS
 provider credentials while retaining the current API redirect.
 
@@ -455,7 +456,7 @@ cd ~/ameet
 cp coturn/turnserver.conf.example coturn/turnserver.conf
 # edit coturn/turnserver.conf: YOUR_DOMAIN, YOUR_PUBLIC_IP, TURN_SECRET_PLACEHOLDER
 
-# Apply deploy/nginx.conf with API_DOMAIN replaced, then make its ACME webroot available.
+# Apply deploy/nginx.conf with API_DOMAIN and TURN_DOMAIN replaced, then make its ACME webroot available.
 sudo install -d -m 0755 /var/www/certbot
 sudo nginx -t && sudo systemctl reload nginx
 
@@ -465,12 +466,16 @@ sudo env TURN_DOMAIN=turn.example.com TURN_EMAIL=ops@example.com \
   A_MEET_DIR="$HOME/ameet" ./deploy/setup-coturn-tls.sh setup
 ```
 
-`setup-coturn-tls.sh` is idempotent and safe after a recovery or rebuild: Certbot retains a
-valid certificate, then the script copies it into the bind-mounted `coturn/certs/` directory
-and recreates only the coturn container. It also installs a Certbot deploy hook at
+`setup-coturn-tls.sh` first writes and fetches a temporary public HTTP-01 challenge, so it
+stops before Certbot if TURN DNS, Nginx, or TCP port 80 is not ready. It is idempotent: Certbot
+retains a valid certificate, then the script copies it into the bind-mounted `coturn/certs/`
+directory and recreates only the coturn container. It also installs a Certbot deploy hook at
 `/etc/letsencrypt/renewal-hooks/deploy/a-meet-coturn`; the normal `certbot.timer` invokes
-that hook only after a successful renewal, so coturn restarts with the new keypair. The
-certificate files and the generated coturn config remain host-local and are gitignored.
+that hook only after a successful renewal of the TURN certificate, so coturn restarts with the
+new keypair. EC2 auto-recovery restarts the same EBS-backed instance but does not run this
+provisioning script; the operator must re-run `setup-coturn-tls.sh setup` after recovery if
+the TURN service needs to be restored. The certificate files and generated coturn config remain
+host-local and are gitignored.
 
 Verify the listener certificate itself before testing media:
 
@@ -499,6 +504,9 @@ builds so browsers receive all three fallback URIs.
 For each successful call, browser `chrome://webrtc-internals` should show the selected ICE
 candidate pair using a `relay` candidate; coturn logs should show an allocation for that test.
 Clear both verification variables and rebuild before returning the client to normal operation.
+TLS TURN here uses TCP `5349`; it does not use port 443 and therefore is not a fallback for
+networks that permit only outbound 443. Serving TURN on 443 requires a separate listener or
+endpoint and is an out-of-scope follow-up.
 
 ### Host identity & automatic recovery
 
