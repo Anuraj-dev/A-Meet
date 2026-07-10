@@ -111,6 +111,25 @@ describe('useRoomLayout — stage derivation', () => {
     expect(result.current.stage.showRail).toBe(true);
   });
 
+  it('unpinning restores the layout the pin replaced', () => {
+    const { result } = setup({
+      remoteKeys: ['peer-1', 'peer-2'], isAlone: false, isSoloCall: false,
+    });
+
+    // Baseline: a multi-party call renders the grid.
+    expect(result.current.stage.kind).toBe('grid');
+
+    // Pinning a tile switches to the focused layout on that tile…
+    act(() => result.current.handlePin({ id: 'peer-1' }));
+    expect(result.current.stage.kind).toBe('focus');
+    expect(result.current.stage.focusKey).toBe('peer-1');
+
+    // …and unpinning (toggling the same tile off) restores the grid.
+    act(() => result.current.handlePin({ id: 'peer-1' }));
+    expect(result.current.pinnedKey).toBeNull();
+    expect(result.current.stage.kind).toBe('grid');
+  });
+
   it('host spotlight overrides a local pin', () => {
     const { result } = setup({
       remoteKeys: ['peer-1', 'peer-2'], isAlone: false, spotlightKey: 'peer-2',
