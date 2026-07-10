@@ -65,7 +65,7 @@ export default function PeoplePanel({
   const isMobile = useMediaQuery((theme) => theme.breakpoints.down('sm'));
   const [query, setQuery] = useState('');
   const [menuFor, setMenuFor] = useState<PersonMenu | null>(null); // { anchor, person }
-  const { initialFocusRef, panelRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
+  const { initialFocusRef, panelRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose, !menuFor);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

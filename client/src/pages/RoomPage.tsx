@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState, type ComponentProps, type FormEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Alert, Avatar, AvatarGroup, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
+  Alert, Avatar, AvatarGroup, Box, Button, Chip, Dialog, DialogActions,
   DialogContent, DialogTitle, IconButton, Popover,
   Snackbar, Stack, Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
@@ -30,6 +30,7 @@ import RtcStatsOverlay from '../components/RtcStatsOverlay';
 import ControlBar from '../components/ControlBar';
 import ChatPanel from '../components/ChatPanel';
 import PeoplePanel from '../components/PeoplePanel';
+import MediaReconnectingAlert from '../components/MediaReconnectingAlert';
 import TranscriptPanel from '../components/TranscriptPanel';
 import LiveCaptions from '../components/LiveCaptions';
 import CallNotifications from '../components/CallNotifications';
@@ -1237,14 +1238,7 @@ export default function RoomPage() {
             </Alert>
           )}
           {mediaReconnecting && (
-            <Alert
-              severity="warning"
-              variant="filled"
-              icon={<CircularProgress size={18} thickness={5} sx={{ color: 'inherit' }} />}
-              sx={{ borderRadius: 2, mb: 1, bgcolor: 'ember.dark', color: '#fff', '& .MuiAlert-icon': { color: '#fff' } }}
-            >
-              Reconnecting media…
-            </Alert>
+            <MediaReconnectingAlert />
           )}
           {mediaExhausted && (
             <Alert

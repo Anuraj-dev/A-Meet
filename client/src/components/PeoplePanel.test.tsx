@@ -213,5 +213,14 @@ describe('PeoplePanel', () => {
       fireEvent.keyDown(screen.getByRole('dialog', { name: 'People' }), { key: 'Escape' });
       expect(props.onClose).toHaveBeenCalledTimes(1);
     });
+
+    it('keeps the panel open when Escape is pressed while a person-actions menu is open', () => {
+      const props = renderPanel();
+      openMenuFor('Bob');
+
+      fireEvent.keyDown(screen.getByRole('dialog', { name: 'People', hidden: true }), { key: 'Escape' });
+
+      expect(props.onClose).not.toHaveBeenCalled();
+    });
   });
 });

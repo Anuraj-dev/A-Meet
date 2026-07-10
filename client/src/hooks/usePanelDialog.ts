@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, type KeyboardEvent } from 'react';
 //     opened (the control-bar toggle that invoked it), so keyboard users aren't
 //     stranded at the top of the document;
 //   • Escape closes the panel (wire `onKeyDown` on the panel container).
-export function usePanelDialog<T extends HTMLElement>(onClose: () => void) {
+export function usePanelDialog<T extends HTMLElement>(onClose: () => void, closeOnEscape = true) {
   const initialFocusRef = useRef<T | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
 
@@ -38,12 +38,12 @@ export function usePanelDialog<T extends HTMLElement>(onClose: () => void) {
 
   const onKeyDown = useCallback(
     (e: KeyboardEvent<HTMLElement>) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && closeOnEscape) {
         e.stopPropagation();
         onClose();
       }
     },
-    [onClose],
+    [closeOnEscape, onClose],
   );
 
   return { initialFocusRef, panelRef, onKeyDown };
