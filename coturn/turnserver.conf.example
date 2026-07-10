@@ -1,6 +1,11 @@
 # Replace YOUR_DOMAIN / YOUR_PUBLIC_IP and set TURN_SECRET in server/.env before deploying.
 listening-port=3478
 tls-listening-port=5349
+# These host paths are bind-mounted into the container by
+# docker-compose.coturn.yml. setup-coturn-tls.sh keeps them in sync with the
+# Let's Encrypt certificate and restarts coturn after each successful renewal.
+cert=/etc/coturn/certs/fullchain.pem
+pkey=/etc/coturn/certs/privkey.pem
 realm=YOUR_DOMAIN
 server-name=YOUR_DOMAIN
 

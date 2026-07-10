@@ -5,3 +5,6 @@ services:
     network_mode: host
     volumes:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # setup-coturn-tls.sh copies Let's Encrypt material here after issuance
+      # and every renewal. Keep the private key host-only and read-only here.
+      - ./coturn/certs:/etc/coturn/certs:ro
