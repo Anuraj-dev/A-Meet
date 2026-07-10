@@ -24,6 +24,14 @@
       ]
     },
     {
+      "Sid": "Decrypt",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "LambdaLogs",
       "Effect": "Allow",
       "Action": [
