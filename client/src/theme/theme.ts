@@ -199,6 +199,15 @@ const theme = createTheme({
         '@media (prefers-reduced-motion: reduce)': {
           '*': { animationDuration: '0.01ms !important', transitionDuration: '0.01ms !important' },
         },
+        // Visible keyboard focus ring (a11y baseline). Ember, the design system's
+        // designated focus-ring accent, reads clearly on the warm graphite
+        // surfaces. Applied only for :focus-visible so pointer clicks don't draw
+        // a ring, and we ADD an outline rather than removing any default.
+        ':focus-visible': {
+          outline: `2px solid ${EMBER}`,
+          outlineOffset: '2px',
+          borderRadius: '4px',
+        },
       },
     },
 
