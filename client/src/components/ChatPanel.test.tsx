@@ -148,4 +148,53 @@ describe('ChatPanel', () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
   });
+
+  // A11y baseline (#164): the panel is a labeled dialog that receives focus on
+  // open, closes on Escape, and returns focus to the invoking control on close.
+  describe('accessibility', () => {
+    it('is exposed as a dialog named "In-call messages" and moves focus inside on open', () => {
+      render(<Harness messages={[]} />);
+
+      const dialog = screen.getByRole('dialog', { name: 'In-call messages' });
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    });
+
+    it('closes when Escape is pressed inside the panel', () => {
+      const onClose = vi.fn();
+      render(<Harness messages={[]} onClose={onClose} />);
+
+      fireEvent.keyDown(screen.getByRole('dialog', { name: 'In-call messages' }), { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns focus to the control that opened it when the panel unmounts', () => {
+      function Wrapper() {
+        const [open, setOpen] = useState(false);
+        return (
+          <>
+            <button onClick={() => setOpen(true)}>Show chat</button>
+            {open && <button onClick={() => setOpen(false)}>unmount</button>}
+            {open && <Harness messages={[]} />}
+          </>
+        );
+      }
+      render(<Wrapper />);
+
+      const opener = screen.getByRole('button', { name: 'Show chat' });
+      opener.focus();
+      fireEvent.click(opener);
+      // Panel took focus on open…
+      expect(screen.getByRole('dialog', { name: 'In-call messages' })).toContainElement(document.activeElement as HTMLElement);
+
+      fireEvent.click(screen.getByRole('button', { name: 'unmount' }));
+      // …and hands it back on close.
+      expect(opener).toHaveFocus();
+    });
+
+    it('exposes the message history as a log region for polite announcements', () => {
+      render(<Harness messages={[{ sender: { id: 'bob', name: 'Bob' }, text: 'Hi', ts: Date.now() }]} />);
+
+      expect(screen.getByRole('log', { name: 'Chat messages' })).toBeInTheDocument();
+    });
+  });
 });

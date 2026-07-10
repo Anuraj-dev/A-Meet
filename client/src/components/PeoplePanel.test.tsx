@@ -173,4 +173,23 @@ describe('PeoplePanel', () => {
       expect(screen.getByRole('button', { name: /Mute all/ })).toBeInTheDocument();
     });
   });
+
+  // A11y baseline (#164): the panel is a labeled dialog that receives focus on
+  // open and closes on Escape (focus-return behavior shares usePanelDialog with
+  // ChatPanel, where it is covered in depth).
+  describe('accessibility', () => {
+    it('is exposed as a dialog named "People" and moves focus inside on open', () => {
+      renderPanel();
+
+      const dialog = screen.getByRole('dialog', { name: 'People' });
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    });
+
+    it('closes when Escape is pressed inside the panel', () => {
+      const props = renderPanel();
+
+      fireEvent.keyDown(screen.getByRole('dialog', { name: 'People' }), { key: 'Escape' });
+      expect(props.onClose).toHaveBeenCalledTimes(1);
+    });
+  });
 });

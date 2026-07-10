@@ -17,6 +17,7 @@ import {
   Stars as SpotlightIcon,
   VideocamOff as VideocamOffIcon,
 } from '@mui/icons-material';
+import { usePanelDialog } from '../hooks/usePanelDialog';
 
 export interface PersonItem {
   id: string; name?: string; avatar?: string; audioOn?: boolean; videoOn?: boolean;
@@ -62,6 +63,7 @@ export default function PeoplePanel({
 }: PeoplePanelProps) {
   const [query, setQuery] = useState('');
   const [menuFor, setMenuFor] = useState<PersonMenu | null>(null); // { anchor, person }
+  const { initialFocusRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -82,8 +84,9 @@ export default function PeoplePanel({
 
   return (
     <>
-      {/* Mobile backdrop */}
+      {/* Mobile backdrop — pointer-only affordance; Escape / Close serve keyboard users */}
       <Box
+        aria-hidden
         onClick={onClose}
         sx={{
           display: { xs: 'block', sm: 'none' },
@@ -92,6 +95,9 @@ export default function PeoplePanel({
         }}
       />
       <Box
+        role="dialog"
+        aria-label="People"
+        onKeyDown={onKeyDown}
         sx={{
           position: { xs: 'fixed', sm: 'relative' },
           bottom: { xs: 0, sm: 'auto' },
@@ -128,7 +134,12 @@ export default function PeoplePanel({
             borderBottom: '1px solid', borderColor: 'divider',
           }}
         >
-          <Typography sx={{ fontFamily: '"Bricolage Grotesque", sans-serif', fontWeight: 600 }}>
+          <Typography
+            component="h2"
+            ref={initialFocusRef}
+            tabIndex={-1}
+            sx={{ fontFamily: '"Bricolage Grotesque", sans-serif', fontWeight: 600, outline: 'none' }}
+          >
             People
             <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontWeight: 500, fontSize: 14 }}>
               {people.length}
