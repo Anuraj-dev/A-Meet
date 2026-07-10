@@ -66,6 +66,7 @@ interface CircleButtonProps {
 
 export interface ControlBarProps {
   localAudioOn: boolean; hasMic: boolean; onToggleAudio: () => void;
+  forcedMuteCount?: number;
   localVideoOn: boolean; onToggleVideo: () => void;
   isScreenSharing: boolean; onToggleShare: () => void;
   handRaised: boolean; onToggleHand: () => void;
@@ -120,6 +121,7 @@ function CircleButton({ title, onClick, disabled = false, variant = 'idle', badg
 
 export default function ControlBar({
   localAudioOn, hasMic, onToggleAudio,
+  forcedMuteCount = 0,
   localVideoOn, onToggleVideo,
   isScreenSharing, onToggleShare,
   handRaised, onToggleHand,
@@ -154,19 +156,21 @@ export default function ControlBar({
   // the previous render's values and update state during render) rather than an
   // effect, per react-hooks/set-state-in-effect.
   const [announcement, setAnnouncement] = useState('');
-  const [prevState, setPrevState] = useState({ localAudioOn, localVideoOn, handRaised, isScreenSharing });
+  const [prevState, setPrevState] = useState({ localAudioOn, localVideoOn, handRaised, isScreenSharing, forcedMuteCount });
   if (
     prevState.localAudioOn !== localAudioOn ||
     prevState.localVideoOn !== localVideoOn ||
     prevState.handRaised !== handRaised ||
-    prevState.isScreenSharing !== isScreenSharing
+    prevState.isScreenSharing !== isScreenSharing ||
+    prevState.forcedMuteCount !== forcedMuteCount
   ) {
     const messages: string[] = [];
-    if (hasMic && localAudioOn !== prevState.localAudioOn) messages.push(localAudioOn ? 'Microphone on' : 'Microphone muted');
+    const wasForcedMute = forcedMuteCount !== prevState.forcedMuteCount && prevState.localAudioOn && !localAudioOn;
+    if (hasMic && localAudioOn !== prevState.localAudioOn && !wasForcedMute) messages.push(localAudioOn ? 'Microphone on' : 'Microphone muted');
     if (localVideoOn !== prevState.localVideoOn) messages.push(localVideoOn ? 'Camera on' : 'Camera off');
     if (handRaised !== prevState.handRaised) messages.push(handRaised ? 'Hand raised' : 'Hand lowered');
     if (isScreenSharing !== prevState.isScreenSharing) messages.push(isScreenSharing ? 'Presenting your screen' : 'Stopped presenting');
-    setPrevState({ localAudioOn, localVideoOn, handRaised, isScreenSharing });
+    setPrevState({ localAudioOn, localVideoOn, handRaised, isScreenSharing, forcedMuteCount });
     if (messages.length) setAnnouncement(messages.join('. '));
   }
 
@@ -209,7 +213,7 @@ export default function ControlBar({
           onClick={onToggleTranscript}
           disabled={transcriptDisabled}
           variant={transcriptActive ? 'active' : 'idle'}
-          pressed={transcriptActive}
+          pressed={transcriptAvailable ? showTranscript : undefined}
         >
           {transcriptActive ? <CaptionIcon /> : <CaptionOffIcon />}
         </CircleButton>
@@ -350,7 +354,13 @@ export default function ControlBar({
         onClose={() => setAudioAnchor(null)}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
         transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        slotProps={{ paper: { sx: { mb: 1.5, p: 2.5, borderRadius: 3, minWidth: 240, bgcolor: 'control.surface', backdropFilter: 'blur(12px)' } } }}
+        slotProps={{
+          paper: {
+            role: 'dialog',
+            'aria-label': 'Audio settings',
+            sx: { mb: 1.5, p: 2.5, borderRadius: 3, minWidth: 240, bgcolor: 'control.surface', backdropFilter: 'blur(12px)' },
+          },
+        }}
       >
         <Stack spacing={2.5}>
           <Box>

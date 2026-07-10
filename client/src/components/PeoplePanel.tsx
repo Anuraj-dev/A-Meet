@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import {
   Avatar, Box, Button, Divider, IconButton, InputAdornment,
-  ListItemIcon, ListItemText, Menu, MenuItem, TextField, Tooltip, Typography,
+  ListItemIcon, ListItemText, Menu, MenuItem, Modal, TextField, Tooltip, Typography,
+  useMediaQuery,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -61,9 +62,10 @@ export default function PeoplePanel({
   onMuteAll,
   onAskUnmuteAll,
 }: PeoplePanelProps) {
+  const isMobile = useMediaQuery((theme) => theme.breakpoints.down('sm'));
   const [query, setQuery] = useState('');
   const [menuFor, setMenuFor] = useState<PersonMenu | null>(null); // { anchor, person }
-  const { initialFocusRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
+  const { initialFocusRef, panelRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -82,19 +84,9 @@ export default function PeoplePanel({
   // Moderation menu is only meaningful for the host acting on OTHER people.
   const showMenuFor = (p: PersonItem) => !p.isLocal && Boolean(onPin || (currentUserIsHost && (onSpotlight || onMute || onAskUnmute || onRemove)));
 
-  return (
-    <>
-      {/* Mobile backdrop — pointer-only affordance; Escape / Close serve keyboard users */}
-      <Box
-        aria-hidden
-        onClick={onClose}
-        sx={{
-          display: { xs: 'block', sm: 'none' },
-          position: 'fixed', inset: 0, zIndex: 1299,
-          bgcolor: 'rgba(0,0,0,0.55)',
-        }}
-      />
-      <Box
+  const panel = (
+    <Box
+        ref={panelRef}
         role="dialog"
         aria-label="People"
         onKeyDown={onKeyDown}
@@ -138,7 +130,7 @@ export default function PeoplePanel({
             component="h2"
             ref={initialFocusRef}
             tabIndex={-1}
-            sx={{ fontFamily: '"Bricolage Grotesque", sans-serif', fontWeight: 600, outline: 'none' }}
+            sx={{ fontFamily: '"Bricolage Grotesque", sans-serif', fontWeight: 600 }}
           >
             People
             <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontWeight: 500, fontSize: 14 }}>
@@ -258,10 +250,11 @@ export default function PeoplePanel({
             </Box>
           ))}
         </Box>
-      </Box>
+    </Box>
+  );
 
-      {/* Per-person action menu */}
-      <Menu
+  const personMenu = (
+    <Menu
         anchorEl={menuFor?.anchor}
         open={Boolean(menuFor)}
         onClose={closeMenu}
@@ -300,7 +293,22 @@ export default function PeoplePanel({
             <ListItemText>Remove from call</ListItemText>
           </MenuItem>
         )}
-      </Menu>
+    </Menu>
+  );
+
+  return (
+    <>
+      {isMobile ? (
+        <Modal
+          open
+          onClose={onClose}
+          keepMounted={false}
+          slotProps={{ backdrop: { sx: { bgcolor: 'rgba(0,0,0,0.55)' } } }}
+        >
+          {panel}
+        </Modal>
+      ) : panel}
+      {personMenu}
     </>
   );
 }

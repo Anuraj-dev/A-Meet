@@ -7,12 +7,14 @@ import ChatPanel, { type ChatMessage } from './ChatPanel';
 
 // ChatPanel uses responsive sx but no useMediaQuery branch in its logic; jsdom
 // still lacks matchMedia, so stub it defensively for any MUI internals.
+let isMobile = false;
+
 beforeAll(() => {
   // jsdom doesn't implement scrollIntoView, which ChatPanel calls to keep the
   // latest message in view; stub it so the auto-scroll effect is a no-op.
   Element.prototype.scrollIntoView = vi.fn();
   window.matchMedia = vi.fn().mockImplementation((query) => ({
-    matches: false,
+    matches: isMobile,
     media: query,
     onchange: null,
     addListener: vi.fn(),
@@ -54,6 +56,7 @@ const sendButton = () => screen.getByRole('button', { name: 'Send message' });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  isMobile = false;
 });
 
 describe('ChatPanel', () => {
@@ -152,11 +155,28 @@ describe('ChatPanel', () => {
   // A11y baseline (#164): the panel is a labeled dialog that receives focus on
   // open, closes on Escape, and returns focus to the invoking control on close.
   describe('accessibility', () => {
+    it('makes the mobile bottom sheet modal to background content', () => {
+      isMobile = true;
+      render(
+        <>
+          <button>Background control</button>
+          <Harness messages={[]} />
+        </>,
+      );
+
+      const background = screen.getByRole('button', { name: 'Background control', hidden: true });
+      expect(background.closest('[aria-hidden="true"]')).not.toBeNull();
+      const dialog = screen.getByRole('dialog', { name: 'In-call messages' });
+      background.focus();
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    });
+
     it('is exposed as a dialog named "In-call messages" and moves focus inside on open', () => {
       render(<Harness messages={[]} />);
 
       const dialog = screen.getByRole('dialog', { name: 'In-call messages' });
       expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      expect(screen.getByRole('heading', { name: 'In-call messages' })).not.toHaveStyle({ outline: 'none' });
     });
 
     it('closes when Escape is pressed inside the panel', () => {

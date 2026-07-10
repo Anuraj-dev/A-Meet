@@ -36,9 +36,10 @@ test.describe('room accessibility baseline', () => {
     const mic = page.getByRole('button', { name: /Turn (off|on) microphone/ });
     await expect(mic).toBeVisible({ timeout: 15_000 });
 
-    // Tab traversal reaches every control-bar button (labels are the a11y
-    // contract; "Leave call" is the bar's final control).
-    const expected = [
+    // Find each required control by tabbing with a bounded search. This proves
+    // reachability without coupling the test to the exact order of optional
+    // controls that may be rendered for a particular room state.
+    const required = [
       /Turn (off|on) microphone/,
       /transcript/i,
       /Turn (off|on) camera/,
@@ -53,10 +54,16 @@ test.describe('room accessibility baseline', () => {
       'Leave call',
     ];
     await mic.focus();
-    for (let i = 0; i < expected.length; i += 1) {
-      const name = expected[i];
-      await expect(page.getByRole('button', { name }).first()).toBeFocused();
-      if (i < expected.length - 1) await page.keyboard.press('Tab');
+    for (const name of required) {
+      const control = page.getByRole('button', { name }).first();
+      await expect(control).toBeVisible();
+      let reached = await control.evaluate((element) => element === document.activeElement);
+      for (let tabs = 0; !reached && tabs < 30; tabs += 1) {
+        await page.keyboard.press('Tab');
+        reached = await control.evaluate((element) => element === document.activeElement);
+      }
+      expect(reached, `Tab did not reach control ${String(name)}`).toBe(true);
+      await expect(control).toBeEnabled();
     }
 
     // Toggles respond to the keyboard and expose their state via aria-pressed.

@@ -1,6 +1,7 @@
 import { useEffect, useRef, type FormEvent } from 'react';
 import {
-  Avatar, Box, Chip, IconButton, InputAdornment, TextField, Tooltip, Typography,
+  Avatar, Box, Chip, IconButton, InputAdornment, Modal, TextField, Tooltip, Typography,
+  useMediaQuery,
 } from '@mui/material';
 import { Close as CloseIcon, Send as SendIcon } from '@mui/icons-material';
 import { usePanelDialog } from '../hooks/usePanelDialog';
@@ -24,27 +25,16 @@ function formatTime(ts: string | number | Date): string {
 // Mobile: a bottom sheet (62vh, slides up over the video, with backdrop).
 export default function ChatPanel({ messages, input, setInput, onSend, currentUserId, onClose }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const { initialFocusRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
+  const isMobile = useMediaQuery((theme) => theme.breakpoints.down('sm'));
+  const { initialFocusRef, panelRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  return (
-    <>
-      {/* Mobile backdrop — pointer-only affordance; Escape / Close serve keyboard users */}
-      <Box
-        aria-hidden
-        onClick={onClose}
-        sx={{
-          display: { xs: 'block', sm: 'none' },
-          position: 'fixed',
-          inset: 0,
-          zIndex: 1299,
-          bgcolor: 'rgba(0,0,0,0.55)',
-        }}
-      />
-      <Box
+  const panel = (
+    <Box
+        ref={panelRef}
         data-testid="chat-panel"
         role="dialog"
         aria-label="In-call messages"
@@ -95,7 +85,7 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
           component="h2"
           ref={initialFocusRef}
           tabIndex={-1}
-          sx={{ fontFamily: '"Outfit", sans-serif', fontWeight: 600, outline: 'none' }}
+          sx={{ fontFamily: '"Outfit", sans-serif', fontWeight: 600 }}
         >
           In-call messages
         </Typography>
@@ -203,6 +193,18 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
         />
       </Box>
     </Box>
-    </>
+  );
+
+  if (!isMobile) return panel;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      keepMounted={false}
+      slotProps={{ backdrop: { sx: { bgcolor: 'rgba(0,0,0,0.55)' } } }}
+    >
+      {panel}
+    </Modal>
   );
 }

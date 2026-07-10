@@ -61,6 +61,7 @@ function makeProps(overrides: Partial<ControlBarProps> = {}): ControlBarProps {
     onMicGainChange: vi.fn(),
     outputVolume: 1,
     onOutputVolumeChange: vi.fn(),
+    forcedMuteCount: 0,
     ...overrides,
   };
 }
@@ -184,6 +185,7 @@ describe('ControlBar', () => {
       fireEvent.click(btn('Start shared transcript'));
       expect(props.onToggleTranscript).toHaveBeenCalledTimes(1);
     });
+
   });
 
   describe('layout chooser', () => {
@@ -225,6 +227,21 @@ describe('ControlBar', () => {
       return { update };
     }
 
+    it('exposes transcript pressed state only when toggling panel visibility', () => {
+      const { update } = renderRerenderable({
+        transcriptActive: true,
+        transcriptAvailable: true,
+        showTranscript: false,
+      });
+      expect(btn('Show transcript')).toHaveAttribute('aria-pressed', 'false');
+
+      update({ transcriptActive: true, transcriptAvailable: true, showTranscript: true });
+      expect(btn('Hide transcript')).toHaveAttribute('aria-pressed', 'true');
+
+      update({ transcriptActive: false, transcriptAvailable: false, showTranscript: false });
+      expect(btn('Start shared transcript')).not.toHaveAttribute('aria-pressed');
+    });
+
     it('exposes aria-pressed on the mic toggle matching the live/muted state', () => {
       const { update } = renderRerenderable({ localAudioOn: true });
       expect(btn('Turn off microphone')).toHaveAttribute('aria-pressed', 'true');
@@ -260,7 +277,11 @@ describe('ControlBar', () => {
       renderBar();
 
       expect(btn('More options')).toHaveAttribute('aria-haspopup', 'menu');
-      expect(btn('Audio settings')).toHaveAttribute('aria-haspopup', 'dialog');
+      const audioSettings = btn('Audio settings');
+      expect(audioSettings).toHaveAttribute('aria-haspopup', 'dialog');
+
+      fireEvent.click(audioSettings);
+      expect(screen.getByRole('dialog', { name: 'Audio settings' })).toBeInTheDocument();
     });
 
     it('announces microphone state changes through a polite live region', () => {
@@ -273,6 +294,17 @@ describe('ControlBar', () => {
 
       update({ localAudioOn: true });
       expect(region).toHaveTextContent('Microphone on');
+    });
+
+    it('does not duplicate the notification for a host-forced mute', () => {
+      const { update } = renderRerenderable({ localAudioOn: true, forcedMuteCount: 0 });
+
+      update({ localAudioOn: false, forcedMuteCount: 1 });
+      expect(screen.getByRole('status')).not.toHaveTextContent('Microphone muted');
+
+      update({ localAudioOn: true, forcedMuteCount: 1 });
+      update({ localAudioOn: false, forcedMuteCount: 1 });
+      expect(screen.getByRole('status')).toHaveTextContent('Microphone muted');
     });
 
     it('announces raise-hand and screen-share changes', () => {

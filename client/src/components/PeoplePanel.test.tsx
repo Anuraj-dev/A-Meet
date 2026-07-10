@@ -6,9 +6,11 @@ import PeoplePanel from './PeoplePanel';
 
 // PeoplePanel uses responsive sx but no useMediaQuery branch in its logic; jsdom
 // still lacks matchMedia, so stub it defensively for any MUI internals.
+let isMobile = false;
+
 beforeAll(() => {
   window.matchMedia = vi.fn().mockImplementation((query) => ({
-    matches: false,
+    matches: isMobile,
     media: query,
     onchange: null,
     addListener: vi.fn(),
@@ -58,6 +60,7 @@ function openMenuFor(name: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  isMobile = false;
 });
 
 describe('PeoplePanel', () => {
@@ -178,11 +181,30 @@ describe('PeoplePanel', () => {
   // open and closes on Escape (focus-return behavior shares usePanelDialog with
   // ChatPanel, where it is covered in depth).
   describe('accessibility', () => {
+    it('makes the mobile bottom sheet modal to background content', () => {
+      isMobile = true;
+      render(
+        <>
+          <button>Background control</button>
+          <ThemeProvider theme={theme}>
+            <PeoplePanel people={people()} onClose={vi.fn()} />
+          </ThemeProvider>
+        </>,
+      );
+
+      const background = screen.getByRole('button', { name: 'Background control', hidden: true });
+      expect(background.closest('[aria-hidden="true"]')).not.toBeNull();
+      const dialog = screen.getByRole('dialog', { name: 'People' });
+      background.focus();
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    });
+
     it('is exposed as a dialog named "People" and moves focus inside on open', () => {
       renderPanel();
 
       const dialog = screen.getByRole('dialog', { name: 'People' });
       expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      expect(screen.getByRole('heading', { name: /People/ })).not.toHaveStyle({ outline: 'none' });
     });
 
     it('closes when Escape is pressed inside the panel', () => {

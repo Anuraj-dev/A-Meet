@@ -122,6 +122,7 @@ export default function RoomPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   // Host asked us to unmute — surfaced as a one-tap prompt (never forced).
   const [unmuteRequestFrom, setUnmuteRequestFrom] = useState<string | null>(null);
+  const [forcedMuteCount, setForcedMuteCount] = useState(0);
   const [reactionAnchor, setReactionAnchor] = useState<HTMLElement | null>(null);
   const [outputVolume, setOutputVolume] = useState(1);
   const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({});
@@ -461,6 +462,7 @@ export default function RoomPage() {
   // socket effect so they can close over fresh `localAudioOn` / `toggleAudio`.
   useEffect(() => {
     const onForceMuted = () => {
+      setForcedMuteCount((count) => count + 1);
       if (localAudioOn) { playSound('toggleOff'); toggleAudio(); }
       pushNote({ kind: 'event', variant: 'info', text: 'You were muted by the meeting admin' });
     };
@@ -1411,6 +1413,7 @@ export default function RoomPage() {
           >
             <ControlBar
               localAudioOn={localAudioOn} hasMic={hasMic} onToggleAudio={handleToggleAudio}
+              forcedMuteCount={forcedMuteCount}
               localVideoOn={localVideoOn} onToggleVideo={handleToggleVideo}
               isScreenSharing={isScreenSharing} onToggleShare={handleToggleShare}
               handRaised={handRaised} onToggleHand={handleToggleHand}
