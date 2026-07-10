@@ -2,11 +2,14 @@ import { test, expect } from '@playwright/test';
 import { stubAuth } from '../helpers/auth.js';
 
 // Fullscreen a tile is a pure-UI flow (the Fullscreen API on a tile element), so
-// it runs in the fast SFU-off suite. The alone layout renders a chromeless self
-// tile with no options menu, so we first switch to the tiled layout — that
-// renders the self tile with its per-tile options menu (pin/spotlight/
-// fullscreen). We then assert the observable effect: document.fullscreenElement
-// becomes set on enter and clears on exit. Exit uses Escape (the standard user
+// it runs in the fast SFU-off suite. Solo, only the FOCUS layout renders a tile
+// with the per-tile options menu (pin/spotlight/fullscreen): the alone layout's
+// self tile is chromeless, and the tiled grid shows the "You're the only one
+// here" invite block instead of tiles while no remotes are present. So we switch
+// to the Spotlight layout — its focus falls back to the self tile — wait for the
+// focus stage to mount, and drive fullscreen from that tile's menu. We assert
+// the observable effect: document.fullscreenElement becomes set on enter and
+// clears on exit. Exit uses Escape (the standard user
 // gesture): once the tile is fullscreen, the MUI menu portals OUTSIDE the
 // fullscreen element's top layer, so re-clicking the menu item is unreliable.
 
@@ -29,9 +32,13 @@ test.describe('tile fullscreen', () => {
     const page = await context.newPage();
     await createRoomAsHost(page);
 
-    // Switch to the tiled layout so the self tile exposes its options menu.
+    // Switch to the Spotlight layout: solo, its focus falls back to the self
+    // tile — the only solo tile that exposes the options menu. Wait for the
+    // focus stage to mount before reaching for the menu (the same deterministic
+    // signal layout-chooser.spec.js asserts on).
     await page.getByRole('button', { name: 'Change layout' }).click();
-    await page.getByRole('menuitem', { name: 'Tiled' }).click();
+    await page.getByRole('menuitem', { name: 'Spotlight' }).click();
+    await expect(page.getByTestId('stage-focus')).toBeVisible({ timeout: 15_000 });
 
     // Nothing is fullscreen on entry.
     await expect(page.getByRole('button', { name: 'Tile options' })).toBeVisible({ timeout: 15_000 });
