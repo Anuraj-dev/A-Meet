@@ -103,7 +103,7 @@ npm --prefix server install
 
 ### 2. Configure environment
 
-Two env files, with distinct jobs:
+Three env files, with distinct jobs:
 
 ```bash
 cp .env.example .env               # repo root — local Docker Mongo credentials (read by Compose)

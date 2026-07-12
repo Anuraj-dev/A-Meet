@@ -87,6 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Pull image tag on EC2 and restart
+        id: deploy
         uses: appleboy/ssh-action@v1.2.5
         env:
           SERVER_IMAGE: ${{ needs.build-and-push.outputs.image }}
@@ -126,7 +127,7 @@ jobs:
       - name: Health check
         id: health
         run: |
-          HEALTH_URL="${{ vars.HEALTH_URL || 'https://api.ameet.raja-dev.me/api/health' }}"
+          HEALTH_URL="${{ vars.HEALTH_URL || 'https://api.ameet.raja-dev.me/api/health/ready' }}"
           for i in $(seq 1 12); do
             if curl -fsS "$HEALTH_URL" | grep -q '"ok":true'; then
               echo "Health check passed (attempt $i)"
@@ -138,16 +139,20 @@ jobs:
           echo "Health check failed: API did not return ok:true after 60s"
           exit 1
 
-      # Automated rollback: if (and only if) the post-deploy health check failed,
-      # redeploy the image that was running before this release. Because every
-      # build is an immutable :<git-sha> tag, rollback is just re-running the
-      # deploy against the prior tag recorded above in .rollback-image. If the
-      # deploy step itself failed (pull/start error) the old container is still
-      # up, so `health` is skipped, its outcome is not 'failure', and we do NOT
-      # roll back. This step restores service but the job still ends red, so the
-      # existing CloudWatch/Telegram alarm path still notifies a human.
-      - name: Roll back to previous image on failed health check
-        if: ${{ failure() && steps.health.outcome == 'failure' }}
+      # Automated rollback: if either the deploy step OR the post-deploy health
+      # check failed, redeploy the image that was running before this release.
+      # Because every build is an immutable :<git-sha> tag, rollback is just
+      # re-running the deploy against the prior tag recorded above in
+      # .rollback-image. The deploy step can fail *after* `docker compose up -d`
+      # has already stopped/replaced the old container (e.g. the new image starts
+      # but a later command errors), so a deploy-step failure can leave the box
+      # without the last-good release — we must roll back there too, not only on
+      # a health-check failure. The rollback re-checkout uses the SHA recorded in
+      # .rollback-image; if none exists (first deploy) it exits red for a human.
+      # This step restores service but the job still ends red, so the existing
+      # CloudWatch/Telegram alarm path still notifies a human.
+      - name: Roll back to previous image on failed deploy or health check
+        if: ${{ failure() && (steps.deploy.outcome == 'failure' || steps.health.outcome == 'failure') }}
         uses: appleboy/ssh-action@v1.2.5
         env:
           ECR_REGISTRY: ${{ needs.build-and-push.outputs.registry }}
@@ -180,7 +185,7 @@ jobs:
             docker image prune -f
             # Confirm the restored container is actually serving before we stop.
             for i in $(seq 1 12); do
-              if curl -fsS http://localhost:5000/api/health | grep -q '"ok":true'; then
+              if curl -fsS http://localhost:5000/api/health/ready | grep -q '"ok":true'; then
                 echo "Rollback healthy (attempt $i)"
                 exit 0
               fi
