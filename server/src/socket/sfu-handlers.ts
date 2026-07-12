@@ -256,10 +256,15 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
       // live consumer for is spurious — reject it instead of letting `peer.consumers`
       // grow without bound.
       for (const existing of peer.consumers.values()) {
-        if (existing.producerId === producerId) throw new Error('already consuming this producer');
+        // Only a LIVE consumer blocks: a stale closed entry (client tore down and
+        // re-subscribed) must not deny a legitimate re-consume.
+        if (existing.producerId === producerId && !existing.closed) {
+          throw new Error('already consuming this producer');
+        }
       }
-      // Per-peer consumer cap (DoS guard): a peer consumes at most every other
-      // peer's producers; anything past that ceiling is abuse.
+      // Per-peer consumer cap: an intentional absolute DoS backstop (sized from
+      // the soft room ceiling in sfu/config.ts, far above realistic use), not a
+      // limit legitimate calls should ever reach.
       if (peer.consumers.size >= MAX_CONSUMERS_PER_PEER) throw new Error('too many consumers');
       const transport = peer.transports.get(transportId);
       if (!transport) throw new Error('recv transport not found');

@@ -278,6 +278,31 @@ describe('SFU duplicate-consume guard', () => {
     expect(transport.consume).not.toHaveBeenCalled();
     expect(cb).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
   });
+
+  it('allows re-consuming a producer whose previous consumer is closed', async () => {
+    const { handlers } = setup();
+    const room = makeRoom();
+    room.router.canConsume = vi.fn().mockReturnValue(true);
+    const consumer = {
+      id: 'c2', producerId: 'prod-dup', kind: 'video', rtpParameters: {}, on: vi.fn(),
+    };
+    const transport = { id: 't1', consume: vi.fn().mockResolvedValue(consumer) };
+    // A stale, already-closed consumer for the same producer must not block a
+    // legitimate re-consume (e.g. after the client tore down and re-subscribed).
+    const peer = {
+      transports: new Map([['t1', transport]]),
+      consumers: new Map([['stale', { producerId: 'prod-dup', closed: true }]]),
+    };
+    await joinRoom(handlers, room);
+    getRoom.mockReturnValue(room);
+    getPeer.mockReturnValue(peer);
+    const cb = vi.fn();
+
+    await handlers['sfu-consume']({ transportId: 't1', producerId: 'prod-dup', rtpCapabilities: {} }, cb);
+
+    expect(transport.consume).toHaveBeenCalled();
+    expect(cb).toHaveBeenCalledWith(expect.not.objectContaining({ error: expect.any(String) }));
+  });
 });
 
 describe('SFU transport-cap slot release on close/failure', () => {

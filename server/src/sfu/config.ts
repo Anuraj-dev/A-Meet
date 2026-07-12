@@ -47,10 +47,11 @@ export const MAX_PRODUCERS_PER_PEER = 5;
 //     Meet-style call so it never bites legitimate use — it's a DoS backstop, not a
 //     product limit.
 export const MAX_PEERS_PER_ROOM = 50;
-//   • Consumers: a peer consumes every OTHER peer's producers, so the legitimate
-//     ceiling is (room − 1) × producers-per-peer. We derive it from the constants
-//     above rather than picking an arbitrary number, and guard against a peer
-//     re-consuming the same producer to grow `peer.consumers` without bound.
+//   • Consumers: an intentional ABSOLUTE per-peer backstop, not a guarantee tied
+//     to an enforced room size (the peer ceiling above is soft). Sized as
+//     (soft ceiling − 1) × producers-per-peer so it sits far above anything a
+//     legitimate call produces; paired with the duplicate-consume guard it
+//     bounds `peer.consumers` against abuse.
 export const MAX_CONSUMERS_PER_PEER = (MAX_PEERS_PER_ROOM - 1) * MAX_PRODUCERS_PER_PEER;
 
 // Per-Worker settings. The RTC port range is the band of UDP/TCP ports the
