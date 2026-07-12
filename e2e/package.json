@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "description": "A-Meet end-to-end test harness (Playwright)",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "test": "playwright test",
     "test:sfu": "playwright test --config playwright.sfu.config.js",
