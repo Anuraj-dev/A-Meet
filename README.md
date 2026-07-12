@@ -333,7 +333,7 @@ cleanly, so merges to `main` stay green. To enable it:
 |---|---|
 | `AWS_REGION` | ECR / deploy region, e.g. `ap-south-1` |
 | `ECR_REPOSITORY` | ECR repo name, e.g. `a-meet-server` (must exist) |
-| `HEALTH_URL` | optional; defaults to `https://api.ameet.raja-dev.me/api/health` |
+| `HEALTH_URL` | optional; defaults to `https://api.ameet.raja-dev.me/api/health/ready` |
 
 **Repository secrets:**
 
@@ -476,7 +476,7 @@ the instance isn't `ebs`-backed. That makes it safe to use as an automated post-
 
 **Operator validation after a recovery event:**
 1. `deploy/aws-recovery.sh verify` — EIP still associated to the instance; alarm back to `OK`; root device `ebs`.
-2. **API health:** `curl -fsS https://api.<domain>/api/health` returns `{"ok":true}` (the deploy health check uses the same endpoint).
+2. **API health:** `curl -fsS https://api.<domain>/api/health/ready` returns `{"ok":true}` (the deploy health check uses the same readiness endpoint).
 3. **Container up:** on the box, `docker compose -f docker-compose.prod.yml ps` shows the server running, and `logs -f` shows mediasoup workers started.
 4. **Media connectivity:** join a meeting from two devices and confirm audio/video flows — i.e. `MEDIASOUP_ANNOUNCED_IP` still equals the EIP and the security-group UDP RTC range (40000–40100) is open.
 
