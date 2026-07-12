@@ -54,6 +54,10 @@ export const sfuSchemas = {
     producerId: idField.required(),
     rtpCapabilities: opaqueObject.required(),
   }),
+  // A newcomer's request for the room's existing producers carries no fields; we
+  // still assert it is an object (not a string/array/number) so malformed junk is
+  // rejected at the edge like every other event, rather than acked as success.
+  'sfu-get-producers': Joi.object({}),
   'sfu-resume-consumer': Joi.object({ consumerId: idField.required() }),
   'sfu-pause-producer': Joi.object({ producerId: idField.required() }),
   'sfu-resume-producer': Joi.object({ producerId: idField.required() }),

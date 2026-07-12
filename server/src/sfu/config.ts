@@ -42,6 +42,16 @@ export const MAX_TRANSPORTS_PER_PEER = 4;
 //     screen-share video, and screen-share audio. One slot of headroom covers a
 //     produce that races an old producer's teardown.
 export const MAX_PRODUCERS_PER_PEER = 5;
+//   • Peers per room: a soft ceiling used only to size the per-peer consumer cap
+//     below (the room store itself isn't hard-capped). Set well above any realistic
+//     Meet-style call so it never bites legitimate use — it's a DoS backstop, not a
+//     product limit.
+export const MAX_PEERS_PER_ROOM = 50;
+//   • Consumers: a peer consumes every OTHER peer's producers, so the legitimate
+//     ceiling is (room − 1) × producers-per-peer. We derive it from the constants
+//     above rather than picking an arbitrary number, and guard against a peer
+//     re-consuming the same producer to grow `peer.consumers` without bound.
+export const MAX_CONSUMERS_PER_PEER = (MAX_PEERS_PER_ROOM - 1) * MAX_PRODUCERS_PER_PEER;
 
 // Per-Worker settings. The RTC port range is the band of UDP/TCP ports the
 // Worker binds for media — it must be open in the firewall on LAN/prod.

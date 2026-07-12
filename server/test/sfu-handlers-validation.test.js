@@ -29,9 +29,13 @@ vi.mock('../src/config/logger.js', () => ({
 }));
 
 import { registerSfuHandlers } from '../src/socket/sfu-handlers.js';
-import { getOrCreateRoom, getRoom, getPeer } from '../src/sfu/sfu-rooms.js';
+import {
+  getOrCreateRoom, getRoom, getPeer, listOtherProducers,
+} from '../src/sfu/sfu-rooms.js';
 import { Room } from '../src/models/Room.js';
-import { MAX_TRANSPORTS_PER_PEER, MAX_PRODUCERS_PER_PEER } from '../src/sfu/config.js';
+import {
+  MAX_TRANSPORTS_PER_PEER, MAX_PRODUCERS_PER_PEER, MAX_CONSUMERS_PER_PEER,
+} from '../src/sfu/config.js';
 
 // A well-formed Google Meet-style code (xxx-xxxx-xxx), matching the REST layer.
 const ROOM = 'abc-defg-hij';
@@ -230,5 +234,128 @@ describe('SFU per-peer resource caps (DoS guard)', () => {
 
     expect(transport.produce).not.toHaveBeenCalled();
     expect(cb).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
+  });
+
+  it('caps consumers per peer', async () => {
+    const { handlers } = setup();
+    const room = makeRoom();
+    room.router.canConsume = vi.fn().mockReturnValue(true);
+    const transport = { id: 't1', consume: vi.fn() };
+    const consumers = new Map();
+    // Distinct producerIds so the duplicate guard never fires — only the cap does.
+    for (let i = 0; i < MAX_CONSUMERS_PER_PEER; i++) consumers.set(`c${i}`, { producerId: `p${i}` });
+    const peer = { transports: new Map([['t1', transport]]), consumers };
+    await joinRoom(handlers, room);
+    getRoom.mockReturnValue(room);
+    getPeer.mockReturnValue(peer);
+    const cb = vi.fn();
+
+    await handlers['sfu-consume']({ transportId: 't1', producerId: 'brand-new', rtpCapabilities: {} }, cb);
+
+    expect(transport.consume).not.toHaveBeenCalled();
+    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
+  });
+});
+
+describe('SFU duplicate-consume guard', () => {
+  it('rejects a second consume of a producer the peer already consumes', async () => {
+    const { handlers } = setup();
+    const room = makeRoom();
+    room.router.canConsume = vi.fn().mockReturnValue(true);
+    const transport = { id: 't1', consume: vi.fn() };
+    // The peer already holds a live consumer for prod-dup.
+    const peer = {
+      transports: new Map([['t1', transport]]),
+      consumers: new Map([['existing', { producerId: 'prod-dup' }]]),
+    };
+    await joinRoom(handlers, room);
+    getRoom.mockReturnValue(room);
+    getPeer.mockReturnValue(peer);
+    const cb = vi.fn();
+
+    await handlers['sfu-consume']({ transportId: 't1', producerId: 'prod-dup', rtpCapabilities: {} }, cb);
+
+    expect(transport.consume).not.toHaveBeenCalled();
+    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
+  });
+});
+
+describe('SFU transport-cap slot release on close/failure', () => {
+  it('frees a transport slot when the transport fails, so a recreated one is allowed', async () => {
+    const { handlers } = setup();
+    const room = makeRoom();
+    const listeners = {}; // event → handler, captured from transport.on(...)
+    const createdTransport = {
+      id: 'trans-fail', iceParameters: {}, iceCandidates: [], dtlsParameters: {},
+      on: vi.fn((event, cb) => { listeners[event] = cb; }),
+      close: vi.fn(),
+    };
+    room.router.createWebRtcTransport = vi.fn().mockResolvedValue(createdTransport);
+    // Peer is one slot below the cap; the first create fills the last slot.
+    const peer = { transports: new Map(), producers: new Map() };
+    for (let i = 0; i < MAX_TRANSPORTS_PER_PEER - 1; i++) peer.transports.set(`stale${i}`, {});
+    await joinRoom(handlers, room);
+    getRoom.mockReturnValue(room);
+    getPeer.mockReturnValue(peer);
+
+    await handlers['sfu-create-transport']({ direction: 'recv' }, vi.fn());
+    expect(peer.transports.has('trans-fail')).toBe(true);
+    expect(peer.transports.size).toBe(MAX_TRANSPORTS_PER_PEER);
+
+    // The transport dies (DTLS failed) — its slot must be released.
+    listeners.dtlsstatechange?.('failed');
+    expect(peer.transports.has('trans-fail')).toBe(false);
+    expect(peer.transports.size).toBe(MAX_TRANSPORTS_PER_PEER - 1);
+  });
+
+  it('frees a transport slot on routerclose', async () => {
+    const { handlers } = setup();
+    const room = makeRoom();
+    const listeners = {};
+    const createdTransport = {
+      id: 'trans-rc', iceParameters: {}, iceCandidates: [], dtlsParameters: {},
+      on: vi.fn((event, cb) => { listeners[event] = cb; }),
+      close: vi.fn(),
+    };
+    room.router.createWebRtcTransport = vi.fn().mockResolvedValue(createdTransport);
+    const peer = { transports: new Map(), producers: new Map() };
+    await joinRoom(handlers, room);
+    getRoom.mockReturnValue(room);
+    getPeer.mockReturnValue(peer);
+
+    await handlers['sfu-create-transport']({ direction: 'send' }, vi.fn());
+    expect(peer.transports.has('trans-rc')).toBe(true);
+
+    listeners.routerclose?.();
+    expect(peer.transports.has('trans-rc')).toBe(false);
+  });
+});
+
+describe('SFU get-producers schema validation', () => {
+  it('rejects a malformed (non-object) payload without listing producers', async () => {
+    const { handlers } = setup();
+    const room = makeRoom();
+    await joinRoom(handlers, room);
+    getRoom.mockReturnValue(room);
+    getPeer.mockReturnValue({ transports: new Map() });
+    const cb = vi.fn();
+
+    await handlers['sfu-get-producers']('not-an-object', cb);
+
+    expect(listOtherProducers).not.toHaveBeenCalled();
+    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
+  });
+
+  it('accepts an empty payload and returns the producer list', async () => {
+    const { handlers } = setup();
+    const room = makeRoom();
+    listOtherProducers.mockReturnValue([{ producerId: 'p1' }]);
+    await joinRoom(handlers, room);
+    getRoom.mockReturnValue(room);
+    const cb = vi.fn();
+
+    await handlers['sfu-get-producers'](undefined, cb);
+
+    expect(cb).toHaveBeenCalledWith([{ producerId: 'p1' }]);
   });
 });

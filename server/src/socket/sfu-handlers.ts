@@ -8,6 +8,7 @@
 
 import {
   webRtcTransportOptions, MAX_TRANSPORTS_PER_PEER, MAX_PRODUCERS_PER_PEER,
+  MAX_CONSUMERS_PER_PEER,
 } from '../sfu/config.js';
 import {
   getOrCreateRoom, getRoom, addPeer, getPeer,
@@ -110,6 +111,13 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
       });
       peer.transports.set(transport.id, transport);
 
+      // Release the transport's cap slot the moment it dies. Without this a peer
+      // whose transport fails (ICE/DTLS) and is recreated keeps burning slots — a
+      // few failures brick the peer at MAX_TRANSPORTS_PER_PEER until disconnect.
+      // We drop it on router teardown and on terminal ICE/DTLS states (below).
+      const releaseTransport = () => { peer.transports.delete(transport.id); };
+      transport.on('routerclose', releaseTransport);
+
       // Diagnostics: the selected ICE tuple reveals the negotiated media path
       // (direct UDP / TCP / relay) — the key signal when peers can't see or hear
       // each other across networks. We also surface ICE/DTLS failures.
@@ -131,11 +139,15 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
       transport.on('icestatechange', (iceState: string) => {
         const level = (iceState === 'disconnected' || iceState === 'failed') ? 'warn' : 'debug';
         logger[level]({ event: 'ice.stateChange', direction, socketId: socket.id, iceState }, `ICE ${iceState}`);
+        // A closed/failed ICE state is terminal — free the cap slot.
+        if (iceState === 'closed' || iceState === 'failed') releaseTransport();
       });
       transport.on('dtlsstatechange', (dtlsState) => {
         // 'closed' is normal teardown on disconnect — only 'failed' is a real problem
         const level = dtlsState === 'failed' ? 'warn' : 'debug';
         logger[level]({ event: 'dtls.stateChange', direction, socketId: socket.id, dtlsState }, `DTLS ${dtlsState}`);
+        // Terminal DTLS state — free the cap slot so a recreated transport fits.
+        if (dtlsState === 'closed' || dtlsState === 'failed') releaseTransport();
       });
 
       callback({
@@ -239,6 +251,16 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
       if (!room.router.canConsume({ producerId, rtpCapabilities })) {
         throw new Error('cannot consume this producer');
       }
+      // Duplicate-consume guard: a well-behaved client consumes each producer once
+      // (it de-dupes locally), so a second consume of a producer we already carry a
+      // live consumer for is spurious — reject it instead of letting `peer.consumers`
+      // grow without bound.
+      for (const existing of peer.consumers.values()) {
+        if (existing.producerId === producerId) throw new Error('already consuming this producer');
+      }
+      // Per-peer consumer cap (DoS guard): a peer consumes at most every other
+      // peer's producers; anything past that ceiling is abuse.
+      if (peer.consumers.size >= MAX_CONSUMERS_PER_PEER) throw new Error('too many consumers');
       const transport = peer.transports.get(transportId);
       if (!transport) throw new Error('recv transport not found');
 
@@ -292,7 +314,9 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   });
 
   // 7) A newcomer asks for producers already present so it can consume them.
-  on('sfu-get-producers', 'signaling', (_payload, callback) => {
+  on('sfu-get-producers', 'signaling', (payload, callback) => {
+    const { error } = validateSfuPayload(sfuSchemas['sfu-get-producers'], payload);
+    if (error) { callback({ error }); return; }
     callback(listOtherProducers(socketRoom.get(socket.id), socket.id));
   });
 
