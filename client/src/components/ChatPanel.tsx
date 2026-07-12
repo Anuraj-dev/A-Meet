@@ -7,7 +7,7 @@ import { Close as CloseIcon, Send as SendIcon } from '@mui/icons-material';
 import { usePanelDialog } from '../hooks/usePanelDialog';
 
 interface ChatSender { id: string; name?: string; avatar?: string }
-export interface ChatMessage { type?: 'event' | 'chat'; text: string; ts: string | number | Date; sender?: ChatSender }
+export interface ChatMessage { id?: string; type?: 'event' | 'chat'; text: string; ts: string | number | Date; sender?: ChatSender }
 interface ChatPanelProps {
   messages: ChatMessage[];
   input: string;
@@ -19,6 +19,24 @@ interface ChatPanelProps {
 
 function formatTime(ts: string | number | Date): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// Stable React key tied to message identity, not array position — so React
+// reconciles rows correctly when the list grows or a message is prepended.
+// Prefer a server id; otherwise fall back to a key minted per message object
+// (messages are appended once and never re-created, so object identity is
+// stable across renders and unique even for byte-identical messages).
+const fallbackKeys = new WeakMap<ChatMessage, string>();
+let fallbackKeyCounter = 0;
+function messageKey(msg: ChatMessage): string {
+  if (msg.id) return msg.id;
+  let key = fallbackKeys.get(msg);
+  if (!key) {
+    fallbackKeyCounter += 1;
+    key = `local:${fallbackKeyCounter}`;
+    fallbackKeys.set(msg, key);
+  }
+  return key;
 }
 
 // In-call chat. Desktop: a 372px wide in-flow side column.
@@ -90,7 +108,7 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
           In-call messages
         </Typography>
         <Tooltip title="Close">
-          <IconButton size="small" onClick={onClose} sx={{ color: 'text.secondary' }}>
+          <IconButton aria-label="Close" size="small" onClick={onClose} sx={{ color: 'text.secondary' }}>
             <CloseIcon fontSize="small" />
           </IconButton>
         </Tooltip>
@@ -106,10 +124,11 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
           </Box>
         )}
 
-        {messages.map((msg, i) => {
+        {messages.map((msg) => {
+          const key = messageKey(msg);
           if (msg.type === 'event') {
             return (
-              <Box key={i} sx={{ textAlign: 'center', my: 1 }}>
+              <Box key={key} sx={{ textAlign: 'center', my: 1 }}>
                 <Chip
                   label={msg.text}
                   size="small"
@@ -122,7 +141,7 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
           const isMe = msg.sender?.id === currentUserId;
           return (
             <Box
-              key={i}
+              key={key}
               sx={{
                 display: 'flex',
                 flexDirection: isMe ? 'row-reverse' : 'row',

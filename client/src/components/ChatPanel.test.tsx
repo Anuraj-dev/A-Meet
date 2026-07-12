@@ -96,6 +96,24 @@ describe('ChatPanel', () => {
       expect(screen.getByText('Bob joined the call')).toBeInTheDocument();
     });
 
+    it('renders identical id-less messages without duplicate React keys', () => {
+      // Two messages with the same sender, text, and millisecond timestamp —
+      // the worst case for any content-derived key.
+      const ts = Date.now();
+      const twin = (): ChatMessage => ({
+        type: 'chat', text: 'same', ts, sender: { id: 'u1', name: 'Alice' },
+      });
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      render(<Harness messages={[twin(), twin()]} />);
+
+      expect(screen.getAllByText('same')).toHaveLength(2);
+      const duplicateKeyWarning = errorSpy.mock.calls.some((args) =>
+        args.some((a) => typeof a === 'string' && a.includes('same key')));
+      expect(duplicateKeyWarning).toBe(false);
+      errorSpy.mockRestore();
+    });
+
     it('shows the empty-state prompt when there are no messages', () => {
       render(<Harness messages={[]} />);
 
