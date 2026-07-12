@@ -21,12 +21,20 @@ function formatTime(ts: string | number | Date): string {
 
 // Stable React key tied to message identity, not array position — so React
 // reconciles rows correctly when the list grows or a message is prepended.
-// Prefer a server id; otherwise compose from timestamp + sender + text, which
-// is effectively unique per real message.
+// Prefer a server id; otherwise fall back to a key minted per message object
+// (messages are appended once and never re-created, so object identity is
+// stable across renders and unique even for byte-identical messages).
+const fallbackKeys = new WeakMap<ChatMessage, string>();
+let fallbackKeyCounter = 0;
 function messageKey(msg: ChatMessage): string {
   if (msg.id) return msg.id;
-  const sender = msg.sender?.id ?? (msg.type === 'event' ? 'event' : 'anon');
-  return `${new Date(msg.ts).getTime()}:${sender}:${msg.text}`;
+  let key = fallbackKeys.get(msg);
+  if (!key) {
+    fallbackKeyCounter += 1;
+    key = `local:${fallbackKeyCounter}`;
+    fallbackKeys.set(msg, key);
+  }
+  return key;
 }
 
 // In-call chat. Desktop: a 372px wide in-flow side column.
