@@ -37,7 +37,7 @@ services:
     network_mode: host
     # Auto-restart on crash/reboot; the server drains gracefully on the SIGTERM
     # Docker sends, so restarts don't drop in-flight media abruptly.
-    restart: unless-stopped
+    restart: always
     environment:
       NODE_ENV: production
       AWS_REGION: ${AWS_REGION:?set AWS_REGION}
