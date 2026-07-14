@@ -46,6 +46,27 @@ beforeEach(() => {
 });
 
 describe('DeepgramMeetingSession provider lifecycle', () => {
+  it('closes a connection created after stop without connecting it', async () => {
+    let resolveConnection;
+    mockConnect.mockReturnValueOnce(new Promise((resolve) => {
+      resolveConnection = resolve;
+    }));
+    const session = new DeepgramMeetingSession({
+      socketId: 'socket-stopped-while-connecting',
+      onInterim: vi.fn(),
+      onFinal: vi.fn(),
+      onStatus: vi.fn(),
+    });
+
+    const starting = session.start();
+    await session.stop();
+    resolveConnection(mockConnection);
+    await starting;
+
+    expect(mockConnection.close).toHaveBeenCalledTimes(1);
+    expect(mockConnection.connect).not.toHaveBeenCalled();
+  });
+
   it('uses the v5 live API and flushes buffered audio after open', async () => {
     const onStatus = vi.fn();
     const session = new DeepgramMeetingSession({
@@ -73,6 +94,22 @@ describe('DeepgramMeetingSession provider lifecycle', () => {
     expect(onStatus).toHaveBeenLastCalledWith({ status: 'listening', provider: 'Deepgram' });
   });
 
+  it('closes a never-opened connection without sending finalize messages', async () => {
+    const session = new DeepgramMeetingSession({
+      socketId: 'socket-never-opened',
+      onInterim: vi.fn(),
+      onFinal: vi.fn(),
+      onStatus: vi.fn(),
+    });
+    await session.start();
+
+    await session.stop();
+
+    expect(mockConnection.sendFinalize).not.toHaveBeenCalled();
+    expect(mockConnection.sendCloseStream).not.toHaveBeenCalled();
+    expect(mockConnection.close).toHaveBeenCalledTimes(1);
+  });
+
   it('maps v5 message types and closes with finalize then close-stream', async () => {
     vi.useFakeTimers();
     const onFinal = vi.fn();
@@ -83,6 +120,7 @@ describe('DeepgramMeetingSession provider lifecycle', () => {
       onStatus: vi.fn(),
     });
     await session.start();
+    deepgramHandlers.open();
 
     deepgramHandlers.message({ type: 'SpeechStarted', channel: [0], timestamp: 0 });
     deepgramHandlers.message({

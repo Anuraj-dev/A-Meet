@@ -65,7 +65,7 @@ export class DeepgramMeetingSession {
   async start() {
     if (!env.transcription.deepgramApiKey) throw new Error('Deepgram is not configured');
     const client = new DeepgramClient({ apiKey: env.transcription.deepgramApiKey });
-    this.connection = await client.listen.v1.connect({
+    const connection = await client.listen.v1.connect({
       model: env.transcription.deepgramModel,
       language: 'en-US',
       encoding: 'linear16',
@@ -78,6 +78,11 @@ export class DeepgramMeetingSession {
       smart_format: 'true',
       punctuate: 'true',
     });
+    if (this.stopping) {
+      connection.close();
+      return;
+    }
+    this.connection = connection;
 
     this.connection.on('open', () => {
       if (!this.connection || this.stopping) return;
@@ -160,11 +165,13 @@ export class DeepgramMeetingSession {
     if (this.stopping) return;
     this.stopping = true;
     if (!this.connection) return;
-    try {
-      this.connection.sendFinalize({ type: 'Finalize' });
-      await new Promise<void>((resolve) => setTimeout(resolve, 450));
-      this.connection.sendCloseStream({ type: 'CloseStream' });
-    } catch { /* best-effort close */ }
+    if (this.connected) {
+      try {
+        this.connection.sendFinalize({ type: 'Finalize' });
+        await new Promise<void>((resolve) => setTimeout(resolve, 450));
+        this.connection.sendCloseStream({ type: 'CloseStream' });
+      } catch { /* best-effort close */ }
+    }
     this.connection.close();
     this.connection = null;
     this.connected = false;
