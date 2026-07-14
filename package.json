@@ -35,6 +35,7 @@
     "lint:server": "npm --prefix server run lint",
     "lint:client": "npm --prefix client run lint",
     "lint": "npm run lint:shared && npm run lint:server && npm run lint:client",
+    "lint:fix": "npm --workspaces --if-present run lint -- --fix",
     "audit:server": "npm audit --audit-level=high --prefix server",
     "audit:client": "npm audit --audit-level=high --prefix client",
     "audit": "npm run audit:server && npm run audit:client",
