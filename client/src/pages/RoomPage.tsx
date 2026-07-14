@@ -1017,6 +1017,7 @@ export default function RoomPage() {
         {pageCount > 1 && (
           <>
             <IconButton
+              aria-label="Previous page"
               onClick={() => setGridPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
               sx={{
@@ -1028,6 +1029,7 @@ export default function RoomPage() {
               <NavigateBeforeIcon />
             </IconButton>
             <IconButton
+              aria-label="Next page"
               onClick={() => setGridPage((p) => Math.min(pageCount - 1, p + 1))}
               disabled={page >= pageCount - 1}
               sx={{
@@ -1324,7 +1326,7 @@ export default function RoomPage() {
                 {roomId}
               </Typography>
               <Tooltip title="Copy joining link">
-                <IconButton size="small" onClick={handleCopyLink} sx={{ color: 'text.secondary' }}>
+                <IconButton aria-label="Copy joining link" size="small" onClick={handleCopyLink} sx={{ color: 'text.secondary' }}>
                   <ContentCopyIcon sx={{ fontSize: 16 }} />
                 </IconButton>
               </Tooltip>

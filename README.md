@@ -103,17 +103,22 @@ npm --prefix server install
 
 ### 2. Configure environment
 
-Two env files, with distinct jobs:
+Three env files, with distinct jobs:
 
 ```bash
 cp .env.example .env               # repo root — local Docker Mongo credentials (read by Compose)
 cp server/.env.example server/.env # server app config (read by the Node server)
+cp client/.env.example client/.env # client app config (Vite reads VITE_SERVER_URL for Socket.io)
 ```
 
 `docker compose` reads the **repo-root `.env`** for the Mongo container credentials, so those
 live there — not in `server/.env`. Keep the two in sync: the username/password in the root
 `.env` must match the ones embedded in the server's `MONGO_URI` (both default to
 `admin` / `change-me`).
+
+The **`client/.env`** supplies `VITE_SERVER_URL` — the origin the browser opens the Socket.io
+connection to. There is no built-in fallback, so on a fresh clone signaling silently fails to
+connect until this file exists; the default points at the local server (`http://localhost:5000`).
 
 Repo-root `.env` (local Docker Mongo only — unused in production):
 
@@ -235,7 +240,7 @@ A-Meet/
 │   └── src/
 │       ├── routes/          # auth, meetings, rooms
 │       ├── socket/          # room events, SFU signalling
-│       ├── models/          # User, Meeting
+│       ├── models/          # User, Room
 │       └── middleware/      # JWT cookie auth
 ├── docker-compose.yml       # LOCAL DEV: MongoDB + observability stack
 ├── docker-compose.prod.yml  # PRODUCTION: server only (DB is Atlas via MONGO_URI)
@@ -297,7 +302,7 @@ git clone ... && cd A-Meet   # the node keeps a checkout for config (compose fil
 
 # Runtime secrets are loaded from SSM by the container entrypoint. No production
 # server/.env is required or copied into the image.
-# Open UDP ports 10000–59999 in the security group (mediasoup RTP range), plus 5000 (API).
+# Open UDP ports 40000–40100 in the security group (mediasoup RTP range), plus 5000 (API).
 
 # Pull the published image tag and start (this is what CI automates on each deploy):
 export SERVER_IMAGE=<account>.dkr.ecr.<region>.amazonaws.com/a-meet-server:<git-sha>
@@ -328,7 +333,7 @@ cleanly, so merges to `main` stay green. To enable it:
 |---|---|
 | `AWS_REGION` | ECR / deploy region, e.g. `ap-south-1` |
 | `ECR_REPOSITORY` | ECR repo name, e.g. `a-meet-server` (must exist) |
-| `HEALTH_URL` | optional; defaults to `https://api.ameet.raja-dev.me/api/health` |
+| `HEALTH_URL` | optional; defaults to `https://api.ameet.raja-dev.me/api/health/ready` |
 
 **Repository secrets:**
 
@@ -544,9 +549,9 @@ the instance isn't `ebs`-backed. That makes it safe to use as an automated post-
 
 **Operator validation after a recovery event:**
 1. `deploy/aws-recovery.sh verify` — EIP still associated to the instance; alarm back to `OK`; root device `ebs`.
-2. **API health:** `curl -fsS https://api.<domain>/api/health` returns `{"ok":true}` (the deploy health check uses the same endpoint).
+2. **API health:** `curl -fsS https://api.<domain>/api/health/ready` returns `{"ok":true}` (the deploy health check uses the same readiness endpoint).
 3. **Container up:** on the box, `docker compose -f docker-compose.prod.yml ps` shows the server running, and `logs -f` shows mediasoup workers started.
-4. **Media connectivity:** join a meeting from two devices and confirm audio/video flows — i.e. `MEDIASOUP_ANNOUNCED_IP` still equals the EIP and the security-group UDP RTC range (10000–59999) is open.
+4. **Media connectivity:** join a meeting from two devices and confirm audio/video flows — i.e. `MEDIASOUP_ANNOUNCED_IP` still equals the EIP and the security-group UDP RTC range (40000–40100) is open.
 
 For HTTPS (required for camera/mic on non-localhost), put Nginx in front with a Let's Encrypt cert and proxy to `localhost:5000`.
 

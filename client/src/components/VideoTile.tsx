@@ -429,6 +429,7 @@ export default function VideoTile({
         >
           <Tooltip title={peerVolume === 0 && showVolumeControl ? `${name ?? 'Participant'} muted for you` : 'Tile options'}>
             <IconButton
+              aria-label={peerVolume === 0 && showVolumeControl ? `${name ?? 'Participant'} muted for you` : 'Tile options'}
               size="small"
               onClick={(event) => {
                 // Tile controls are local UI only. Keeping the menu state as a

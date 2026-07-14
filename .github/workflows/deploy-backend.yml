@@ -87,6 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Pull image tag on EC2 and restart
+        id: deploy
         uses: appleboy/ssh-action@v1.2.5
         env:
           SERVER_IMAGE: ${{ needs.build-and-push.outputs.image }}
@@ -106,6 +107,10 @@ jobs:
             aws ecr get-login-password --region "$AWS_REGION" \
               | docker login --username AWS --password-stdin "$ECR_REGISTRY"
             cd ~/ameet
+            # Record the currently-running image BEFORE switching, so a failed
+            # post-deploy health check can roll back to the last-good release.
+            # Empty file (|| true) means "no prior container" — a first deploy.
+            docker inspect --format '{{.Config.Image}}' a-meet-server > .rollback-image 2>/dev/null || true
             # Check out the EXACT commit that produced SERVER_IMAGE (detached HEAD)
             # rather than moving `main`, so the compose file + env contract used to
             # deploy always match the image tag being released — even if a newer
@@ -120,8 +125,9 @@ jobs:
             docker image prune -f
 
       - name: Health check
+        id: health
         run: |
-          HEALTH_URL="${{ vars.HEALTH_URL || 'https://api.ameet.raja-dev.me/api/health' }}"
+          HEALTH_URL="${{ vars.HEALTH_URL || 'https://api.ameet.raja-dev.me/api/health/ready' }}"
           for i in $(seq 1 12); do
             if curl -fsS "$HEALTH_URL" | grep -q '"ok":true'; then
               echo "Health check passed (attempt $i)"
@@ -132,3 +138,59 @@ jobs:
           done
           echo "Health check failed: API did not return ok:true after 60s"
           exit 1
+
+      # Automated rollback: if either the deploy step OR the post-deploy health
+      # check failed, redeploy the image that was running before this release.
+      # Because every build is an immutable :<git-sha> tag, rollback is just
+      # re-running the deploy against the prior tag recorded above in
+      # .rollback-image. The deploy step can fail *after* `docker compose up -d`
+      # has already stopped/replaced the old container (e.g. the new image starts
+      # but a later command errors), so a deploy-step failure can leave the box
+      # without the last-good release — we must roll back there too, not only on
+      # a health-check failure. The rollback re-checkout uses the SHA recorded in
+      # .rollback-image; if none exists (first deploy) it exits red for a human.
+      # This step restores service but the job still ends red, so the existing
+      # CloudWatch/Telegram alarm path still notifies a human.
+      - name: Roll back to previous image on failed deploy or health check
+        if: ${{ failure() && (steps.deploy.outcome == 'failure' || steps.health.outcome == 'failure') }}
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          ECR_REGISTRY: ${{ needs.build-and-push.outputs.registry }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
+          envs: ECR_REGISTRY,AWS_REGION
+          script: |
+            set -euo pipefail
+            cd ~/ameet
+            PREV_IMAGE="$(cat .rollback-image 2>/dev/null || true)"
+            if [ -z "$PREV_IMAGE" ]; then
+              echo "No previous image recorded (first deploy?) — cannot auto-roll back."
+              exit 1
+            fi
+            echo "Rolling back to previous image: $PREV_IMAGE"
+            aws ecr get-login-password --region "$AWS_REGION" \
+              | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+            # The image tag is the prior commit SHA; check that commit out so the
+            # compose file + env contract match the image being restored.
+            PREV_SHA="${PREV_IMAGE##*:}"
+            git fetch --quiet origin main
+            git checkout --quiet --force --detach "$PREV_SHA"
+            export SERVER_IMAGE="$PREV_IMAGE"
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f
+            # Confirm the restored container is actually serving before we stop.
+            for i in $(seq 1 12); do
+              if curl -fsS http://localhost:5000/api/health/ready | grep -q '"ok":true'; then
+                echo "Rollback healthy (attempt $i)"
+                exit 0
+              fi
+              echo "Attempt $i: rolled-back API not healthy yet, retrying in 5s..."
+              sleep 5
+            done
+            echo "Rollback deployed but health still failing after 60s — needs a human."
+            exit 1

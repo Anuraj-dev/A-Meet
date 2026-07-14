@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "A-Meet server — Express + Mongoose + Passport + Socket.io",
   "main": "index.js",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
