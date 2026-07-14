@@ -16,7 +16,7 @@ export default defineConfig({
   workers: CI ? 1 : undefined,
   // In CI the suite is split across parallel shards (see .github/workflows/
   // e2e.yml). Each shard emits a `blob` report; a downstream merge job stitches
-  // the shards back into one HTML report. Locally we keep the human HTML report.
+  // the shards back into one HTML report. Locally the list reporter stays, as before.
   reporter: CI ? [['list'], ['blob']] : 'list',
   use: {
     baseURL: CLIENT_URL,
