@@ -14,7 +14,10 @@ export default defineConfig({
   // the first retry so failures are debuggable without rerunning by hand.
   retries: 2,
   workers: CI ? 1 : undefined,
-  reporter: CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+  // In CI the suite is split across parallel shards (see .github/workflows/
+  // e2e.yml). Each shard emits a `blob` report; a downstream merge job stitches
+  // the shards back into one HTML report. Locally we keep the human HTML report.
+  reporter: CI ? [['list'], ['blob']] : 'list',
   use: {
     baseURL: CLIENT_URL,
     trace: 'on-first-retry',
