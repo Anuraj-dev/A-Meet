@@ -28,7 +28,7 @@ beforeAll(() => {
 // ChatPanel is fully controlled (input/setInput/onSend come from the parent, which
 // also clears the input on send). This harness mirrors RoomPage's real wiring so
 // tests exercise the true contract: onSend reads the current input, then clears it.
-interface HarnessProps { onSendSpy?: ReturnType<typeof vi.fn>; messages?: ChatMessage[]; currentUserId?: string; onClose?: ReturnType<typeof vi.fn> }
+interface HarnessProps { onSendSpy?: (input: string) => void; messages?: ChatMessage[]; currentUserId?: string; onClose?: () => void }
 function Harness({ onSendSpy = vi.fn(), messages = [], currentUserId = 'me', onClose = vi.fn() }: HarnessProps) {
   const [input, setInput] = useState('');
   const handleSend = (e: FormEvent) => {
