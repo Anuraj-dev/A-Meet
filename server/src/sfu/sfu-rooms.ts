@@ -9,6 +9,7 @@
 import type { types as MediasoupTypes } from 'mediasoup';
 import { getWorker } from './workers.js';
 import { mediaCodecs } from './config.js';
+import { logger } from '../config/logger.js';
 import type { AuthUser } from '../types.js';
 
 // Per-peer mediasoup bookkeeping (all Maps keyed by the mediasoup object id).
@@ -41,7 +42,7 @@ export async function getOrCreateRoom(roomId: string): Promise<Room> {
   const router = await worker.createRouter({ mediaCodecs });
   room = { router, peers: new Map() };
   rooms.set(roomId, room);
-  console.log(`[sfu] room ${roomId}: router created on worker ${worker.pid}`);
+  logger.info({ event: 'room.routerCreated', roomId, workerPid: worker.pid }, 'SFU router created');
   return room;
 }
 
@@ -121,5 +122,5 @@ export function closeRoomIfEmpty(roomId: string) {
   if (room.peers.size > 0) return;
   try { room.router.close(); } catch { /* already closed */ }
   rooms.delete(roomId);
-  console.log(`[sfu] room ${roomId}: empty → router closed`);
+  logger.info({ event: 'room.routerClosed', roomId }, 'SFU router closed (room empty)');
 }
