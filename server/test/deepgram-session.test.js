@@ -1,5 +1,107 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { deepgramHandlers, mockConnection, mockConnect } = vi.hoisted(() => {
+  const handlers = {};
+  const connection = {
+    on: vi.fn((event, callback) => { handlers[event] = callback; }),
+    connect: vi.fn(),
+    sendMedia: vi.fn(),
+    sendFinalize: vi.fn(),
+    sendCloseStream: vi.fn(),
+    close: vi.fn(),
+  };
+  return {
+    deepgramHandlers: handlers,
+    mockConnection: connection,
+    mockConnect: vi.fn().mockResolvedValue(connection),
+  };
+});
+
+vi.mock('@deepgram/sdk', () => ({
+  DeepgramClient: class {
+    listen = { v1: { connect: mockConnect } };
+  },
+}));
+
+vi.mock('../src/config/env.js', () => ({
+  env: {
+    transcription: {
+      deepgramApiKey: 'test-key',
+      groqApiKey: '',
+      deepgramModel: 'nova-3',
+    },
+  },
+}));
+
+vi.mock('../src/config/logger.js', () => ({
+  logger: { warn: vi.fn() },
+}));
+
 import { DeepgramMeetingSession } from '../src/transcription/deepgram-session.js';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  for (const key of Object.keys(deepgramHandlers)) delete deepgramHandlers[key];
+  mockConnect.mockResolvedValue(mockConnection);
+});
+
+describe('DeepgramMeetingSession provider lifecycle', () => {
+  it('uses the v5 live API and flushes buffered audio after open', async () => {
+    const onStatus = vi.fn();
+    const session = new DeepgramMeetingSession({
+      socketId: 'socket-v5',
+      onInterim: vi.fn(),
+      onFinal: vi.fn(),
+      onStatus,
+    });
+    const buffered = Buffer.alloc(320, 3);
+    session.send(buffered);
+
+    await session.start();
+
+    expect(mockConnect).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'nova-3',
+      encoding: 'linear16',
+      sample_rate: 16000,
+      interim_results: 'true',
+    }));
+    expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+    expect(onStatus).toHaveBeenLastCalledWith({ status: 'connecting', provider: 'Deepgram' });
+
+    deepgramHandlers.open();
+    expect(mockConnection.sendMedia).toHaveBeenCalledWith(buffered);
+    expect(onStatus).toHaveBeenLastCalledWith({ status: 'listening', provider: 'Deepgram' });
+  });
+
+  it('maps v5 message types and closes with finalize then close-stream', async () => {
+    vi.useFakeTimers();
+    const onFinal = vi.fn();
+    const session = new DeepgramMeetingSession({
+      socketId: 'socket-v5',
+      onInterim: vi.fn(),
+      onFinal,
+      onStatus: vi.fn(),
+    });
+    await session.start();
+
+    deepgramHandlers.message({ type: 'SpeechStarted', channel: [0], timestamp: 0 });
+    deepgramHandlers.message({
+      type: 'Results',
+      is_final: true,
+      speech_final: true,
+      channel: { alternatives: [{ transcript: 'Migrated safely.' }] },
+    });
+    expect(onFinal).toHaveBeenCalledWith(expect.objectContaining({ text: 'Migrated safely.' }));
+
+    const stopping = session.stop();
+    expect(mockConnection.sendFinalize).toHaveBeenCalledWith({ type: 'Finalize' });
+    await vi.advanceTimersByTimeAsync(450);
+    await stopping;
+    expect(mockConnection.sendCloseStream).toHaveBeenCalledWith({ type: 'CloseStream' });
+    expect(mockConnection.close).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+});
 
 describe('DeepgramMeetingSession turn assembly', () => {
   it('broadcasts interim text and finalizes one audio-backed utterance', () => {

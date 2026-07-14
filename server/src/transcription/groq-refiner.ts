@@ -1,5 +1,4 @@
-import Groq from 'groq-sdk';
-import { toFile } from 'groq-sdk/uploads';
+import Groq, { toFile } from 'groq-sdk';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 
@@ -104,7 +103,7 @@ export class GroqTranscriptRefiner {
           const completion = await this.client.chat.completions.create({
             model: env.transcription.mergeModel,
             temperature: 0,
-            max_tokens: 320,
+            max_completion_tokens: 320,
             messages: [
               {
                 role: 'system',

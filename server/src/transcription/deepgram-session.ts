@@ -1,4 +1,4 @@
-import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
+import { DeepgramClient } from '@deepgram/sdk';
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
@@ -6,6 +6,8 @@ import { logger } from '../config/logger.js';
 const MAX_CONNECT_BUFFER_CHUNKS = 100;
 const MAX_UTTERANCE_BYTES = 16000 * 2 * 45;
 const PRE_ROLL_CHUNKS = 6;
+
+type DeepgramLiveConnection = Awaited<ReturnType<DeepgramClient['listen']['v1']['connect']>>;
 
 /** Status pushed to the contributor's own socket as the provider connects. */
 export interface ContributorStatus {
@@ -27,9 +29,7 @@ export class DeepgramMeetingSession {
   onInterim: DeepgramSessionOptions['onInterim'];
   onFinal: DeepgramSessionOptions['onFinal'];
   onStatus: DeepgramSessionOptions['onStatus'];
-  // The Deepgram live connection is an SDK object with loosely-typed event
-  // payloads; kept `any` rather than chasing the SDK's internal shapes.
-  connection: any;
+  connection: DeepgramLiveConnection | null;
   connected: boolean;
   stopping: boolean;
   connectBuffer: Buffer[];
@@ -64,39 +64,42 @@ export class DeepgramMeetingSession {
 
   async start() {
     if (!env.transcription.deepgramApiKey) throw new Error('Deepgram is not configured');
-    const client = createClient(env.transcription.deepgramApiKey);
-    this.connection = client.listen.live({
+    const client = new DeepgramClient({ apiKey: env.transcription.deepgramApiKey });
+    this.connection = await client.listen.v1.connect({
       model: env.transcription.deepgramModel,
       language: 'en-US',
       encoding: 'linear16',
       sample_rate: 16000,
       channels: 1,
-      interim_results: true,
+      interim_results: 'true',
       endpointing: 300,
       utterance_end_ms: 1000,
-      vad_events: true,
-      smart_format: true,
-      punctuate: true,
+      vad_events: 'true',
+      smart_format: 'true',
+      punctuate: 'true',
     });
 
-    this.connection.on(LiveTranscriptionEvents.Open, () => {
+    this.connection.on('open', () => {
       if (!this.connection || this.stopping) return;
       this.connected = true;
       this.onStatus({ status: 'listening', provider: env.transcription.groqApiKey ? 'Deepgram + Groq' : 'Deepgram' });
       for (const chunk of this.connectBuffer) this.sendToProvider(chunk);
       this.connectBuffer = [];
     });
-    this.connection.on(LiveTranscriptionEvents.SpeechStarted, () => this.beginSpeech());
-    this.connection.on(LiveTranscriptionEvents.Transcript, (data: any) => this.handleTranscript(data));
-    this.connection.on(LiveTranscriptionEvents.Error, (error: any) => {
+    this.connection.on('message', (data) => {
+      if (data.type === 'SpeechStarted') this.beginSpeech();
+      if (data.type === 'Results') this.handleTranscript(data);
+    });
+    this.connection.on('error', (error) => {
       logger.warn({ event: 'transcript.deepgramError', socketId: this.socketId, err: error?.message }, 'Deepgram meeting stream failed');
       this.onStatus({ status: 'error', message: 'Live transcription provider disconnected.' });
     });
-    this.connection.on(LiveTranscriptionEvents.Close, () => {
+    this.connection.on('close', () => {
       this.connected = false;
       if (!this.stopping) this.onStatus({ status: 'error', message: 'Live transcription provider closed unexpectedly.' });
     });
     this.onStatus({ status: 'connecting', provider: 'Deepgram' });
+    this.connection.connect();
   }
 
   beginSpeech() {
@@ -134,8 +137,7 @@ export class DeepgramMeetingSession {
   }
 
   sendToProvider(chunk: Buffer) {
-    const arrayBuffer = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
-    this.connection?.send(arrayBuffer);
+    this.connection?.sendMedia(chunk);
   }
 
   send(chunk: Buffer) {
@@ -159,11 +161,11 @@ export class DeepgramMeetingSession {
     this.stopping = true;
     if (!this.connection) return;
     try {
-      this.connection.finalize();
+      this.connection.sendFinalize({ type: 'Finalize' });
       await new Promise<void>((resolve) => setTimeout(resolve, 450));
-      this.connection.requestClose();
+      this.connection.sendCloseStream({ type: 'CloseStream' });
     } catch { /* best-effort close */ }
-    this.connection.removeAllListeners();
+    this.connection.close();
     this.connection = null;
     this.connected = false;
     this.connectBuffer = [];
