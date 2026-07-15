@@ -37,7 +37,7 @@ services:
     network_mode: host
     # Auto-restart on crash/reboot; the server drains gracefully on the SIGTERM
     # Docker sends, so restarts don't drop in-flight media abruptly.
-    restart: unless-stopped
+    restart: always
     # Resource ceilings so a runaway process (leaked producers, a busy call)
     # can't starve nginx/system on the box. Honored by `docker compose up`
     # (non-swarm). Sized for a small single node (~2 vCPU / 2-4 GB); raise on a

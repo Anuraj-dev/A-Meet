@@ -1,7 +1,6 @@
-import js from '@eslint/js';
 import globals from 'globals';
-import tseslint from 'typescript-eslint';
 import { defineConfig, globalIgnores } from 'eslint/config';
+import { baseEslintConfigs } from '../eslint.config.base.mjs';
 
 // Flat config for the Node server (ESLint 10), mirroring the client setup.
 // Lints application source, tests, and config files with ESM parsing and
@@ -11,7 +10,7 @@ export default defineConfig([
   globalIgnores(['node_modules', 'logs', 'coverage', 'dist']),
   {
     files: ['**/*.js'],
-    extends: [js.configs.recommended],
+    extends: [baseEslintConfigs.javascript],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -20,7 +19,7 @@ export default defineConfig([
   },
   {
     files: ['**/*.ts'],
-    extends: [js.configs.recommended, tseslint.configs.recommended],
+    extends: [baseEslintConfigs.javascript, baseEslintConfigs.typescript],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

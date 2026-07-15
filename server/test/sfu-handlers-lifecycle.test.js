@@ -28,8 +28,11 @@ import { registerSfuHandlers } from '../src/socket/sfu-handlers.js';
 import {
   getOrCreateRoom, getRoom, getPeer, addPeer, removePeer, closeRoomIfEmpty,
 } from '../src/sfu/sfu-rooms.js';
+import { Room } from '../src/models/Room.js';
 
-const ROOM = 'room-1';
+// A well-formed Google Meet-style room code (xxx-xxxx-xxx). The SFU entry point
+// now validates this format and the room's DB existence before minting a Router.
+const ROOM = 'abc-defg-hij';
 
 function makeFakes() {
   const producer = { id: 'prod-1', kind: 'video', paused: false, appData: {}, on: vi.fn(), close: vi.fn() };
@@ -87,6 +90,8 @@ const emitted = (emits, event) => emits.find((e) => e.event === event);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The entry handler now requires the room to exist and be active in the DB.
+  Room.findOne.mockResolvedValue({ active: true });
 });
 
 describe('SFU lifecycle handlers', () => {
