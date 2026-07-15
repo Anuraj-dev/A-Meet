@@ -245,7 +245,11 @@ A-Meet/
 ├── docker-compose.yml       # LOCAL DEV: MongoDB + observability stack
 ├── docker-compose.prod.yml  # PRODUCTION: server only (DB is Atlas via MONGO_URI)
 ├── docker-compose.coturn.yml
-└── plan.md                  # milestone roadmap (source of truth)
+├── docs/
+│   ├── STATE.md              # current status (source of truth — read first)
+│   ├── decisions.md          # load-bearing decision log
+│   └── old_plan.md           # archived milestone-by-milestone history
+└── CLAUDE.md / AGENTS.md     # agent entry point
 ```
 
 ---

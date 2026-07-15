@@ -187,7 +187,7 @@ aws cloudwatch put-metric-alarm \
   --datapoints-to-alarm 5 \
   --threshold 1 \
   --comparison-operator LessThanThreshold \
-  --treat-missing-data notBreaching \
+  --treat-missing-data breaching \
   --alarm-actions "$PROCESS_TOPIC_ARN" \
   --ok-actions "$PROCESS_TOPIC_ARN"
 
