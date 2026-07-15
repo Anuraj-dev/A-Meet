@@ -13,6 +13,25 @@
       ]
     },
     {
+      "Sid": "ReadWriteAlarmStateParameters",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:PutParameter"
+      ],
+      "Resource": [
+        "arn:aws:ssm:*:*:parameter/a-meet/prod/alarm-state/*"
+      ]
+    },
+    {
+      "Sid": "Decrypt",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "LambdaLogs",
       "Effect": "Allow",
       "Action": [

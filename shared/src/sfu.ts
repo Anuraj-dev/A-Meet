@@ -9,6 +9,12 @@ import type {
 
 export interface SocketAckError {
   error: string;
+  /**
+   * Present on rate-limit rejections: milliseconds the client should wait
+   * before retrying. Mirrors the HTTP 429 `retryAfterMs` body field so both
+   * transports surface the same structured back-off hint.
+   */
+  retryAfterMs?: number;
 }
 
 export type SocketAck<T> = (T & { error?: never }) | SocketAckError;

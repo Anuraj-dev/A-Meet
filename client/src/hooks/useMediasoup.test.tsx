@@ -73,7 +73,7 @@ const H = vi.hoisted(() => {
     state.devices.push(device);
     return device;
   }
-  state.Device = vi.fn(() => makeDevice());
+  state.Device = vi.fn(function () { return makeDevice(); });
   return state;
 });
 
@@ -423,6 +423,96 @@ describe('useMediasoup', () => {
     });
     // The UI reflects the user's intent even though the server call failed.
     expect(result.current.localAudioOn).toBe(false);
+  });
+
+  // ── First-connection recovery (issue #160) ────────────────────────────────
+
+  it('does not emit any signaling until the socket is connected (no handshake race)', async () => {
+    // Socket starts disconnected and connect() does NOT flip it (models a socket
+    // still mid-handshake). setupSfu must wait for `connect` before its 1st emit.
+    H.socket.connect.mockImplementationOnce(() => { /* still connecting */ });
+
+    mount();
+    // Give init() time to acquire media and reach setupSfu's connect gate.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(H.request).not.toHaveBeenCalled();
+
+    // Socket finishes connecting — setup proceeds and produces media.
+    await act(async () => { H.socket.connected = true; H.socket._emit('connect'); await Promise.resolve(); });
+    await waitFor(() => expect(H.request).toHaveBeenCalledWith('sfu-get-rtp-capabilities', { roomId: 'room-1' }));
+  });
+
+  it('leaves no residual connect listener when unmounted while the socket is still disconnected', async () => {
+    // Socket never finishes connecting; setupSfu is parked on its connect gate.
+    H.socket.connect.mockImplementationOnce(() => { /* still connecting */ });
+
+    const { unmount } = mount();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(H.request).not.toHaveBeenCalled();
+
+    unmount();
+
+    // The hook's own onSocketConnect AND the pending waitForSocketConnect
+    // closure must both be gone — otherwise each mount/unmount while offline
+    // leaks a listener on the singleton socket.
+    expect(H.socket._handlers['connect'] ?? []).toHaveLength(0);
+  });
+
+  it('retries the FIRST setup on reconnect after it failed mid-handshake, and reaches ready', async () => {
+    // First setup fails on its very first request (socket dropped mid-handshake:
+    // the initialized flag is never set — the incident's un-retried failure).
+    H.request.mockImplementationOnce(async () => { throw new Error('socket disconnected'); });
+
+    const { result } = mount();
+    await waitFor(() => expect(result.current.mediaRecovery.status).not.toBe('ready'));
+    expect(H.devices).toHaveLength(0); // never got past rtp-capabilities
+
+    // Socket reconnects — setup is retried even though it never completed once.
+    await act(async () => { H.socket.connected = true; H.socket._emit('connect'); await Promise.resolve(); });
+
+    await waitFor(() => expect(result.current.mediaRecovery.status).toBe('ready'));
+    expect(H.devices.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('exposes an exhausted state after the retry budget is spent, backing off between tries', async () => {
+    vi.useFakeTimers();
+    try {
+      // Every setup attempt fails while the socket stays connected → the backoff
+      // ladder runs to exhaustion.
+      H.request.mockImplementation(async () => { throw new Error('rtp caps rejected'); });
+      H.socket.connect.mockImplementation(() => { H.socket.connected = true; });
+
+      const { result } = mount();
+      // Drain init + the whole backoff ladder (capped exponential, 5 retries).
+      await vi.advanceTimersByTimeAsync(60000);
+
+      expect(result.current.mediaRecovery.status).toBe('exhausted');
+      expect(result.current.mediaRecovery.attempt).toBe(5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers via the manual retryMedia() affordance once retries are exhausted', async () => {
+    vi.useFakeTimers();
+    try {
+      H.request.mockImplementation(async () => { throw new Error('down'); });
+      H.socket.connect.mockImplementation(() => { H.socket.connected = true; });
+
+      const { result } = mount();
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(result.current.mediaRecovery.status).toBe('exhausted');
+
+      // Server is healthy now; the user clicks Retry.
+      H.request.mockImplementation(async (event: string, data: any) => defaultResponder(event, data));
+      // Flush the async setup under fake timers (waitFor would hang without a
+      // real clock, so advance instead).
+      await act(async () => { result.current.retryMedia(); await vi.advanceTimersByTimeAsync(50); });
+
+      expect(result.current.mediaRecovery.status).toBe('ready');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not flag permissionDenied when only the camera is unavailable', async () => {

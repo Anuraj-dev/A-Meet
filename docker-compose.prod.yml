@@ -37,7 +37,31 @@ services:
     network_mode: host
     # Auto-restart on crash/reboot; the server drains gracefully on the SIGTERM
     # Docker sends, so restarts don't drop in-flight media abruptly.
-    restart: unless-stopped
+    restart: always
+    # Resource ceilings so a runaway process (leaked producers, a busy call)
+    # can't starve nginx/system on the box. Honored by `docker compose up`
+    # (non-swarm). Sized for a small single node (~2 vCPU / 2-4 GB); raise on a
+    # larger instance. Reservation keeps a floor for steady-state mediasoup work.
+    mem_limit: 1536m
+    mem_reservation: 512m
+    cpus: 1.5
+    # Readiness probe against the same endpoint the deploy workflow polls
+    # (/api/health/ready -> 200 {"ok":true} only when Mongo is connected AND the
+    # mediasoup workers are alive; 503 otherwise). This is dependency-aware, so a
+    # container that is up but can't actually serve calls is reported unhealthy.
+    # The runtime image is node:22-slim with no curl/wget, so use node's global
+    # fetch; host networking means the server is reachable on localhost:5000.
+    # start_period covers mediasoup worker spin-up.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:5000/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     environment:
       NODE_ENV: production
       AWS_REGION: ${AWS_REGION:?set AWS_REGION}

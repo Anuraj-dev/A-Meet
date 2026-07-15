@@ -32,7 +32,9 @@ import { getOrCreateRoom, getRoom, getPeer } from '../src/sfu/sfu-rooms.js';
 import { addUser, removeUser } from '../src/socket/room-manager.js';
 import { Room } from '../src/models/Room.js';
 
-const ROOM = 'room-1';
+// A well-formed Google Meet-style room code (xxx-xxxx-xxx); the SFU entry point
+// validates this format and DB existence before seeding the socket→room map.
+const ROOM = 'abc-defg-hij';
 const HOST_ID = 'host-user';
 const TARGET = 'target-sock';
 
@@ -90,6 +92,9 @@ beforeEach(() => {
   // get-rtp-capabilities only needs a room with a router and an existing
   // audioLevelObserver (truthy → skip the observer-creation branch).
   getOrCreateRoom.mockResolvedValue({ router: { rtpCapabilities: {} }, audioLevelObserver: {} });
+  // The entry handler validates the room's DB existence before seeding the map;
+  // asHost()/asNonHost() override this per test for the moderation authz check.
+  Room.findOne.mockResolvedValue({ active: true, admin: HOST_ID });
 });
 
 describe('SFU host-moderation authorization', () => {
@@ -188,6 +193,54 @@ describe('SFU host-moderation authorization', () => {
       await handlers['sfu-request-unmute']({ socketId: TARGET });
 
       expect(emittedTo(ioEmits, TARGET, 'sfu-unmute-request')).toBe(false);
+    });
+  });
+
+  describe('sfu-request-unmute-all', () => {
+    it('host: broadcasts an unmute request to the room — never touches any producer', async () => {
+      const { handlers, socketEmits } = setup({ userId: HOST_ID });
+      await joinRoom(handlers);
+      asHost();
+      // Wire real (paused) producers into the room state. The prompt-only
+      // contract means the handler must never even reach for them.
+      const t1 = makeMicPeer();
+      const t2 = makeMicPeer();
+      t1.producer.paused = true;
+      t2.producer.paused = true;
+      getRoom.mockReturnValue({ peers: new Map([['caller-sock', {}], ['t1', {}], ['t2', {}]]) });
+      getPeer.mockImplementation((_room, sid) => {
+        if (sid === 't1') return t1.peer;
+        if (sid === 't2') return t2.peer;
+        return null;
+      });
+      // Only count lookups made by the handler under test (joinRoom is setup).
+      getRoom.mockClear();
+      getPeer.mockClear();
+
+      await handlers['sfu-request-unmute-all']();
+
+      // Sent room-wide via `socket.to(roomId)` (excludes the host themselves),
+      // carrying who asked so the target's prompt can name the requester.
+      const evt = socketEmits.find((e) => e.target === ROOM && e.event === 'sfu-unmute-request');
+      expect(evt?.payload).toEqual({ by: 'Caller' });
+      // Consent-based: the handler performs NO peer/producer operations at all —
+      // it never looks up room peers, and no producer is resumed or paused.
+      expect(getRoom).not.toHaveBeenCalled();
+      expect(getPeer).not.toHaveBeenCalled();
+      for (const { producer } of [t1, t2]) {
+        expect(producer.resume).not.toHaveBeenCalled();
+        expect(producer.pause).not.toHaveBeenCalled();
+      }
+    });
+
+    it('non-host: broadcasts no unmute request', async () => {
+      const { handlers, socketEmits } = setup({ userId: 'rando' });
+      await joinRoom(handlers);
+      asNonHost();
+
+      await handlers['sfu-request-unmute-all']();
+
+      expect(emittedTo(socketEmits, ROOM, 'sfu-unmute-request')).toBe(false);
     });
   });
 

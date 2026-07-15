@@ -67,6 +67,9 @@ test.describe('SFU host moderation (real media)', () => {
     await openPeople(pageA);
     await expect(async () => {
       await pageA.keyboard.press('Escape'); // dismiss any stale (audio-not-yet) menu
+      // With no menu open, Escape closes the People panel itself (dialog
+      // semantics), so re-open it before reaching for the per-person menu.
+      await openPeople(pageA);
       await pageA.getByRole('button', { name: `More actions for ${guest.name}` }).click();
       await expect(pageA.getByRole('menuitem', { name: /^mute$/i })).toBeVisible({ timeout: 1500 });
     }).toPass({ timeout: 30_000 });

@@ -26,7 +26,14 @@ export default defineConfig({
       // fails when any metric drops below these numbers. They hold today's
       // measured coverage; RAISING them is an intentional, reviewed commit —
       // never lower them to make a drop pass.
-      thresholds: { lines: 18, functions: 33, branches: 64, statements: 18 },
+      // NOTE: the `branches` floor was recalibrated (64 -> 37) for the Vitest 4
+      // upgrade. @vitest/coverage-v8 4.x fully AST-analyzes UNTESTED included
+      // files and counts every real branch in them as uncovered, where 3.x gave
+      // such files a single placeholder branch (e.g. pages/RoomPage.tsx 1 -> 320
+      // branches, ScheduleMeetingDialog.tsx 1 -> 63). Total branches grew
+      // 785 -> 1752 while covered branches went UP (553 -> 659) with identical
+      // tests — a denominator/meter change, not a coverage regression.
+      thresholds: { lines: 18, functions: 33, branches: 37, statements: 18 },
     },
   },
 });

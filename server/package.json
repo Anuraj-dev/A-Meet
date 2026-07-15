@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "A-Meet server — Express + Mongoose + Passport + Socket.io",
   "main": "index.js",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
@@ -19,19 +22,19 @@
   "dependencies": {
     "@a-meet/contracts": "file:../shared",
     "@aws-sdk/client-ssm": "^3.1076.0",
-    "@deepgram/sdk": "^4.11.3",
+    "@deepgram/sdk": "^5.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
-    "groq-sdk": "^0.37.0",
+    "groq-sdk": "^1.0.0",
     "helmet": "^8.2.0",
-    "joi": "^18.2.1",
+    "joi": "^18.2.3",
     "jsonwebtoken": "^9.0.3",
-    "mediasoup": "^3.20.0",
-    "mongoose": "^9.6.3",
-    "nanoid": "^5.1.11",
+    "mediasoup": "^3.20.9",
+    "mongoose": "^9.7.2",
+    "nanoid": "^5.1.16",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "pino": "^10.3.1",
@@ -49,13 +52,13 @@
     "@types/node": "^26.0.1",
     "@types/passport": "^1.0.17",
     "@types/passport-google-oauth20": "^2.0.17",
-    "@vitest/coverage-v8": "^3.2.6",
+    "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.3.0",
     "globals": "^17.6.0",
     "mongodb-memory-server": "^11.2.0",
     "nodemon": "^3.1.14",
     "supertest": "^7.2.2",
     "typescript-eslint": "^8.62.1",
-    "vitest": "^3.2.6"
+    "vitest": "^4.1.10"
   }
 }

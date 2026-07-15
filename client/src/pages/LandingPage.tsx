@@ -27,23 +27,8 @@ import EtherealShadow from "../components/EtherealShadow";
 import ScheduleMeetingDialog from "../components/ScheduleMeetingDialog";
 import UpcomingMeetings from "../components/UpcomingMeetings";
 import type { RoomMetadataDto, ScheduledMeetingDto } from "@a-meet/contracts";
-
-// Warm graphite + ember + dusty sage. Smoke, not glow.
-const DK = {
-  bg: "#140f0c",
-  surface: "rgba(255,255,255,0.05)",
-  surface2: "rgba(255,255,255,0.09)",
-  ink: "#f4efe9",
-  dim: "#a89f97",
-  faint: "#6f675f",
-  line: "rgba(255,255,255,0.09)",
-  line2: "rgba(255,255,255,0.16)",
-  ember: "#e8623d",
-  emberDark: "#d4502c",
-  sage: "#7d9183",
-  display: '"Bricolage Grotesque", system-ui, sans-serif',
-  font: '"Plus Jakarta Sans", system-ui, sans-serif',
-};
+// Warm graphite + ember + dusty sage. Smoke, not glow. Shared with the lobby.
+import { DK } from "../theme/theme";
 
 const EASE = [0.23, 1, 0.32, 1] as const;
 

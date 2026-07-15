@@ -40,11 +40,15 @@ const { mockSessionInstance, mockRefinerInstance } = vi.hoisted(() => ({
 }));
 
 vi.mock('../src/transcription/deepgram-session.js', () => ({
-  DeepgramMeetingSession: vi.fn(() => mockSessionInstance),
+  DeepgramMeetingSession: vi.fn(function () {
+    return mockSessionInstance;
+  }),
 }));
 
 vi.mock('../src/transcription/groq-refiner.js', () => ({
-  GroqTranscriptRefiner: vi.fn(() => mockRefinerInstance),
+  GroqTranscriptRefiner: vi.fn(function () {
+    return mockRefinerInstance;
+  }),
 }));
 
 // Import the module under test AFTER all vi.mock() declarations.

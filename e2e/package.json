@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "description": "A-Meet end-to-end test harness (Playwright)",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "test": "playwright test",
     "test:sfu": "playwright test --config playwright.sfu.config.js",
@@ -12,6 +15,7 @@
     "report": "playwright show-report"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.49.1",
     "jsonwebtoken": "^9.0.3",
     "mongodb-memory-server": "^11.2.0"

@@ -103,17 +103,22 @@ npm --prefix server install
 
 ### 2. Configure environment
 
-Two env files, with distinct jobs:
+Three env files, with distinct jobs:
 
 ```bash
 cp .env.example .env               # repo root — local Docker Mongo credentials (read by Compose)
 cp server/.env.example server/.env # server app config (read by the Node server)
+cp client/.env.example client/.env # client app config (Vite reads VITE_SERVER_URL for Socket.io)
 ```
 
 `docker compose` reads the **repo-root `.env`** for the Mongo container credentials, so those
 live there — not in `server/.env`. Keep the two in sync: the username/password in the root
 `.env` must match the ones embedded in the server's `MONGO_URI` (both default to
 `admin` / `change-me`).
+
+The **`client/.env`** supplies `VITE_SERVER_URL` — the origin the browser opens the Socket.io
+connection to. There is no built-in fallback, so on a fresh clone signaling silently fails to
+connect until this file exists; the default points at the local server (`http://localhost:5000`).
 
 Repo-root `.env` (local Docker Mongo only — unused in production):
 
@@ -235,7 +240,7 @@ A-Meet/
 │   └── src/
 │       ├── routes/          # auth, meetings, rooms
 │       ├── socket/          # room events, SFU signalling
-│       ├── models/          # User, Meeting
+│       ├── models/          # User, Room
 │       └── middleware/      # JWT cookie auth
 ├── docker-compose.yml       # LOCAL DEV: MongoDB + observability stack
 ├── docker-compose.prod.yml  # PRODUCTION: server only (DB is Atlas via MONGO_URI)
@@ -301,7 +306,7 @@ git clone ... && cd A-Meet   # the node keeps a checkout for config (compose fil
 
 # Runtime secrets are loaded from SSM by the container entrypoint. No production
 # server/.env is required or copied into the image.
-# Open UDP ports 10000–59999 in the security group (mediasoup RTP range), plus 5000 (API).
+# Open UDP ports 40000–40100 in the security group (mediasoup RTP range), plus 5000 (API).
 
 # Pull the published image tag and start (this is what CI automates on each deploy):
 export SERVER_IMAGE=<account>.dkr.ecr.<region>.amazonaws.com/a-meet-server:<git-sha>
@@ -332,7 +337,7 @@ cleanly, so merges to `main` stay green. To enable it:
 |---|---|
 | `AWS_REGION` | ECR / deploy region, e.g. `ap-south-1` |
 | `ECR_REPOSITORY` | ECR repo name, e.g. `a-meet-server` (must exist) |
-| `HEALTH_URL` | optional; defaults to `https://api.ameet.raja-dev.me/api/health` |
+| `HEALTH_URL` | optional; defaults to `https://api.ameet.raja-dev.me/api/health/ready` |
 
 **Repository secrets:**
 
@@ -439,6 +444,79 @@ Staging smoke:
    then `ALARM`, and confirm a new notification.
 5. Confirm local `docker-compose.yml` still runs Loki/Grafana/Promtail without AWS settings.
 
+### TURN over TLS (5349)
+
+coturn exposes UDP and TCP on `3478` plus TURN-over-TLS on `5349`. The TLS
+certificate is for the public TURN hostname (for example, `turn.example.com`), which must
+have an A record pointing to the node's Elastic IP before issuance. The certificate is
+obtained with **HTTP-01**, not DNS-01: the existing Nginx configuration already owns port
+80, so `deploy/nginx.conf` explicitly lists both the API and TURN hostnames and serves only
+`/.well-known/acme-challenge/` from
+`/var/www/certbot` and redirects every other HTTP request to HTTPS. This avoids DNS
+provider credentials while retaining the current API redirect.
+
+Before provisioning, ensure the EC2 security group allows TCP `80` (ACME), UDP and TCP
+`3478`, TCP `5349`, and UDP `49160-49200` (the configured relay range). Copy the coturn
+template into the ignored host-local config and replace its placeholders, including the
+public/private `external-ip` mapping and TURN secret:
+
+```bash
+cd ~/ameet
+cp coturn/turnserver.conf.example coturn/turnserver.conf
+# edit coturn/turnserver.conf: YOUR_DOMAIN, YOUR_PUBLIC_IP, TURN_SECRET_PLACEHOLDER
+
+# Apply deploy/nginx.conf with API_DOMAIN and TURN_DOMAIN replaced, then make its ACME webroot available.
+sudo install -d -m 0755 /var/www/certbot
+sudo nginx -t && sudo systemctl reload nginx
+
+# Installs certbot if needed, obtains/reuses the certificate, copies the certificate and
+# private key to coturn/certs/, starts coturn, and enables the standard certbot.timer.
+sudo env TURN_DOMAIN=turn.example.com TURN_EMAIL=ops@example.com \
+  A_MEET_DIR="$HOME/ameet" ./deploy/setup-coturn-tls.sh setup
+```
+
+`setup-coturn-tls.sh` first writes and fetches a temporary public HTTP-01 challenge, so it
+stops before Certbot if TURN DNS, Nginx, or TCP port 80 is not ready. It is idempotent: Certbot
+retains a valid certificate, then the script copies it into the bind-mounted `coturn/certs/`
+directory and recreates only the coturn container. It also installs a Certbot deploy hook at
+`/etc/letsencrypt/renewal-hooks/deploy/a-meet-coturn`; the normal `certbot.timer` invokes
+that hook only after a successful renewal of the TURN certificate, so coturn restarts with the
+new keypair. EC2 auto-recovery restarts the same EBS-backed instance but does not run this
+provisioning script; the operator must re-run `setup-coturn-tls.sh setup` after recovery if
+the TURN service needs to be restored. The certificate files and generated coturn config remain
+host-local and are gitignored.
+
+Verify the listener certificate itself before testing media:
+
+```bash
+openssl s_client -connect turn.example.com:5349 -servername turn.example.com </dev/null
+sudo systemctl status certbot.timer
+docker compose -f docker-compose.coturn.yml logs --tail=100 coturn
+```
+
+#### Force-relay verification: UDP, TCP, and TLS
+
+Build a test client with the real `VITE_TURN_DOMAIN`, `VITE_TURN_USERNAME`, and
+`VITE_TURN_SECRET`, then set `VITE_FORCE_RELAY=1`. For each row below, rebuild/redeploy the
+client with the listed `VITE_TURN_TRANSPORT`, join the same meeting from two independent
+networks, and confirm two-way audio and video. `VITE_FORCE_RELAY=1` makes the call fail
+instead of silently falling back to direct SFU media; `VITE_TURN_TRANSPORT` narrows the
+candidate list to prove the named path. Omit `VITE_TURN_TRANSPORT` in normal production
+builds so browsers receive all three fallback URIs.
+
+| Path | Build-time environment | Expected URI |
+|---|---|---|
+| UDP | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=udp` | `turn:turn.example.com:3478?transport=udp` |
+| TCP | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=tcp` | `turn:turn.example.com:3478?transport=tcp` |
+| TLS | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=tls` | `turns:turn.example.com:5349?transport=tcp` |
+
+For each successful call, browser `chrome://webrtc-internals` should show the selected ICE
+candidate pair using a `relay` candidate; coturn logs should show an allocation for that test.
+Clear both verification variables and rebuild before returning the client to normal operation.
+TLS TURN here uses TCP `5349`; it does not use port 443 and therefore is not a fallback for
+networks that permit only outbound 443. Serving TURN on 443 requires a separate listener or
+endpoint and is an out-of-scope follow-up.
+
 ### Host identity & automatic recovery
 
 The production node has a **stable identity** so it survives host failure without manual
@@ -475,9 +553,9 @@ the instance isn't `ebs`-backed. That makes it safe to use as an automated post-
 
 **Operator validation after a recovery event:**
 1. `deploy/aws-recovery.sh verify` — EIP still associated to the instance; alarm back to `OK`; root device `ebs`.
-2. **API health:** `curl -fsS https://api.<domain>/api/health` returns `{"ok":true}` (the deploy health check uses the same endpoint).
+2. **API health:** `curl -fsS https://api.<domain>/api/health/ready` returns `{"ok":true}` (the deploy health check uses the same readiness endpoint).
 3. **Container up:** on the box, `docker compose -f docker-compose.prod.yml ps` shows the server running, and `logs -f` shows mediasoup workers started.
-4. **Media connectivity:** join a meeting from two devices and confirm audio/video flows — i.e. `MEDIASOUP_ANNOUNCED_IP` still equals the EIP and the security-group UDP RTC range (10000–59999) is open.
+4. **Media connectivity:** join a meeting from two devices and confirm audio/video flows — i.e. `MEDIASOUP_ANNOUNCED_IP` still equals the EIP and the security-group UDP RTC range (40000–40100) is open.
 
 For HTTPS (required for camera/mic on non-localhost), put Nginx in front with a Let's Encrypt cert and proxy to `localhost:5000`.
 

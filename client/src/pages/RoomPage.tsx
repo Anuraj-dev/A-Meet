@@ -30,6 +30,7 @@ import RtcStatsOverlay from '../components/RtcStatsOverlay';
 import ControlBar from '../components/ControlBar';
 import ChatPanel from '../components/ChatPanel';
 import PeoplePanel from '../components/PeoplePanel';
+import MediaReconnectingAlert from '../components/MediaReconnectingAlert';
 import TranscriptPanel from '../components/TranscriptPanel';
 import LiveCaptions from '../components/LiveCaptions';
 import CallNotifications from '../components/CallNotifications';
@@ -122,6 +123,7 @@ export default function RoomPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   // Host asked us to unmute — surfaced as a one-tap prompt (never forced).
   const [unmuteRequestFrom, setUnmuteRequestFrom] = useState<string | null>(null);
+  const [forcedMuteCount, setForcedMuteCount] = useState(0);
   const [reactionAnchor, setReactionAnchor] = useState<HTMLElement | null>(null);
   const [outputVolume, setOutputVolume] = useState(1);
   const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({});
@@ -224,7 +226,7 @@ export default function RoomPage() {
     isScreenSharing, localScreenStream, localScreenSurface, shareScreen, stopScreenShare,
     micGain, setMicGain,
     handRaised, toggleHand,
-    activeSpeaker, socketConnected, permissionDenied, rtcStats,
+    activeSpeaker, socketConnected, mediaRecovery, retryMedia, permissionDenied, rtcStats,
   } = useMediasoup(roomId, devices);
 
   const sendTranscriptAudio = useCallback((audio: ArrayBuffer) => {
@@ -461,6 +463,7 @@ export default function RoomPage() {
   // socket effect so they can close over fresh `localAudioOn` / `toggleAudio`.
   useEffect(() => {
     const onForceMuted = () => {
+      setForcedMuteCount((count) => count + 1);
       if (localAudioOn) { playSound('toggleOff'); toggleAudio(); }
       pushNote({ kind: 'event', variant: 'info', text: 'You were muted by the meeting admin' });
     };
@@ -1014,6 +1017,7 @@ export default function RoomPage() {
         {pageCount > 1 && (
           <>
             <IconButton
+              aria-label="Previous page"
               onClick={() => setGridPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
               sx={{
@@ -1025,6 +1029,7 @@ export default function RoomPage() {
               <NavigateBeforeIcon />
             </IconButton>
             <IconButton
+              aria-label="Next page"
               onClick={() => setGridPage((p) => Math.min(pageCount - 1, p + 1))}
               disabled={page >= pageCount - 1}
               sx={{
@@ -1219,11 +1224,44 @@ export default function RoomPage() {
       <RtcStatsOverlay stats={rtcStats} />
 
       {/* Floating status banners */}
-      {(!socketConnected || permissionDenied) && (
+      {(() => {
+        // Media recovery only surfaces while the socket itself is up: a dropped
+        // socket already shows its own "Connection lost" banner below, and the
+        // media ladder pauses until it reconnects, so showing both would be noise.
+        const mediaReconnecting = socketConnected && mediaRecovery.status === 'reconnecting';
+        const mediaExhausted = socketConnected && mediaRecovery.status === 'exhausted';
+        const showBanner = !socketConnected || mediaReconnecting || mediaExhausted || permissionDenied;
+        if (!showBanner) return null;
+        return (
         <Box sx={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 1400, width: 'min(92%, 520px)' }}>
           {!socketConnected && (
             <Alert severity="warning" variant="filled" sx={{ borderRadius: 2, mb: 1 }}>
               Connection lost — reconnecting…
+            </Alert>
+          )}
+          {mediaReconnecting && (
+            <MediaReconnectingAlert />
+          )}
+          {mediaExhausted && (
+            <Alert
+              severity="error"
+              variant="filled"
+              sx={{ borderRadius: 2, mb: 1, alignItems: 'center' }}
+              action={
+                <Button
+                  size="small"
+                  onClick={retryMedia}
+                  sx={{
+                    color: '#fff', borderColor: 'rgba(255,255,255,0.6)', fontWeight: 700,
+                    '&:hover': { borderColor: '#fff', bgcolor: 'ember.soft' },
+                  }}
+                  variant="outlined"
+                >
+                  Retry
+                </Button>
+              }
+            >
+              Couldn’t connect your media. Check your connection and retry.
             </Alert>
           )}
           {permissionDenied && (
@@ -1232,7 +1270,8 @@ export default function RoomPage() {
             </Alert>
           )}
         </Box>
-      )}
+        );
+      })()}
 
       {/* Stage + chat */}
       <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -1287,7 +1326,7 @@ export default function RoomPage() {
                 {roomId}
               </Typography>
               <Tooltip title="Copy joining link">
-                <IconButton size="small" onClick={handleCopyLink} sx={{ color: 'text.secondary' }}>
+                <IconButton aria-label="Copy joining link" size="small" onClick={handleCopyLink} sx={{ color: 'text.secondary' }}>
                   <ContentCopyIcon sx={{ fontSize: 16 }} />
                 </IconButton>
               </Tooltip>
@@ -1370,6 +1409,7 @@ export default function RoomPage() {
           >
             <ControlBar
               localAudioOn={localAudioOn} hasMic={hasMic} onToggleAudio={handleToggleAudio}
+              forcedMuteCount={forcedMuteCount}
               localVideoOn={localVideoOn} onToggleVideo={handleToggleVideo}
               isScreenSharing={isScreenSharing} onToggleShare={handleToggleShare}
               handRaised={handRaised} onToggleHand={handleToggleHand}

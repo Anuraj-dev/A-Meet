@@ -9,9 +9,20 @@ on:
   pull_request:
 
 jobs:
+  # SFU-off feature + smoke suite, split across parallel shards to cut the
+  # wall-clock of the required E2E gate (#37). Playwright distributes whole spec
+  # files across the shards; every shard must pass for the gate to be green, so
+  # this stays exactly as strict as the single-job run — just faster. Three
+  # shards is sized to the current ~8 spec files (a11y/chat/presence/host-mod/
+  # smoke &c.); revisit if the suite grows a lot.
   e2e:
-    name: Playwright smoke
+    name: Playwright E2E (shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shardIndex: [1, 2, 3]
+        shardTotal: [3]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,12 +46,53 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: e2e
 
-      - name: Run E2E smoke
-        run: npx playwright test
+      - name: Run E2E shard
+        run: npx playwright test --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
         working-directory: e2e
 
-      - name: Upload report on failure
-        if: failure()
+      # Each shard emits a blob report; keep it (even on failure) so the merge
+      # job below can stitch a single HTML report across all shards. Cancelled
+      # runs produce nothing worth keeping.
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-blob-report-${{ matrix.shardIndex }}
+          path: e2e/blob-report/
+          retention-days: 1
+
+  # Merge the per-shard blob reports into one browsable HTML report. Runs after
+  # every shard regardless of pass/fail so a failing run still gets a unified,
+  # downloadable report. This is a reporting convenience, not a gate — the E2E
+  # gate is the shard jobs themselves.
+  e2e-merge-reports:
+    name: Merge E2E reports
+    if: ${{ !cancelled() }}
+    needs: [e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspace deps
+        run: npm ci --ignore-scripts
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v4
+        with:
+          path: e2e/all-blob-reports
+          pattern: e2e-blob-report-*
+          merge-multiple: true
+
+      - name: Merge blobs into HTML report
+        run: npx playwright merge-reports --reporter html ./all-blob-reports
+        working-directory: e2e
+
+      - name: Upload merged HTML report
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report

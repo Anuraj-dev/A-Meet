@@ -1,5 +1,10 @@
-import { GetParametersCommand, SSMClient } from '@aws-sdk/client-ssm';
-import { formatAlarmMessage, parseSnsAlarm } from './formatter.mjs';
+import {
+  GetParameterCommand,
+  GetParametersCommand,
+  PutParameterCommand,
+  SSMClient,
+} from '@aws-sdk/client-ssm';
+import { decideNotification, parseSnsAlarm } from './formatter.mjs';
 
 const ssm = new SSMClient({ region: process.env.SSM_REGION });
 
@@ -24,15 +29,62 @@ async function readTelegramConfig() {
   return { token, chatId };
 }
 
+// The CloudWatch SNS payload only carries the NEW state's StateChangeTime, so
+// the ALARM timestamp is persisted in SSM and read back when the OK arrives to
+// measure how long the alarm was in ALARM (flap suppression window).
+function alarmStateParameterName(environment, alarmName) {
+  return `/a-meet/${environment}/alarm-state/${alarmName}`;
+}
+
+// Alarm-state persistence is best-effort: paging must never depend on SSM
+// being writable/readable. A failed write only means the eventual OK can't be
+// collapsed; a failed read only means the OK is delivered as the full block.
+async function storeAlarmTimestamp(environment, alarmName, stateChangeTime) {
+  if (!stateChangeTime) return;
+  try {
+    await ssm.send(new PutParameterCommand({
+      Name: alarmStateParameterName(environment, alarmName),
+      Value: stateChangeTime,
+      Type: 'String',
+      Overwrite: true,
+    }));
+  } catch (error) {
+    console.warn(`Failed to store alarm-state parameter: ${error?.message ?? error}`);
+  }
+}
+
+async function readAlarmTimestamp(environment, alarmName) {
+  try {
+    const response = await ssm.send(new GetParameterCommand({
+      Name: alarmStateParameterName(environment, alarmName),
+    }));
+    return response.Parameter?.Value ?? null;
+  } catch (error) {
+    if (error?.name !== 'ParameterNotFound') {
+      console.warn(`Failed to read alarm-state parameter: ${error?.message ?? error}`);
+    }
+    return null;
+  }
+}
+
 export async function handler(event) {
   const alarm = parseSnsAlarm(event, process.env.ENVIRONMENT ?? 'unknown');
+
+  let previousStateChangeTime = null;
+  if (alarm.state === 'ALARM') {
+    await storeAlarmTimestamp(alarm.environment, alarm.alarmName, alarm.stateChangeTime);
+  } else if (alarm.state === 'OK') {
+    previousStateChangeTime = await readAlarmTimestamp(alarm.environment, alarm.alarmName);
+  }
+
+  const { text } = decideNotification(alarm, { previousStateChangeTime });
   const { token, chatId } = await readTelegramConfig();
   const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: formatAlarmMessage(alarm),
+      text,
     }),
   });
   if (!response.ok) throw new Error(`Telegram API failed with ${response.status}`);

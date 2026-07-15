@@ -1,12 +1,11 @@
-import js from '@eslint/js';
-import tseslint from 'typescript-eslint';
 import { defineConfig, globalIgnores } from 'eslint/config';
+import { baseEslintConfigs } from '../eslint.config.base.mjs';
 
 export default defineConfig([
   globalIgnores(['node_modules', 'dist']),
   {
     files: ['**/*.ts'],
-    extends: [js.configs.recommended, tseslint.configs.recommended],
+    extends: [baseEslintConfigs.javascript, baseEslintConfigs.typescript],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

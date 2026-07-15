@@ -6,7 +6,10 @@
 // Error convention: every ack returns either the result or `{ error: msg }`;
 // the client's request() helper rejects on `error`.
 
-import { webRtcTransportOptions } from '../sfu/config.js';
+import {
+  webRtcTransportOptions, MAX_TRANSPORTS_PER_PEER, MAX_PRODUCERS_PER_PEER,
+  MAX_CONSUMERS_PER_PEER,
+} from '../sfu/config.js';
 import {
   getOrCreateRoom, getRoom, addPeer, getPeer,
   listOtherProducers, removePeer, closeRoomIfEmpty,
@@ -15,6 +18,8 @@ import { Room } from '../models/Room.js';
 import { isRoomAdmin } from '../rooms/room-admin.js';
 import { getUserRoom } from './room-manager.js';
 import { logger } from '../config/logger.js';
+import { socketRateLimiter } from './rate-limit.js';
+import { sfuSchemas, validateSfuPayload } from '../validation/sfu.schema.js';
 import type { Server, Socket } from 'socket.io';
 import type { SfuHandRaiseUpdatePayload } from '@a-meet/contracts';
 
@@ -24,12 +29,34 @@ import type { SfuHandRaiseUpdatePayload } from '@a-meet/contracts';
 const socketRoom = new Map<string, string>();
 
 export function registerSfuHandlers(io: Server, socket: Socket) {
+  // Register a rate-limited event handler: each invocation spends a token from
+  // the named per-socket bucket before the handler runs. `signaling` covers the
+  // high-frequency SFU handshake; `chat` covers reactions/raise-hand. Host
+  // moderation + teardown events stay unguarded (host-gated and low-frequency).
+  const on = (event: string, bucket: 'signaling' | 'chat', handler: (...args: any[]) => void): void => {
+    socket.on(event as never, socketRateLimiter.guard(socket, bucket, event, handler) as never);
+  };
+
   // 1) Entry point: lazily create the room's Router, register this peer, and
   //    return the Router's rtpCapabilities so the client can load its Device.
   //    Also lazily creates the AudioLevelObserver on first peer join.
-  socket.on('sfu-get-rtp-capabilities', async ({ roomId } = {}, callback) => {
+  on('sfu-get-rtp-capabilities', 'signaling', async (payload = {}, callback) => {
     try {
-      if (!roomId || typeof roomId !== 'string') throw new Error('roomId required');
+      // Validate the room code against the SAME format the REST layer enforces,
+      // then confirm the room exists and is active in the DB BEFORE mediasoup
+      // lazily mints a Router for it. Without this, any authenticated peer could
+      // spin up unbounded Routers (worker resource exhaustion / DoS) for arbitrary
+      // ids the HTTP layer would reject outright.
+      const { error, value } = validateSfuPayload<{ roomId: string }>(
+        sfuSchemas['sfu-get-rtp-capabilities'], payload,
+      );
+      if (error) throw new Error(error);
+      const roomId = value.roomId;
+
+      const roomDoc = await Room.findOne({ roomId });
+      if (!roomDoc) throw new Error('Room not found');
+      if (roomDoc.active === false) throw new Error('Meeting has ended');
+
       const room = await getOrCreateRoom(roomId);
       addPeer(roomId, socket.id, socket.user);
       socketRoom.set(socket.id, roomId);
@@ -62,19 +89,34 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
 
   // 2) Create a send or recv WebRtcTransport for this peer. We return only the
   //    client-needed bits; the server keeps the Transport object.
-  socket.on('sfu-create-transport', async ({ direction } = {}, callback) => {
+  on('sfu-create-transport', 'signaling', async (payload = {}, callback) => {
     try {
+      const { error, value } = validateSfuPayload<{ direction: 'send' | 'recv' }>(
+        sfuSchemas['sfu-create-transport'], payload,
+      );
+      if (error) throw new Error(error);
+      const { direction } = value;
+
       const roomId = socketRoom.get(socket.id);
       const room = getRoom(roomId);
       const peer = getPeer(roomId, socket.id);
       if (!room || !peer) throw new Error('not in room');
-      if (direction !== 'send' && direction !== 'recv') throw new Error('bad direction');
+      // Per-peer transport cap (DoS guard): stop a peer spamming create-transport
+      // to exhaust the Worker's bounded RTC port range.
+      if (peer.transports.size >= MAX_TRANSPORTS_PER_PEER) throw new Error('too many transports');
 
       const transport = await room.router.createWebRtcTransport({
         ...webRtcTransportOptions,
         appData: { direction },
       });
       peer.transports.set(transport.id, transport);
+
+      // Release the transport's cap slot the moment it dies. Without this a peer
+      // whose transport fails (ICE/DTLS) and is recreated keeps burning slots — a
+      // few failures brick the peer at MAX_TRANSPORTS_PER_PEER until disconnect.
+      // We drop it on router teardown and on terminal ICE/DTLS states (below).
+      const releaseTransport = () => { peer.transports.delete(transport.id); };
+      transport.on('routerclose', releaseTransport);
 
       // Diagnostics: the selected ICE tuple reveals the negotiated media path
       // (direct UDP / TCP / relay) — the key signal when peers can't see or hear
@@ -97,11 +139,15 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
       transport.on('icestatechange', (iceState: string) => {
         const level = (iceState === 'disconnected' || iceState === 'failed') ? 'warn' : 'debug';
         logger[level]({ event: 'ice.stateChange', direction, socketId: socket.id, iceState }, `ICE ${iceState}`);
+        // A closed/failed ICE state is terminal — free the cap slot.
+        if (iceState === 'closed' || iceState === 'failed') releaseTransport();
       });
       transport.on('dtlsstatechange', (dtlsState) => {
         // 'closed' is normal teardown on disconnect — only 'failed' is a real problem
         const level = dtlsState === 'failed' ? 'warn' : 'debug';
         logger[level]({ event: 'dtls.stateChange', direction, socketId: socket.id, dtlsState }, `DTLS ${dtlsState}`);
+        // Terminal DTLS state — free the cap slot so a recreated transport fits.
+        if (dtlsState === 'closed' || dtlsState === 'failed') releaseTransport();
       });
 
       callback({
@@ -118,8 +164,14 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
 
   // 3) Complete the DTLS handshake using the client's dtlsParameters. Fires
   //    once per transport, the first time it's used.
-  socket.on('sfu-connect-transport', async ({ transportId, dtlsParameters } = {}, callback) => {
+  on('sfu-connect-transport', 'signaling', async (payload = {}, callback) => {
     try {
+      const { error, value } = validateSfuPayload<{ transportId: string; dtlsParameters: any }>(
+        sfuSchemas['sfu-connect-transport'], payload,
+      );
+      if (error) throw new Error(error);
+      const { transportId, dtlsParameters } = value;
+
       const peer = getPeer(socketRoom.get(socket.id), socket.id);
       const transport = peer?.transports.get(transportId);
       if (!transport) throw new Error('transport not found');
@@ -132,13 +184,22 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
 
   // 4) The client produces a local track on its send transport. We create the
   //    server-side Producer, then tell everyone else to consume it.
-  socket.on('sfu-produce', async ({ transportId, kind, rtpParameters, appData } = {}, callback) => {
+  on('sfu-produce', 'signaling', async (payload = {}, callback) => {
     try {
+      const { error, value } = validateSfuPayload<{
+        transportId: string; kind: 'audio' | 'video'; rtpParameters: any; appData: any;
+      }>(sfuSchemas['sfu-produce'], payload);
+      if (error) throw new Error(error);
+      const { transportId, kind, rtpParameters, appData } = value;
+
       const roomId = socketRoom.get(socket.id);
       const room = getRoom(roomId);
       const peer = getPeer(roomId, socket.id);
       const transport = peer?.transports.get(transportId);
       if (!peer || !transport) throw new Error('send transport not found');
+      // Per-peer producer cap (DoS guard): a legitimate client tops out at four
+      // tracks (mic, camera, screen video, screen audio); reject beyond the cap.
+      if (peer.producers.size >= MAX_PRODUCERS_PER_PEER) throw new Error('too many producers');
 
       const producer = await transport.produce({ kind, rtpParameters, appData });
       peer.producers.set(producer.id, producer);
@@ -151,10 +212,9 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
       // Register audio producers with the level observer (screen-share audio excluded).
       if (kind === 'audio' && appData?.source !== 'screen' && room?.audioLevelObserver) {
         room.audioProducerToSocket?.set(producer.id, socket.id);
-        // NOTE: 'close' is not a Producer event in mediasoup (transportclose is);
-        // this listener is effectively dead but preserved as-is during the TS
-        // migration to avoid a behavior change. Cast keeps the typed emitter happy.
-        (producer.on as any)('close', () => room.audioProducerToSocket?.delete(producer.id));
+        // The observer entry is cleaned up on teardown: `transportclose` (above)
+        // deletes the producer, and the AudioLevelObserver drops closed producers
+        // itself. (mediasoup Producers emit `transportclose`, never a bare `close`.)
         try { await room.audioLevelObserver.addProducer({ producerId: producer.id }); } catch { /* ok */ }
       }
 
@@ -176,8 +236,14 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   // 5) The client consumes someone else's producer on its recv transport.
   //    Created PAUSED — the client resumes (step 6) once the track is wired up,
   //    so the first keyframe isn't lost into a not-yet-ready element.
-  socket.on('sfu-consume', async ({ transportId, producerId, rtpCapabilities } = {}, callback) => {
+  on('sfu-consume', 'signaling', async (payload = {}, callback) => {
     try {
+      const { error, value } = validateSfuPayload<{
+        transportId: string; producerId: string; rtpCapabilities: any;
+      }>(sfuSchemas['sfu-consume'], payload);
+      if (error) throw new Error(error);
+      const { transportId, producerId, rtpCapabilities } = value;
+
       const roomId = socketRoom.get(socket.id);
       const room = getRoom(roomId);
       const peer = getPeer(roomId, socket.id);
@@ -185,6 +251,21 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
       if (!room.router.canConsume({ producerId, rtpCapabilities })) {
         throw new Error('cannot consume this producer');
       }
+      // Duplicate-consume guard: a well-behaved client consumes each producer once
+      // (it de-dupes locally), so a second consume of a producer we already carry a
+      // live consumer for is spurious — reject it instead of letting `peer.consumers`
+      // grow without bound.
+      for (const existing of peer.consumers.values()) {
+        // Only a LIVE consumer blocks: a stale closed entry (client tore down and
+        // re-subscribed) must not deny a legitimate re-consume.
+        if (existing.producerId === producerId && !existing.closed) {
+          throw new Error('already consuming this producer');
+        }
+      }
+      // Per-peer consumer cap: an intentional absolute DoS backstop (sized from
+      // the soft room ceiling in sfu/config.ts, far above realistic use), not a
+      // limit legitimate calls should ever reach.
+      if (peer.consumers.size >= MAX_CONSUMERS_PER_PEER) throw new Error('too many consumers');
       const transport = peer.transports.get(transportId);
       if (!transport) throw new Error('recv transport not found');
 
@@ -219,8 +300,14 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   });
 
   // 6) Resume a consumer once the client has attached its track.
-  socket.on('sfu-resume-consumer', async ({ consumerId } = {}, callback) => {
+  on('sfu-resume-consumer', 'signaling', async (payload = {}, callback) => {
     try {
+      const { error, value } = validateSfuPayload<{ consumerId: string }>(
+        sfuSchemas['sfu-resume-consumer'], payload,
+      );
+      if (error) throw new Error(error);
+      const { consumerId } = value;
+
       const peer = getPeer(socketRoom.get(socket.id), socket.id);
       const consumer = peer?.consumers.get(consumerId);
       if (!consumer) throw new Error('consumer not found');
@@ -232,14 +319,22 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   });
 
   // 7) A newcomer asks for producers already present so it can consume them.
-  socket.on('sfu-get-producers', (_payload, callback) => {
+  on('sfu-get-producers', 'signaling', (payload, callback) => {
+    const { error } = validateSfuPayload(sfuSchemas['sfu-get-producers'], payload);
+    if (error) { callback({ error }); return; }
     callback(listOtherProducers(socketRoom.get(socket.id), socket.id));
   });
 
   // 8) Mic-mute / camera-off = pause the producer (track stays, RTP stops).
   //    We broadcast so others can show a muted/placeholder tile.
-  socket.on('sfu-pause-producer', async ({ producerId } = {}, callback) => {
+  on('sfu-pause-producer', 'signaling', async (payload = {}, callback) => {
     try {
+      const { error, value } = validateSfuPayload<{ producerId: string }>(
+        sfuSchemas['sfu-pause-producer'], payload,
+      );
+      if (error) throw new Error(error);
+      const { producerId } = value;
+
       const roomId = socketRoom.get(socket.id);
       const producer = getPeer(roomId, socket.id)?.producers.get(producerId);
       if (!producer) throw new Error('producer not found');
@@ -252,8 +347,14 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
     }
   });
 
-  socket.on('sfu-resume-producer', async ({ producerId } = {}, callback) => {
+  on('sfu-resume-producer', 'signaling', async (payload = {}, callback) => {
     try {
+      const { error, value } = validateSfuPayload<{ producerId: string }>(
+        sfuSchemas['sfu-resume-producer'], payload,
+      );
+      if (error) throw new Error(error);
+      const { producerId } = value;
+
       const roomId = socketRoom.get(socket.id);
       const producer = getPeer(roomId, socket.id)?.producers.get(producerId);
       if (!producer) throw new Error('producer not found');
@@ -269,8 +370,14 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   // 9) Close a producer outright (used for screen-share stop). Closing the
   //    server-side Producer cascades `producerclose` to every consumer →
   //    each client receives `sfu-consumer-closed` and drops the tile.
-  socket.on('sfu-close-producer', async ({ producerId } = {}, callback) => {
+  on('sfu-close-producer', 'signaling', async (payload = {}, callback) => {
     try {
+      const { error, value } = validateSfuPayload<{ producerId: string }>(
+        sfuSchemas['sfu-close-producer'], payload,
+      );
+      if (error) throw new Error(error);
+      const { producerId } = value;
+
       const roomId = socketRoom.get(socket.id);
       const peer = getPeer(roomId, socket.id);
       const producer = peer?.producers.get(producerId);
@@ -284,11 +391,15 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   });
 
   // 10) Raise hand: toggle for this peer; broadcast state to the room.
-  socket.on('sfu-raise-hand', ({ raised } = {}, callback) => {
+  on('sfu-raise-hand', 'chat', (input = {}, callback) => {
+    const { error, value } = validateSfuPayload<{ raised: boolean }>(
+      sfuSchemas['sfu-raise-hand'], input,
+    );
+    if (error) { callback?.({ error }); return; }
     const roomId = socketRoom.get(socket.id);
     const peer = getPeer(roomId, socket.id);
     if (!peer) return;
-    peer.handRaised = !!raised;
+    peer.handRaised = value.raised;
     const payload: SfuHandRaiseUpdatePayload = { socketId: socket.id, raised: peer.handRaised };
     socket.to(roomId!).emit('sfu-hand-raise-update', payload);
     callback?.({ ok: true });
@@ -296,14 +407,18 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
 
   // 11) Emoji reaction: ephemeral relay only, no persistence. Use io.in so the
   //     sender also receives the event (for local feedback).
-  socket.on('sfu-reaction', ({ emoji } = {}) => {
+  on('sfu-reaction', 'chat', (payload = {}) => {
+    const { error, value } = validateSfuPayload<{ emoji: string }>(
+      sfuSchemas['sfu-reaction'], payload,
+    );
+    if (error) return;
     // A reaction is a pure room broadcast, not a media operation. Resolve the
     // room from canonical presence (room-manager) with the SFU map as a fast
     // path, so a reaction still relays before the SFU handshake completes — and
     // on the SFU-off E2E harness, where `socketRoom` is never populated.
     const roomId = socketRoom.get(socket.id) ?? getUserRoom(socket.id);
-    if (!roomId || typeof emoji !== 'string') return;
-    io.in(roomId).emit('sfu-reaction', { emoji, socketId: socket.id });
+    if (!roomId) return;
+    io.in(roomId).emit('sfu-reaction', { emoji: value.emoji, socketId: socket.id });
   });
 
   // 13) Host ends the meeting for everyone: verify the caller is the room host,
@@ -363,9 +478,14 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   }
 
   // 14) Host mutes one participant (enforced).
-  socket.on('sfu-host-mute', async ({ socketId: targetSocketId } = {}) => {
+  socket.on('sfu-host-mute', async (payload = {}) => {
+    const { error, value } = validateSfuPayload<{ socketId: string }>(
+      sfuSchemas['sfu-host-mute'], payload,
+    );
+    if (error) return;
+    const targetSocketId = value.socketId;
     const roomId = await callerIsHost();
-    if (!roomId || !targetSocketId || targetSocketId === socket.id) return;
+    if (!roomId || targetSocketId === socket.id) return;
     try {
       const muted = await pauseMic(roomId, targetSocketId);
       if (muted) logger.info({ event: 'host.mute', roomId, by: socket.id, target: targetSocketId }, 'host muted peer');
@@ -386,9 +506,14 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   });
 
   // 16) Host asks one participant to unmute (a prompt; never forced).
-  socket.on('sfu-request-unmute', async ({ socketId: targetSocketId } = {}) => {
+  socket.on('sfu-request-unmute', async (payload = {}) => {
+    const { error, value } = validateSfuPayload<{ socketId: string }>(
+      sfuSchemas['sfu-request-unmute'], payload,
+    );
+    if (error) return;
+    const targetSocketId = value.socketId;
     const roomId = await callerIsHost();
-    if (!roomId || !targetSocketId) return;
+    if (!roomId) return;
     io.to(targetSocketId).emit('sfu-unmute-request', { by: socket.user?.name ?? 'The host' });
   });
 
@@ -402,9 +527,14 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   // 18) Host removes a participant from the call. Notify them, then disconnect
   //     their socket — the `disconnect` handler below broadcasts the leave and
   //     frees the room if it empties.
-  socket.on('sfu-host-remove', async ({ socketId: targetSocketId } = {}) => {
+  socket.on('sfu-host-remove', async (payload = {}) => {
+    const { error, value } = validateSfuPayload<{ socketId: string }>(
+      sfuSchemas['sfu-host-remove'], payload,
+    );
+    if (error) return;
+    const targetSocketId = value.socketId;
     const roomId = await callerIsHost();
-    if (!roomId || !targetSocketId || targetSocketId === socket.id) return;
+    if (!roomId || targetSocketId === socket.id) return;
     // The target must be in the host's OWN room. This emits straight at a socket
     // id (unlike mute, which is scoped by getPeer(roomId, …)), so without this a
     // host of one room could disconnect a socket in another room by passing its
@@ -419,7 +549,12 @@ export function registerSfuHandlers(io: Server, socket: Socket) {
   // 19) Host spotlights a participant for EVERYONE (pure layout relay, no media
   //     change). `socketId: null` clears the spotlight. Distinct from a local
   //     pin, which is client-only and never hits the server.
-  socket.on('sfu-spotlight', async ({ socketId: targetSocketId = null } = {}) => {
+  socket.on('sfu-spotlight', async (payload = {}) => {
+    const { error, value } = validateSfuPayload<{ socketId: string | null }>(
+      sfuSchemas['sfu-spotlight'], payload,
+    );
+    if (error) return;
+    const targetSocketId = value.socketId;
     const roomId = await callerIsHost();
     if (!roomId) return;
     io.to(roomId).emit('sfu-spotlight', { socketId: targetSocketId });

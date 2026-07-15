@@ -38,6 +38,30 @@ const VOICE = '#34d399'; // live-voice green (also the keyframe glow below)
 const BRAND_GRADIENT = `linear-gradient(120deg, ${EMBER}, ${EMBER_DARK})`;
 const GRAD_TEXT = `linear-gradient(110deg, ${EMBER}, #f08a5d 55%, ${SAGE})`;
 
+// Shared ember/sage design tokens for the pre-call surfaces (landing + lobby),
+// which style raw elements directly rather than through the MUI palette. These
+// were previously copy-pasted as a local `DK` object in each of those files;
+// this is the single source the unification note above always meant. The room
+// itself reads the same language via the MUI palette tokens declared below.
+export const DK = {
+  bg:        '#140f0c',
+  surface:   'rgba(255,255,255,0.05)',
+  surface2:  'rgba(255,255,255,0.09)',
+  ink:       '#f4efe9',
+  dim:       '#a89f97',
+  faint:     '#6f675f',
+  line:      'rgba(255,255,255,0.09)',
+  line2:     'rgba(255,255,255,0.16)',
+  ember:     '#e8623d',
+  emberDark: '#d4502c',
+  emberSoft: 'rgba(232,98,61,0.16)',
+  sage:      '#7d9183',
+  sageSoft:  'rgba(125,145,131,0.16)',
+  panel:     '#1b140f',
+  display:   '"Bricolage Grotesque", system-ui, sans-serif',
+  font:      '"Plus Jakarta Sans", system-ui, sans-serif',
+};
+
 const theme = createTheme({
   palette: {
     mode: 'dark',
@@ -198,6 +222,15 @@ const theme = createTheme({
         },
         '@media (prefers-reduced-motion: reduce)': {
           '*': { animationDuration: '0.01ms !important', transitionDuration: '0.01ms !important' },
+        },
+        // Visible keyboard focus ring (a11y baseline). Ember, the design system's
+        // designated focus-ring accent, reads clearly on the warm graphite
+        // surfaces. Applied only for :focus-visible so pointer clicks don't draw
+        // a ring, and we ADD an outline rather than removing any default.
+        ':focus-visible': {
+          outline: `2px solid ${EMBER}`,
+          outlineOffset: '2px',
+          borderRadius: '4px',
         },
       },
     },
