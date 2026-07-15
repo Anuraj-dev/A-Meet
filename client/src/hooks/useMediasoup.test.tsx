@@ -73,7 +73,7 @@ const H = vi.hoisted(() => {
     state.devices.push(device);
     return device;
   }
-  state.Device = vi.fn(() => makeDevice());
+  state.Device = vi.fn(function () { return makeDevice(); });
   return state;
 });
 
