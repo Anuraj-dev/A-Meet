@@ -48,3 +48,86 @@ still giving the host a way to force everyone's focus (spotlight wins when both 
 full read to find what's still open. Split into `docs/STATE.md` (live overview, read every
 session) and `docs/old_plan.md` (completed-milestone archive, read only on demand) so a fresh
 agent orients cheaply. `CLAUDE.md`/`AGENTS.md` now route here instead of `plan.md`.
+
+## 2026-07-06 — Stay on custom mediasoup; do NOT migrate to LiveKit
+**Why:** the 2026-07-05 prod incident proved the SFU server was healthy the whole time — every
+failure since M6 has been in the hand-rolled client state machine (retry/ordering/error labeling),
+which is fixable in days. For a learning/portfolio project the custom SFU is the asset; a LiveKit
+rewrite (3–4 weeks, all client-side) would teach integration, not WebRTC. Rejected alternatives:
+self-hosted LiveKit (right for a product, not this goal) and hybrid LiveKit-Cloud-for-prod (two
+stacks, prod stops exercising the showcased code). Reference livekit-client's reconnection code
+when fixing ours.
+
+## 2026-07-06 — SFU media-setup recovery contract
+**Why:** a failed *first* setup must never strand a user media-less (the incident's failure mode).
+Contract: auto-retry setupSfu on every socket `connect` regardless of prior success, capped
+exponential backoff while connected, visible "Connecting media…" state with a manual Retry as last
+resort; setup awaits the socket's `connect` event (no emits on a connecting socket); signaling
+errors propagate the real socket.io error + socket.connected + elapsed-ms (never blanket
+"timed out" — that mislabel misdirected debugging at TURN for weeks).
+
+## 2026-07-09 — Telegram flap suppression lives in the notifier, not in alarm thresholds
+**Why:** `mongo-disconnect` logs one line per disconnect event, so requiring 2-of-2 datapoints
+would never fire for a real sustained outage — sensitivity must stay 1-of-1 and the noise is
+absorbed downstream: the Lambda persists the ALARM's StateChangeTime in SSM (best-effort — paging
+must never depend on SSM being writable) and folds an OK arriving within 10 min into one compact
+"recovered after Xm Ys" line. Rejected: DynamoDB state (new resource), parsing NewStateReason (brittle).
+
+## 2026-07-09 — Socket rate-limit buckets are keyed per ACTOR with grace-period eviction
+**Why:** per-socket buckets are bypassable by reconnecting/opening parallel sockets, and evicting
+actor state on last disconnect reopens the same hole for serial reconnects. Buckets key on
+authenticated user id (fallback: rightmost X-Forwarded-For hop, matching HTTP trust proxy 1) and
+survive 10 min past the last disconnect. In-memory by design — single-node prod, no Redis.
+Rejected: distributed store (out of scope until horizontal scaling).
+
+## 2026-07-10 — Escape closes Chat/People panels, guarded while an action menu is open
+**Why:** WCAG dialog semantics for the room side panels (#164/#170). Unguarded Escape broke the
+host-moderation E2E flow (stale-menu Escape nuked the whole panel), so `usePanelDialog` takes a
+`closeOnEscape` flag that PeoplePanel disables while its per-person menu is open; E2E flows that
+press Escape with no menu open must reopen the panel. Rejected: swallowing Escape entirely
+(non-standard, traps keyboard users).
+
+## 2026-07-10 — E2E exits native fullscreen via document.exitFullscreen(), not Escape
+**Why:** headless Chromium/CDP cannot synthesize the browser-chrome-level Escape that exits the
+Fullscreen API, and the tile menu portals outside the fullscreen top layer, so neither user
+affordance is drivable in CI. `page.evaluate(() => document.exitFullscreen())` still proves the
+app's enter path and teardown. Rejected: app-level Escape handler just to make tests pass.
+
+## 2026-07-10 — TURN TLS: certbot HTTP-01 via existing nginx; recovery is operator-rerun
+**Why:** nginx already owns port 80 so webroot HTTP-01 needs no DNS credentials; the renew hook
+is lineage-guarded so API-cert renewals can't install the wrong cert into coturn (review
+blocker). Recovery stays manual (`setup-coturn-tls.sh` re-run) because the EBS-backed
+self-healing flow has no user-data provisioning pattern to hook a retry unit into — README says
+so honestly. Rejected: DNS-01 (needs creds), auto-retry systemd unit (no pattern to extend).
+
+## 2026-07-10 — coturn cert copies owned by container runtime uid (65534), not root
+**Why:** the coturn/coturn image drops to nobody:nogroup, so root-only 0600 copies made the TLS
+listener silently fail ("certificate file is not set properly") — and the certbot renewal hook
+re-installed the broken ownership every ~60 days. Rejected alternative: running coturn as root
+(needless privilege). UID/GID overridable via COTURN_RUNTIME_UID/GID and persisted in
+/etc/a-meet/coturn-tls.env so renewals reuse them (PR #171).
+
+## 2026-07-13 — Terra effort split + SFU consumer-cap semantics
+**Why:** Raja set codex GPT-5.6 Terra at HIGH effort for code review, MEDIUM for implementation,
+~50/50 workload with Opus subagents (max 2 each concurrently) — review quality is worth the
+quota, implementation isn't. Rejected: Sol-low reviews (previous default) for this session.
+SFU per-peer consumer cap defined as an intentional absolute DoS backstop derived from a SOFT
+50-peer sizing constant (room size deliberately unenforced); duplicate-consume guard skips
+`closed` consumers so clients can legitimately re-subscribe. Rejected: enforcing a hard room
+cap just to make the arithmetic a guarantee.
+
+## 2026-07-15 — Vitest-4 branch-coverage floors are measurement-driven (server 62, client 37)
+**Why:** @vitest/coverage-v8 4.x AST-analyzes untested included files and counts every real
+branch as uncovered, where 3.x counted one placeholder branch per untested file — the totals
+denominator ~doubled while covered branches rose with identical tests (per-file evidence in
+both vitest.config.js comments and PR #176). Floors are set tight against measured values;
+"restoring" the old numbers would just break the gate, not add coverage. Rejected alternative:
+excluding untested files from coverage (hides real gaps).
+
+## 2026-07-15 — Dependabot handling protocol
+**Why:** dependabot never syncs the ROOT lockfile, so its PRs always fail `npm ci`. Grouped
+minor/patch PRs: push a root-lockfile sync commit onto the dependabot branch, then merge.
+Single-package majors: supersede with a manual migration branch (done for deepgram/groq/jsdom
+in #175, vitest in #176). Also: after merging main into any deps branch, regenerate by deleting
+the ROOT lockfile + all node_modules and running one clean root `npm install` — incremental
+installs keep the old hoisting shape and break single-instance packages (vitest/jest-dom).

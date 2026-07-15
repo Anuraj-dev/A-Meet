@@ -1,75 +1,83 @@
 # A-Meet — State
+
 > Google Meet clone (MERN + TypeScript strict + Material UI + Socket.io + mediasoup SFU), built in
-> staged milestones as a learning/portfolio project. · Last checkpoint: 2026-07-05
+> staged milestones as a learning/portfolio project. · Last checkpoint: 2026-07-15
 
 ## 🚧 In progress / next
-- **M8.5** — manual verify + `/journal` for per-participant output volume (code done).
-- **M9.7** — prod verify pending for connection-stability fixes (code done).
-- **M10.12** — `npm run build` + lint check + Anuraj manual verify for landing/lobby ember redesign.
-- **M12.11** — client+server tests green, zero new lint errors, Anuraj manual verify (needs 2
-  peers) + `/journal M12` for the meeting-room re-skin + Meet feature parity. **Current milestone.**
-- Test-coverage gap (from 2026-07-04 quality report): mute-all, ask-to-unmute(-all), and pin's
-  layout effect have no automated test at any level; screen share/raise-hand/fullscreen/layout
-  chooser have no E2E coverage. Worth closing before `/journal M12` and moving to M13+.
-- Known prod follow-ups: no automated rollback on failed post-deploy health check; coturn's TLS
-  listener (5349) has no cert yet; EC2 instance role's ECR-pull permission isn't captured in the
-  repo's IAM policy files.
+
+- **Raja: one-click close epics #31/#33/#35/#37/#38** — every acceptance criterion is merged
+  (see Status). Agent closing was permission-blocked; nothing else is pending on them.
+- **Merge-conflict warning (still open):** this branch (`feat/alarm-ok-actions`, docs/ context
+  system) has its own `docs/conventions.md`; main got one via #161 AND #170 appends an
+  accessibility section. Reconcile when merging this docs branch.
+- Remaining manual (Raja): browser-level three-path TURN force-relay verification (README);
+  M9.7 / M10.12 / M12.11 manual verifies; `/journal M12` after verify.
 
 ## Status
-- **M0–M9, M11: done.** M10 (landing/lobby ember redesign) and M12 (room re-skin + people panel +
-  pin/spotlight + layout chooser + host moderation): code-complete, pending manual verify above.
-  Full milestone-by-milestone history + the *why* behind each: `docs/old_plan.md`.
-- **Platform/infra (parallel track, all done):** TypeScript migration (client/server/shared all
-  strict TS — `docs/typescript-migration.md`), CI/CD + test gates (ESLint, `npm audit`, Vitest
-  coverage ratchet, Playwright E2E split SFU-off/SFU-on — `CONTRIBUTING.md`, `.github/workflows/`),
-  production deployment + observability (Docker → ECR → self-healing EC2, SSM secrets, CloudWatch
-  → SNS → Telegram alarm/recovery — `README.md` Deployment section, `deploy/`).
+
+- **2026-07-15 backlog cleanout — ALL PRs merged, zero open PRs:**
+  - #156 (SFU socket validation), #172 (useAudioLevel tests, last #35 criterion), #86 (server
+    minor/patch group), #173 (PRD leftovers: `restart: always`, pm2 retired, ESLint base).
+  - **#174** — E2E CI sharding: 3-shard matrix on the SFU-off Playwright job (`--shard=i/3`),
+    blob reports merged into one HTML artifact by a new `e2e-merge-reports` job; serial SFU job
+    intentionally unsharded. Closed the last #37 criterion.
+  - **#175** — deps majors: @deepgram/sdk 4→5 (new `DeepgramClient` + `listen.v1.connect`,
+    `message`-event dispatch, `sendMedia`/`sendFinalize`/`sendCloseStream`), groq-sdk 0.37→1.x,
+    jsdom 25→29, root lockfile sync. Review caught a real start/stop race leaking a Deepgram
+    socket — fixed test-first. Superseded dependabot #87/#88/#91 (closed).
+  - **#176** — unified Vitest 3→4 migration (superseded #89/#92/#93, closed). Branch coverage
+    thresholds lowered (server 72→62, client 64→37): vitest-4's v8 provider AST-analyzes
+    UNTESTED files and counts all their real branches (3.x counted 1 placeholder) — denominator
+    change, covered branches actually rose; per-file evidence in vitest.config.js comments + PR.
+  - **#178** — client minor/patch group (15 updates) merged after pushing a root-lockfile sync
+    commit onto the dependabot branch. #143/#177/#179 were interim versions, closed.
+- **Reviews:** codex GPT-5.6 Sol reviewed #174/#175/#176 to READY TO MERGE (2 real finding
+  rounds). Deepgram/groq migration should get a staging sanity check (no real creds in tests).
+- **M0–M9, M11 done; M10/M12 code-complete pending manual verify.** History: `docs/old_plan.md`.
+- **Platform/infra:** strict TS, CI/CD gates (incl. axe-core a11y + npm audit), prod deploy +
+  observability (self-healing EC2, SSM, CloudWatch→SNS→Telegram), TURN over TLS.
 
 ## Architecture map
-- `client/src/` — React + Vite + MUI, strict TS. Room UI: `components/room/`; SFU client logic:
-  `hooks/` (mediasoup-client wiring); layout/pin/spotlight: `utils/room-entry.ts` + room hooks.
-- `server/src/` — Express + Socket.io + mediasoup SFU. Room/moderation socket events:
-  `sfu-handlers.ts`.
-- `shared/src/` — `@a-meet/contracts` workspace: types shared between client and server.
-- `e2e/` — Playwright, split `tests/` (SFU-off) and `tests-sfu/` (SFU-on).
-- `deploy/` — production deploy scripts/config (Docker/ECR/EC2/CloudWatch/Telegram).
-- `docs/agents/coder-loop.md` — the Claude-codes/Codex-reviews background loop convention.
+
+- `client/src/` — React+Vite+MUI strict TS. Room UI `components/room/`; SFU hooks `hooks/`;
+  ICE `services/ice-config.ts`.
+- `server/src/` — Express + Socket.io + mediasoup. SFU handlers `socket/sfu-handlers.ts`;
+  validation `validation/sfu.schema.ts`; transcription (Deepgram v5/Groq v1) `transcription/`.
+- `shared/src/` — `@a-meet/contracts`.
+- `e2e/` — Playwright: `tests/` (SFU-off, axe gate, sharded 3× in CI) + `tests-sfu/` (serial).
+- `deploy/` — prod scripts; TURN TLS `setup-coturn-tls.sh` + renew hook.
+- `docs/agents/coder-loop.md` — coder/reviewer loop convention.
 
 ## Stack & run
-- Stack: MERN · TypeScript strict (all 3 workspaces) · Material UI only (no Bootstrap) · Google
-  Fonts · Socket.io · mediasoup SFU.
-- Ports: server `5000` · client (Vite) `5173` · MongoDB `27017` · mongo-express `8081`.
-- Run dev: `npm run dev` (root, runs server+client concurrently) · Docker infra: `npm run docker:up`.
-- Test: `npm test` (unit) · `npm run coverage` · `npm run typecheck` · `npm run test:e2e`
-  (Playwright, run `npm run test:e2e:install` once first). Full rules: `CONTRIBUTING.md`.
+
+- MERN · strict TS (3 workspaces) · MUI only · Socket.io · mediasoup SFU · Vitest 4.
+- Ports: server 5000 · client 5173 · Mongo 27017 · mongo-express 8081.
+- Dev `npm run dev` · unit `npm test` · types `npm run typecheck` · E2E in CI only.
 
 ## Key decisions (top 5)
-- **M12 skin/behavior north star:** room adopts the landing's ember/sage/graphite `DK` tokens;
-  target Google Meet *behavior*, not necessarily its color scheme. Speaking cue deliberately
-  stays **green** (`#34d399`) for legibility on warm graphite, not Meet's blue.
-- **Pin vs Spotlight:** local pin (any user, client-only state) is independent from host spotlight
-  (server relay → everyone); spotlight wins when both are set.
-- **Host mute is consent-based:** enforced server-side producer pause with **no force-unmute** —
-  only a request-to-unmute prompt, so audio is never resumed without the muted user's consent.
-- **Auth:** Passport `google-oauth20` (`session:false`) → JWT in httpOnly cookie; protected
-  routes/sockets verify the cookie server-side.
-- **Prod IP resolution:** `resolveAnnouncedIp()` auto-detects the EC2 public IPv4 via IMDSv2 at
-  startup — root-caused a bug where a private/loopback announced IP silently broke peer
-  visibility for everyone on the same network.
-- Full log, including infra/CI decisions: `docs/decisions.md`.
+
+- **Vitest-4 coverage floors are measurement-driven** (server branches 62, client 37, set tight
+  against measured values) — do NOT "restore" the old numbers; the meter changed, not the tests.
+- **Dependabot group PRs get a root-lockfile sync commit pushed onto their branch** (single-
+  package majors get superseded by a manual migration branch instead).
+- **SFU consumer cap is an absolute DoS backstop**, not an enforced room limit.
+- **Host mute is consent-based** — server-side producer pause, no force-unmute.
+- **TURN TLS = certbot HTTP-01 via existing nginx**; recovery is operator-rerun. Full log
+  `docs/decisions.md`.
 
 ## Gotchas (don't re-break these)
-- **Audio routing:** never connect anything to `audioCtx.destination` — metering uses an
-  AnalyserNode-only AudioContext; mic gain routes through a separate `MediaStreamAudioDestinationNode`
-  sink. Connecting to `destination` crackles the live call on Linux/PipeWire.
-- **Mic gain:** GainNode is built eagerly in `setupSfu` before `produce()`; `setMicGain` only
-  touches `gain.value` synchronously — no `replaceTrack`, no async, no race.
-- **Instant-join is a navigation marker, not an identity check:** `RoomGuard` checks for
-  `state:{fromCreate:true}`/`state:{fromLobby:true}`, not host identity — do NOT reintroduce an
-  identity-based redirect, it broke the same account joining from two browsers. Logic:
-  `utils/room-entry.ts` (`shouldRedirectToLobby`).
-- **Camera simulcast:** 3-spatial-layer simulcast lets the SFU shed video layers under bad
-  downlink instead of saturating the transport (which used to break audio too);
-  `consumer.setPriority(255)` on audio reserves voice bitrate.
-- Secrets: local dev uses git-ignored `.env`; prod resolves SecureStrings from SSM via the
-  instance role before boot. Never commit or bake secret values.
+
+- **npm hoisting after lockfile merges:** merging main into a deps branch then `npm install`
+  keeps the OLD tree shape (vitest nested under workspaces → jest-dom "Invalid Chai property").
+  Fix = delete ROOT package-lock.json + all node_modules, one clean root `npm install`.
+- **Per-workspace `package-lock.json` files are CI cache keys** — don't delete; CI installs
+  from the ROOT lockfile.
+- **mongodb-memory-server first run in a fresh worktree** hook-times-out (~10s limit) while
+  downloading the mongo binary — rerun with `--hookTimeout=180000` once; not a real failure.
+- **Codex sandbox can't write `.git` in worktrees** — driver does all git ops after a dispatch.
+- **Audio routing:** nothing connects to `audioCtx.destination` (AnalyserNode-only metering).
+- **Mic gain:** GainNode built eagerly in `setupSfu`; `setMicGain` touches `gain.value` only.
+- **Instant-join marker:** `RoomGuard` checks navigation state, not identity — don't "fix" it.
+- **`iam-telegram-lambda-policy.json` incomplete vs live role** — never blind-apply.
+- **Playwright "Stop presenting" matches 3 elements** — scope via `shareControl` helper.
+- Secrets: git-ignored `.env` locally; SSM SecureStrings in prod. Never commit values.
