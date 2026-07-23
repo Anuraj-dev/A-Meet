@@ -1,4 +1,6 @@
-# The server image only needs workspace manifests plus server/shared sources.
+# The server and bot images share this repository root as their build context,
+# so Docker applies THIS ignore file (a per-Dockerfile bot/.dockerignore would be
+# ignored). Allowlist exactly the workspace manifests + sources each image needs.
 **
 !package.json
 !package-lock.json
@@ -8,6 +10,12 @@ server/**
 !server/Dockerfile
 !server/src/
 !server/src/**
+!bot/
+bot/**
+!bot/package.json
+!bot/Dockerfile
+!bot/src/
+!bot/src/**
 !shared/
 shared/**
 !shared/package.json
