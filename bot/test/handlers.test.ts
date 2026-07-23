@@ -13,17 +13,21 @@ const CLIENT_URL = 'http://client:5173';
 // A mocked interaction exposing only what the handlers touch: the defer/edit/
 // followUp trio and the invoking user. Cast at the call site so the handlers
 // still see the real discord.js type.
-function mockInteraction() {
+function mockInteraction({ channel }: { channel?: false } = {}) {
   const deferReply = vi.fn().mockResolvedValue(undefined);
   const editReply = vi.fn().mockResolvedValue(undefined);
   const followUp = vi.fn().mockResolvedValue(undefined);
+  const channelSend = vi.fn().mockResolvedValue(undefined);
   const interaction = {
     user: { id: '42', toString: () => '<@42>' },
     deferReply,
     editReply,
     followUp,
+    // Real Discord channels expose isSendable(); channel is null e.g. for
+    // uncached/partial contexts — the handler must survive both.
+    channel: channel === false ? null : { isSendable: () => true, send: channelSend },
   } as unknown as ChatInputCommandInteraction;
-  return { interaction, deferReply, editReply, followUp };
+  return { interaction, deferReply, editReply, followUp, channelSend };
 }
 
 // True when a flags value carries the Ephemeral marker in any of the forms
@@ -83,37 +87,48 @@ describe('handleLink', () => {
 });
 
 describe('handleCreate', () => {
-  it('posts a PUBLIC embed via followUp and keeps the ack ephemeral on success', async () => {
-    const { interaction, deferReply, editReply, followUp } = mockInteraction();
+  it('posts a PUBLIC embed via channel.send and keeps the ack ephemeral on success', async () => {
+    const { interaction, deferReply, editReply, followUp, channelSend } = mockInteraction();
     const createRoom = vi.fn().mockResolvedValue({ roomId: 'abc-defg-hij' });
     await handleCreate(interaction, mockClient({ createRoom }), CLIENT_URL);
 
     expect(createRoom).toHaveBeenCalledWith('42');
     // The deferred ack is ephemeral (only the invoker sees it)...
     expect(hasEphemeral(deferReply.mock.calls[0][0].flags)).toBe(true);
-    // ...but the meeting announcement is a PUBLIC followUp — neither the
-    // ephemeral flag bit nor the deprecated `ephemeral: true` shorthand.
-    const followUpPayload = followUp.mock.calls[0][0];
-    expect(isPublic(followUpPayload)).toBe(true);
-    expect(followUpPayload.embeds).toHaveLength(1);
-    const rendered = JSON.stringify(followUpPayload.embeds[0].data);
+    // ...but the meeting announcement MUST go through channel.send. A followUp
+    // on an ephemerally-deferred interaction is forced ephemeral by Discord
+    // regardless of flags (observed live 2026-07-23), so followUp can never be
+    // the public surface.
+    expect(followUp).not.toHaveBeenCalled();
+    const sendPayload = channelSend.mock.calls[0][0];
+    expect(isPublic(sendPayload)).toBe(true);
+    expect(sendPayload.embeds).toHaveLength(1);
+    const rendered = JSON.stringify(sendPayload.embeds[0].data);
     expect(rendered).toContain('http://client:5173/lobby/abc-defg-hij');
     expect(rendered).toContain('<@42>');
     expect(editReply).toHaveBeenCalled();
   });
 
   it('resolves the deferred reply with the link when the public post fails', async () => {
-    const { interaction, deferReply, editReply, followUp } = mockInteraction();
+    const { interaction, deferReply, editReply, channelSend } = mockInteraction();
     const createRoom = vi.fn().mockResolvedValue({ roomId: 'abc-defg-hij' });
     // Channel post rejects (e.g. the bot lacks Send Messages there).
-    (followUp as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error('Missing Permissions'),
-    );
+    channelSend.mockRejectedValue(new Error('Missing Permissions'));
     await handleCreate(interaction, mockClient({ createRoom }), CLIENT_URL);
 
     // The invoker is NOT left hanging: the ephemeral deferred reply is resolved
     // with the meeting link so the created room isn't wasted.
     expect(hasEphemeral(deferReply.mock.calls[0][0].flags)).toBe(true);
+    const editPayload = editReply.mock.calls.at(-1)![0];
+    expect(editPayload.content).toContain('http://client:5173/lobby/abc-defg-hij');
+  });
+
+  it('falls back to the ephemeral link when there is no sendable channel', async () => {
+    const { interaction, editReply, followUp } = mockInteraction({ channel: false });
+    const createRoom = vi.fn().mockResolvedValue({ roomId: 'abc-defg-hij' });
+    await handleCreate(interaction, mockClient({ createRoom }), CLIENT_URL);
+
+    expect(followUp).not.toHaveBeenCalled();
     const editPayload = editReply.mock.calls.at(-1)![0];
     expect(editPayload.content).toContain('http://client:5173/lobby/abc-defg-hij');
   });

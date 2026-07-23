@@ -73,13 +73,19 @@ export async function handleCreate(
       { name: 'Started by', value: interaction.user.toString() },
     );
 
-  // Public channel announcement (non-ephemeral): everyone can see and join.
+  // Public channel announcement. This must be a plain channel.send: Discord
+  // forces every followUp on an ephemerally-deferred interaction to be
+  // ephemeral regardless of flags, so followUp can never produce the public
+  // embed (observed live 2026-07-23).
   try {
-    await interaction.followUp({ embeds: [embed] });
+    const channel = interaction.channel;
+    if (!channel?.isSendable()) throw new Error('no sendable channel');
+    await channel.send({ embeds: [embed] });
   } catch {
     // Posting to the channel can fail (e.g. the bot lacks Send Messages/Embed
-    // Links there). The room WAS created, so resolve the deferred ephemeral
-    // reply by handing the invoker the link directly — never leave them hanging.
+    // Links there, or the channel isn't sendable). The room WAS created, so
+    // resolve the deferred ephemeral reply by handing the invoker the link
+    // directly — never leave them hanging.
     await interaction.editReply({
       content:
         `Your meeting is ready: ${meetingUrl}\n` +
