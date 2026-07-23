@@ -14,6 +14,7 @@ import { areWorkersAlive } from './sfu/workers.js';
 import authRoutes from './routes/auth.routes.js';
 import roomRoutes from './routes/room.routes.js';
 import logRoutes from './routes/log.routes.js';
+import discordRoutes from './routes/discord.routes.js';
 
 // Structured 429 handler shared by every limiter. Body mirrors the socket ack
 // error shape ({ error, retryAfterMs }) so both transports report back-off the
@@ -86,6 +87,10 @@ export function createApp(overrides: RateLimitOverrides = {}) {
   });
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/rooms', roomLimiter, roomRoutes);
+  // Discord integration. Auth is per-route (bot API key for bot calls, user
+  // cookie for the browser link page); the room limiter is intentionally NOT
+  // applied so a single bot-host IP isn't throttled making meetings for a server.
+  app.use('/api/integrations/discord', discordRoutes);
   app.use('/api/logs', logRoutes);
 
   // 404

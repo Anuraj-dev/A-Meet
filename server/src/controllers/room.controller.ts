@@ -14,7 +14,7 @@ function generateRoomId() {
 // Creates a Room with a freshly minted unique code, retrying a few times in the
 // (very unlikely) event of a collision. `fields` carries any extra data (host,
 // scheduling metadata, …). Returns the created doc, or null if all retries lost.
-async function createUniqueRoom(fields: Record<string, unknown>) {
+export async function createUniqueRoom(fields: Record<string, unknown>) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const roomId = generateRoomId();
     try {
