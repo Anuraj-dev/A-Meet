@@ -17,9 +17,7 @@ COPY shared/package.json ./shared/package.json
 RUN npm ci --omit=dev --workspace bot --ignore-scripts
 
 COPY bot/src ./bot/src
-COPY bot/tsconfig.json ./bot/tsconfig.json
 COPY shared/src ./shared/src
-COPY tsconfig.base.json ./tsconfig.base.json
 
 # ---- runtime stage: slim image carrying only the built artifacts ----
 FROM node:22-bookworm-slim AS runtime
@@ -31,7 +29,6 @@ COPY --from=build /app/bot ./
 COPY --from=build /app/shared /app/shared
 COPY --from=build /app/package.json /app/package.json
 COPY --from=build /app/package-lock.json /app/package-lock.json
-COPY --from=build /app/tsconfig.base.json /app/tsconfig.base.json
 
 RUN chown -R node:node /app
 USER node

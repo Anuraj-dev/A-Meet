@@ -7,32 +7,36 @@ import {
 
 // Command handlers: thin glue between a Discord interaction and the integration
 // HTTP client. Every path answers the interaction — success or failure, never
-// silence. Private answers use MessageFlags.Ephemeral (only the invoker sees
-// them); the meeting announcement is a public channel embed.
+// silence.
+//
+// Discord invalidates an interaction token if no initial response is sent within
+// ~3 seconds, and the API call can take longer (cold start, slow network). So
+// each handler defers IMMEDIATELY, then edits/follows-up once the call returns.
+// The deferred reply is ephemeral, so every private outcome (link URL, not-linked
+// nudge, errors) is edited in as ephemeral. The one PUBLIC surface — the meeting
+// announcement — is sent as a separate non-ephemeral followUp, so success stays
+// visible to the whole channel while failures stay private to the invoker.
 
 const GENERIC_ERROR = 'Something went wrong talking to A-Meet. Please try again in a moment.';
 
 /**
- * `/meet link` — mint an account-link token and DM-style ephemeral reply the
+ * `/meet link` — mint an account-link token and ephemerally reply the
  * confirmation URL so only the requester sees it.
  */
 export async function handleLink(
   interaction: ChatInputCommandInteraction,
   client: DiscordIntegrationClient,
 ): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const { linkUrl } = await client.createLinkToken(interaction.user.id);
-    await interaction.reply({
+    await interaction.editReply({
       content:
         `Link your A-Meet account: ${linkUrl}\n` +
         'Open it in your browser while signed in to A-Meet. The link expires in ~10 minutes.',
-      flags: MessageFlags.Ephemeral,
     });
   } catch {
-    await interaction.reply({
-      content: GENERIC_ERROR,
-      flags: MessageFlags.Ephemeral,
-    });
+    await interaction.editReply({ content: GENERIC_ERROR });
   }
 }
 
@@ -46,21 +50,17 @@ export async function handleCreate(
   client: DiscordIntegrationClient,
   clientUrl: string,
 ): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   let roomId: string;
   try {
     ({ roomId } = await client.createRoom(interaction.user.id));
   } catch (err) {
     if (err instanceof NotLinkedError) {
-      await interaction.reply({
-        content: 'Link your account first with `/meet link`.',
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ content: 'Link your account first with `/meet link`.' });
       return;
     }
-    await interaction.reply({
-      content: GENERIC_ERROR,
-      flags: MessageFlags.Ephemeral,
-    });
+    await interaction.editReply({ content: GENERIC_ERROR });
     return;
   }
 
@@ -73,7 +73,10 @@ export async function handleCreate(
       { name: 'Started by', value: interaction.user.toString() },
     );
 
-  await interaction.reply({ embeds: [embed] });
+  // Public channel announcement (non-ephemeral): everyone can see and join.
+  await interaction.followUp({ embeds: [embed] });
+  // Resolve the ephemeral deferred reply with a private confirmation.
+  await interaction.editReply({ content: 'Meeting created — join link posted in the channel.' });
 }
 
 /**

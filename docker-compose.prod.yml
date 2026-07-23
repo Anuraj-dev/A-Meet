@@ -84,7 +84,22 @@ services:
   # it dies the API is unaffected (and vice-versa). Docker's restart policy keeps
   # it up. Unlike the server it needs no inbound ports, but it shares the host
   # network so it can reach the (host-networked) server at localhost:5000.
+  #
+  # Profile-gated ON PURPOSE. The automated server deploy runs a bare
+  # `docker compose up -d` over this file; the `bot` profile keeps that from
+  # touching the bot, so the existing server release path is completely
+  # unaffected. Bring the bot up explicitly once its config + image exist:
+  #   docker compose -f docker-compose.prod.yml --profile bot up -d bot
+  # Full deploy-pipeline automation (build/push a bot image, export the bot's
+  # SSM SecureStrings) is a deliberate follow-up — see bot/README.md.
+  #
+  # Config comes from the environment (locally an .env; in prod exported from the
+  # same SSM SecureStrings as the server). Values default to empty here rather
+  # than using `:?` guards so this shared file can never abort the server's
+  # `up -d`; the bot validates its own required config at startup (loadBotEnv)
+  # and exits non-zero if anything is missing.
   bot:
+    profiles: ["bot"]
     image: ${BOT_IMAGE:-a-meet-bot:latest}
     build:
       context: .
@@ -96,22 +111,19 @@ services:
     mem_limit: 256m
     mem_reservation: 64m
     cpus: 0.5
-    # Secrets are injected from the environment at deploy time (populated from the
-    # same SSM SecureStrings as the server — /a-meet/prod/bot/*). `:?` fails the
-    # `up` loudly if a required secret is missing rather than booting broken.
     environment:
       NODE_ENV: production
-      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN (SSM: /a-meet/prod/bot/discord-token)}
-      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID}
-      DISCORD_BOT_API_KEY: ${DISCORD_BOT_API_KEY:?set DISCORD_BOT_API_KEY (must match the server's)}
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_BOT_API_KEY: ${DISCORD_BOT_API_KEY:-}
       SERVER_URL: ${BOT_SERVER_URL:-http://localhost:5000}
-      CLIENT_URL: ${BOT_CLIENT_URL:?set BOT_CLIENT_URL (public web client base URL)}
+      CLIENT_URL: ${BOT_CLIENT_URL:-}
       # Optional: register commands to a single guild instead of globally.
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
     logging:
       driver: awslogs
       options:
-        awslogs-region: ${AWS_REGION:?set AWS_REGION}
+        awslogs-region: ${AWS_REGION:-eu-north-1}
         awslogs-group: ${CLOUDWATCH_LOG_GROUP:-/a-meet/prod/server}
         awslogs-stream: ${DEPLOY_ENVIRONMENT:-prod}/bot
         awslogs-create-group: "false"

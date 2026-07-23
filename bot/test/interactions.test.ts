@@ -11,7 +11,9 @@ function mockClient() {
   } as unknown as DiscordIntegrationClient;
 }
 
-// Build a chat-input `/meet` interaction for the given subcommand.
+// Build a chat-input `/meet` interaction for the given subcommand. Includes the
+// defer/edit/followUp trio the handlers use plus `reply` for the unknown-command
+// fast path.
 function meetInteraction(sub: string) {
   const reply = vi.fn().mockResolvedValue(undefined);
   const interaction = {
@@ -20,6 +22,9 @@ function meetInteraction(sub: string) {
     options: { getSubcommand: () => sub },
     user: { id: '7', toString: () => '<@7>' },
     reply,
+    deferReply: vi.fn().mockResolvedValue(undefined),
+    editReply: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
   } as unknown as Interaction;
   return { interaction, reply };
 }
