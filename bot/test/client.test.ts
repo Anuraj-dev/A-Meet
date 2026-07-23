@@ -90,6 +90,41 @@ describe('DiscordIntegrationClient.createRoom', () => {
   });
 });
 
+describe('DiscordIntegrationClient request timeout', () => {
+  it('aborts and rejects when the server never completes the response', async () => {
+    vi.useFakeTimers();
+    // A server that accepts the connection but never responds; it only settles
+    // when the abort signal fires.
+    const impl: FetchLike = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('The operation was aborted', 'AbortError')),
+        );
+      });
+    const client = new DiscordIntegrationClient({
+      serverUrl: 'http://server:5000',
+      apiKey: 'k',
+      fetchImpl: impl,
+      requestTimeoutMs: 5000,
+    });
+
+    const pending = client.createRoom('1');
+    const assertion = expect(pending).rejects.toThrow(/abort/i);
+    await vi.advanceTimersByTimeAsync(5000);
+    await assertion;
+    vi.useRealTimers();
+  });
+
+  it('passes an abort signal to fetch and clears the timer on success', async () => {
+    const { impl, calls } = fakeFetch(201, { roomId: 'x' });
+    await makeClient(impl).createRoom('1');
+    const [, init] = calls[0] as [string, { signal?: AbortSignal }];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    // Timer was cleared on completion, so the signal is not aborted afterwards.
+    expect(init.signal?.aborted).toBe(false);
+  });
+});
+
 describe('DiscordIntegrationClient base URL handling', () => {
   it('does not produce a double slash when serverUrl has a trailing slash', async () => {
     const { impl, calls } = fakeFetch(201, { roomId: 'x' });

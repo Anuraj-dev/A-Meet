@@ -34,12 +34,16 @@ export type FetchLike = (
     method?: string;
     headers?: Record<string, string>;
     body?: string;
+    signal?: AbortSignal;
   },
 ) => Promise<{
   status: number;
   ok: boolean;
   json: () => Promise<unknown>;
 }>;
+
+/** Default per-request deadline. A hung server must not wedge an interaction. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface IntegrationClientOptions {
   /** Base URL of the API server, e.g. http://localhost:5000 (no trailing slash needed). */
@@ -48,6 +52,8 @@ export interface IntegrationClientOptions {
   apiKey: string;
   /** Override the fetch implementation (defaults to global fetch). */
   fetchImpl?: FetchLike;
+  /** Per-request deadline in ms (default {@link DEFAULT_REQUEST_TIMEOUT_MS}). */
+  requestTimeoutMs?: number;
 }
 
 const BOT_API_KEY_HEADER = 'X-Bot-Api-Key';
@@ -56,30 +62,43 @@ export class DiscordIntegrationClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly fetchImpl: FetchLike;
+  private readonly requestTimeoutMs: number;
 
   constructor(options: IntegrationClientOptions) {
     // Normalise so `${base}/api/...` never produces a double slash.
     this.baseUrl = options.serverUrl.replace(/\/+$/, '') + '/api/integrations/discord';
     this.apiKey = options.apiKey;
     this.fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   private async post(path: string, body: unknown): Promise<{ status: number; ok: boolean; data: unknown }> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        [BOT_API_KEY_HEADER]: this.apiKey,
-      },
-      body: JSON.stringify(body),
-    });
-    let data: unknown = undefined;
+    // Bound every request: a server that accepts the connection but never
+    // finishes the response would otherwise leave the deferred interaction
+    // hanging forever with no error for the caller to recover from. On timeout
+    // the fetch rejects (AbortError) and the handler answers with a friendly error.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
-      data = await res.json();
-    } catch {
-      // Non-JSON bodies (e.g. a proxy 502) leave data undefined; handled below.
+      const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [BOT_API_KEY_HEADER]: this.apiKey,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      let data: unknown = undefined;
+      try {
+        data = await res.json();
+      } catch {
+        // Non-JSON bodies (e.g. a proxy 502) leave data undefined; handled below.
+      }
+      return { status: res.status, ok: res.ok, data };
+    } finally {
+      clearTimeout(timer);
     }
-    return { status: res.status, ok: res.ok, data };
   }
 
   /** Mint a short-lived account-link token + ready-made confirmation URL. */
