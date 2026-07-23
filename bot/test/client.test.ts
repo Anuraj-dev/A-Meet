@@ -116,12 +116,17 @@ describe('DiscordIntegrationClient request timeout', () => {
   });
 
   it('passes an abort signal to fetch and clears the timer on success', async () => {
+    vi.useFakeTimers();
     const { impl, calls } = fakeFetch(201, { roomId: 'x' });
+    // Default 10s deadline; the response resolves immediately.
     await makeClient(impl).createRoom('1');
     const [, init] = calls[0] as [string, { signal?: AbortSignal }];
     expect(init.signal).toBeInstanceOf(AbortSignal);
-    // Timer was cleared on completion, so the signal is not aborted afterwards.
+    // Advance WELL past the deadline: if the timer had not been cleared it would
+    // fire now and abort the signal. It stays un-aborted, proving cleanup ran.
+    await vi.advanceTimersByTimeAsync(20_000);
     expect(init.signal?.aborted).toBe(false);
+    vi.useRealTimers();
   });
 });
 
