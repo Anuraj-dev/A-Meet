@@ -1,10 +1,13 @@
-import { SlashCommandBuilder } from 'discord.js';
+import { InteractionContextType, SlashCommandBuilder } from 'discord.js';
 
 // The single `/meet` slash command with two subcommands. Slash commands only —
-// the bot needs no privileged Message Content intent.
+// the bot needs no privileged Message Content intent. Guild-only: /meet create
+// must post a PUBLIC channel embed, and in a DM the "public" post would just be
+// the DM itself.
 export const meetCommand = new SlashCommandBuilder()
   .setName('meet')
   .setDescription('A-Meet meetings')
+  .setContexts(InteractionContextType.Guild)
   .addSubcommand((sub) =>
     sub
       .setName('link')
