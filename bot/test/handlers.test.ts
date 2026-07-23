@@ -26,15 +26,25 @@ function mockInteraction() {
   return { interaction, deferReply, editReply, followUp };
 }
 
-// True when a flags value carries the Ephemeral bit.
-function hasEphemeral(flags: unknown): boolean {
-  return typeof flags === 'number' && (flags & MessageFlags.Ephemeral) !== 0;
+// True when a flags value carries the Ephemeral marker in any of the forms
+// discord.js accepts: the numeric bit, the 'Ephemeral' string, or an array of
+// either.
+function carriesEphemeral(flags: unknown): boolean {
+  if (typeof flags === 'number') return (flags & MessageFlags.Ephemeral) !== 0;
+  if (typeof flags === 'string') return flags === 'Ephemeral';
+  if (Array.isArray(flags)) return flags.some(carriesEphemeral);
+  return false;
 }
 
-// A reply payload is PUBLIC only if it neither sets the ephemeral flag bit nor
-// the (deprecated but still honored) `ephemeral: true` shorthand.
+// True when the deferred reply was created ephemeral.
+function hasEphemeral(flags: unknown): boolean {
+  return carriesEphemeral(flags);
+}
+
+// A reply payload is PUBLIC only if it carries the Ephemeral marker in NO form
+// and does not use the (deprecated but still honored) `ephemeral: true` shorthand.
 function isPublic(payload: { flags?: unknown; ephemeral?: unknown }): boolean {
-  return !hasEphemeral(payload.flags) && payload.ephemeral !== true;
+  return !carriesEphemeral(payload.flags) && payload.ephemeral !== true;
 }
 
 function mockClient(overrides: Partial<Record<'createLinkToken' | 'createRoom', ReturnType<typeof vi.fn>>> = {}) {

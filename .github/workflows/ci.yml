@@ -116,6 +116,10 @@ jobs:
         working-directory: client
       - run: npm audit --audit-level=high
         working-directory: client
+      - run: npm ci --ignore-scripts
+        working-directory: bot
+      - run: npm audit --audit-level=high
+        working-directory: bot
 
   client:
     name: Client tests + build

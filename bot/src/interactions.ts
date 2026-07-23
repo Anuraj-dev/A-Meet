@@ -30,3 +30,31 @@ export async function handleInteraction(
       });
   }
 }
+
+// Top-level safety net around the router. If routing throws AFTER the handler
+// already deferred/replied (e.g. an editReply/followUp rejects), the interaction
+// must still be resolved — a bare `!deferred` guard would skip exactly those
+// common cases and leave the user staring at a spinner. Best-effort: if the
+// recovery call itself rejects, there is nothing more we can do.
+export async function dispatchInteraction(
+  interaction: Interaction,
+  client: DiscordIntegrationClient,
+  clientUrl: string,
+): Promise<void> {
+  try {
+    await handleInteraction(interaction, client, clientUrl);
+  } catch (err) {
+    console.error('Unhandled interaction error:', err);
+    if (!interaction.isRepliable()) return;
+    const content = 'Something went wrong. Please try again.';
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content });
+      } else {
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+      }
+    } catch {
+      // Interaction already gone / API failing — nothing more we can do.
+    }
+  }
+}

@@ -1,7 +1,7 @@
-import { Client, GatewayIntentBits, Events, MessageFlags } from 'discord.js';
+import { Client, GatewayIntentBits, Events } from 'discord.js';
 import type { BotConfig } from './config/env.js';
 import { DiscordIntegrationClient } from './http/client.js';
-import { handleInteraction } from './interactions.js';
+import { dispatchInteraction } from './interactions.js';
 
 // Gateway bootstrap: builds the discord.js client, wires the interaction router,
 // and logs in. Only the Guilds intent is needed — slash commands don't require
@@ -19,24 +19,10 @@ export function createBot(config: BotConfig): Client {
     console.log(`Discord bot logged in as ${ready.user.tag}`);
   });
 
-  client.on(Events.InteractionCreate, async (interaction) => {
-    try {
-      await handleInteraction(interaction, api, config.clientUrl);
-    } catch (err) {
-      console.error('Unhandled interaction error:', err);
-      // Best-effort friendly answer so a crash never leaves the user staring at
-      // a spinner. Both reply and followUp can throw if the token expired; ignore.
-      if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-        try {
-          await interaction.reply({
-            content: 'Something went wrong. Please try again.',
-            flags: MessageFlags.Ephemeral,
-          });
-        } catch {
-          /* interaction already gone — nothing more we can do */
-        }
-      }
-    }
+  // dispatchInteraction owns the try/catch safety net (including recovery for
+  // already-deferred interactions), so a thrown handler never leaves a spinner.
+  client.on(Events.InteractionCreate, (interaction) => {
+    void dispatchInteraction(interaction, api, config.clientUrl);
   });
 
   return client;
