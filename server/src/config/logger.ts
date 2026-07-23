@@ -16,7 +16,15 @@ type LogTarget =
   | { type: 'file'; level: string };
 
 // Sensitive fields stripped from every log line, in every environment.
-export const REDACT_PATHS = ['req.headers.authorization', 'req.headers.cookie', '*.password', '*.token'];
+// `req.headers["x-bot-api-key"]` is the Discord bot's host-grade credential;
+// pino-http serializes request headers, so it must be censored here.
+export const REDACT_PATHS = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers["x-bot-api-key"]',
+  '*.password',
+  '*.token',
+];
 
 // Pure: which log targets are active for a given environment. Exported so the
 // stream contract can be asserted in tests without constructing pino or touching
