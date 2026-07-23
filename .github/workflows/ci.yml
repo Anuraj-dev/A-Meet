@@ -42,6 +42,41 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run lint
 
+  bot-lint:
+    name: Bot lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bot/package-lock.json
+      # ESLint needs no native build, so --ignore-scripts keeps install fast.
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+
+  bot:
+    name: Bot tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bot/package-lock.json
+      - run: npm ci --ignore-scripts
+      # Run under coverage so the non-decreasing ratchet (thresholds in
+      # vitest.config.ts) gates every PR — a coverage drop fails this check.
+      - run: npm run test:coverage
+
   server:
     name: Server tests
     runs-on: ubuntu-latest

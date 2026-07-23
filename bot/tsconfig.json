@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  // Greenfield TypeScript workspace — the whole tree is strict-checked (there is
+  // no JS→TS migration here). Tests are type-checked too so mocked interactions
+  // stay honest against discord.js types.
+  "include": ["src", "test"]
+}
