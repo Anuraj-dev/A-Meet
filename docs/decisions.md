@@ -131,3 +131,16 @@ Single-package majors: supersede with a manual migration branch (done for deepgr
 in #175, vitest in #176). Also: after merging main into any deps branch, regenerate by deleting
 the ROOT lockfile + all node_modules and running one clean root `npm install` — incremental
 installs keep the old hoisting shape and break single-instance packages (vitest/jest-dom).
+
+## 2026-07-23 — Discord bot v1: account linking, slash commands, separate bot/ workspace
+**Why:** meeting host/admin must be the Discord requester, and A-Meet host rights live on real
+accounts — a one-time `/meet link` flow (short-lived signed URL opened while logged in, upsert
+on a `DiscordLink` collection) makes every later `/meet create` work with zero extra steps.
+Rejected: per-meeting one-time host links (friction on every create, DM/ephemeral juggling) and
+a bot-owned service account (requester gets no host powers). Slash commands only — native UX,
+ephemeral replies for the private link URL, no privileged Message Content intent. Bot is a new
+`bot/` monorepo workspace: a thin discord.js adapter calling new `/api/integrations/discord/*`
+endpoints over HTTP with a bot API key (only those routes accept it), deployed as one more
+container on the existing EC2 compose stack. Rejected: running the Discord client inside the
+Express server (couples uptime/restarts) and a separate repo (loses shared contracts/CI).
+Spec: `docs/specs/2026-07-23-discord-bot-design.md` · Tickets: #185, #186.
