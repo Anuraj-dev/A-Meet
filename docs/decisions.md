@@ -144,3 +144,18 @@ endpoints over HTTP with a bot API key (only those routes accept it), deployed a
 container on the existing EC2 compose stack. Rejected: running the Discord client inside the
 Express server (couples uptime/restarts) and a separate repo (loses shared contracts/CI).
 Spec: `docs/specs/2026-07-23-discord-bot-design.md` · Tickets: #185, #186.
+
+## 2026-07-23 — Discord bot prod compose service is profile-gated, not always-on
+**Why:** the existing automated server deploy runs `docker compose -f docker-compose.prod.yml up -d`
+on the whole file; an always-on bot service with `${VAR:?}` guards would break that deploy when bot
+secrets aren't provisioned. Rejected: wiring the bot into deploy-backend.yml now (deferred follow-up).
+The bot uses `:-` env defaults in compose and validates its own required env at startup (exit non-zero).
+
+## 2026-07-23 — Integration endpoints validate with Joi, not zod
+**Why:** the spec said "zod" but the repo's validation middleware and every existing schema are Joi;
+"match existing validation conventions" was the stronger signal. Rejected: introducing a second
+validation library for two routes.
+
+## 2026-07-23 — Discord integration routes bypass the room rate-limiter
+**Why:** all bot traffic egresses from one host IP; the per-IP room limiter would throttle legitimate
+`/meet create` usage. The timing-safe bot API key gate is the abuse control. Reviewer-approved.
