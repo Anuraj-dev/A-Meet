@@ -75,6 +75,15 @@ export const env = {
       floodDisconnectThreshold: num('RATE_LIMIT_SOCKET_FLOOD_DISCONNECT', 100),
     },
   },
+  // Discord bot integration (see docs/specs/2026-07-23-discord-bot-design.md).
+  // `botApiKey` is host-grade secret material — the room-creating endpoint trusts
+  // whoever holds it. Empty locally leaves the integration disabled (the bot-auth
+  // middleware then rejects every request). Never logged.
+  discord: {
+    botApiKey: process.env.DISCORD_BOT_API_KEY || '',
+    // Lifetime of the single-purpose account-link token (jsonwebtoken duration).
+    linkTokenTtl: process.env.DISCORD_LINK_TOKEN_TTL || '10m',
+  },
   transcription: {
     deepgramApiKey: process.env.DEEPGRAM_API_KEY || '',
     groqApiKey: process.env.GROQ_API_KEY || '',

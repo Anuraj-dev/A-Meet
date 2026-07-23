@@ -48,6 +48,52 @@ export interface AuthUserDto {
   avatar?: string;
 }
 
+// ── Discord integration contracts ─────────────────────────────────────────
+// Consumed by the Discord bot (ticket 2) and the client `/link/discord` page.
+
+/** Body for `POST /api/integrations/discord/link-token` (bot-key auth). */
+export interface DiscordLinkTokenRequest {
+  discordId: string;
+}
+
+/** Response of `POST /api/integrations/discord/link-token`. */
+export interface DiscordLinkTokenResponse {
+  /** Short-lived, single-purpose JWT bound to the Discord ID. */
+  token: string;
+  /** Ready-made confirmation URL the bot DMs to the user. */
+  linkUrl: string;
+}
+
+/** Body for `POST /api/integrations/discord/link` (user cookie auth). */
+export interface DiscordLinkRequest {
+  token: string;
+}
+
+/** Response of `POST /api/integrations/discord/link`. */
+export interface DiscordLinkResponse {
+  ok: true;
+}
+
+/** Body for `POST /api/integrations/discord/rooms` (bot-key auth). */
+export interface DiscordRoomRequest {
+  discordId: string;
+}
+
+/** Response of `POST /api/integrations/discord/rooms` — matches `POST /api/rooms`. */
+export interface DiscordRoomResponse {
+  roomId: string;
+}
+
+/**
+ * Error body returned by `POST /api/integrations/discord/rooms` when the given
+ * `discordId` has no linked A-Meet account. The `code` lets the bot detect this
+ * specific case (vs a generic failure) and prompt the user to run `/meet link`.
+ */
+export interface DiscordNotLinkedError {
+  error: string;
+  code: 'not_linked';
+}
+
 export interface AuthMeResponse {
   user: AuthUserDto | null;
 }
