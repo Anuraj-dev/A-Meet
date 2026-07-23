@@ -31,6 +31,12 @@ function hasEphemeral(flags: unknown): boolean {
   return typeof flags === 'number' && (flags & MessageFlags.Ephemeral) !== 0;
 }
 
+// A reply payload is PUBLIC only if it neither sets the ephemeral flag bit nor
+// the (deprecated but still honored) `ephemeral: true` shorthand.
+function isPublic(payload: { flags?: unknown; ephemeral?: unknown }): boolean {
+  return !hasEphemeral(payload.flags) && payload.ephemeral !== true;
+}
+
 function mockClient(overrides: Partial<Record<'createLinkToken' | 'createRoom', ReturnType<typeof vi.fn>>> = {}) {
   return {
     createLinkToken: overrides.createLinkToken ?? vi.fn(),
@@ -75,14 +81,31 @@ describe('handleCreate', () => {
     expect(createRoom).toHaveBeenCalledWith('42');
     // The deferred ack is ephemeral (only the invoker sees it)...
     expect(hasEphemeral(deferReply.mock.calls[0][0].flags)).toBe(true);
-    // ...but the meeting announcement is a PUBLIC followUp — no ephemeral flag.
+    // ...but the meeting announcement is a PUBLIC followUp — neither the
+    // ephemeral flag bit nor the deprecated `ephemeral: true` shorthand.
     const followUpPayload = followUp.mock.calls[0][0];
-    expect(hasEphemeral(followUpPayload.flags)).toBe(false);
+    expect(isPublic(followUpPayload)).toBe(true);
     expect(followUpPayload.embeds).toHaveLength(1);
     const rendered = JSON.stringify(followUpPayload.embeds[0].data);
     expect(rendered).toContain('http://client:5173/lobby/abc-defg-hij');
     expect(rendered).toContain('<@42>');
     expect(editReply).toHaveBeenCalled();
+  });
+
+  it('resolves the deferred reply with the link when the public post fails', async () => {
+    const { interaction, deferReply, editReply, followUp } = mockInteraction();
+    const createRoom = vi.fn().mockResolvedValue({ roomId: 'abc-defg-hij' });
+    // Channel post rejects (e.g. the bot lacks Send Messages there).
+    (followUp as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('Missing Permissions'),
+    );
+    await handleCreate(interaction, mockClient({ createRoom }), CLIENT_URL);
+
+    // The invoker is NOT left hanging: the ephemeral deferred reply is resolved
+    // with the meeting link so the created room isn't wasted.
+    expect(hasEphemeral(deferReply.mock.calls[0][0].flags)).toBe(true);
+    const editPayload = editReply.mock.calls.at(-1)![0];
+    expect(editPayload.content).toContain('http://client:5173/lobby/abc-defg-hij');
   });
 
   it('edits in an ephemeral /meet link prompt when the account is not linked', async () => {

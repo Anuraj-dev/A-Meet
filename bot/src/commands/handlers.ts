@@ -74,7 +74,19 @@ export async function handleCreate(
     );
 
   // Public channel announcement (non-ephemeral): everyone can see and join.
-  await interaction.followUp({ embeds: [embed] });
+  try {
+    await interaction.followUp({ embeds: [embed] });
+  } catch {
+    // Posting to the channel can fail (e.g. the bot lacks Send Messages/Embed
+    // Links there). The room WAS created, so resolve the deferred ephemeral
+    // reply by handing the invoker the link directly — never leave them hanging.
+    await interaction.editReply({
+      content:
+        `Your meeting is ready: ${meetingUrl}\n` +
+        "I couldn't post it to this channel — check that I can send messages here.",
+    });
+    return;
+  }
   // Resolve the ephemeral deferred reply with a private confirmation.
   await interaction.editReply({ content: 'Meeting created — join link posted in the channel.' });
 }
