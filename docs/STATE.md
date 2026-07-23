@@ -5,13 +5,15 @@
 
 ## 🚧 In progress / next
 
-- **Discord bot v1 CODE-COMPLETE & merged** (#185→PR #187, #186→PR #188; both issues closed).
-  Remaining is Raja-manual: create the Discord app/bot in the Dev Portal (`DISCORD_TOKEN`,
-  `DISCORD_CLIENT_ID`), invite with `bot`+`applications.commands` scopes, set
-  `DISCORD_BOT_API_KEY` (same value both sides), register commands
-  (`npm --prefix bot run register`, `DISCORD_GUILD_ID` for instant guild reg), and the
-  deferred prod-deploy follow-up: build/push bot image, provision `/a-meet/prod/bot/*` SSM,
-  `docker compose -f docker-compose.prod.yml --profile bot up -d bot` — see `bot/README.md`.
+- **Discord bot v1 LIVE IN PROD and verified end-to-end** (2026-07-23 pm): local + prod
+  `/meet link` and `/meet create` both confirmed working in Raja's guild (bot `ameet#2608`).
+  Post-merge fix PR #189 (see Status). Bot container runs on the EC2 box via
+  `--profile bot` (built on-box from 4054f1a); secrets in SSM `/a-meet/prod/bot/*` +
+  server key at `/a-meet/prod/server/DISCORD_BOT_API_KEY` (prod key ≠ local key).
+- Pending decision (Raja): resize ameet EBS 8→16/20GB — box at ~88% after bot image; account
+  is on the NEW credits-based AWS Free Plan ($58.41 credits left, expires 2026-11-30), so
+  resize just draws credits (~$0.70/mo equiv). Optional later: metaverse box's 30GB
+  docker-data volume could be folded into its root disk to save ~$2.40/mo.
 - Raja: one-click close epics #31/#33/#35/#37/#38 — every acceptance criterion is merged;
   agent closing was permission-blocked.
 - Remaining manual (Raja): browser-level three-path TURN force-relay verification (README);
@@ -19,6 +21,14 @@
 
 ## Status
 
+- **2026-07-23 (pm, later):** live testing found the /meet create embed was EPHEMERAL —
+  Discord forces followUps ephemeral after an ephemeral deferReply, invisible to mocked
+  tests. **PR #189** (merged 4054f1a): public embed now via `channel.send()` +
+  `isSendable()` guard; codex round 1 (Sol high) also caught DM invocability → `/meet` is
+  now guild-only (`setContexts`). Prod deploys of #187/#188 had FAILED on
+  no-space-left-on-device (8GB disk, 92%); pruned images/apt → rerun deploy green.
+  Bot deployed to prod and verified. CI flakes seen: mongodb-binary download race in
+  Server tests + npm-audit registry 400 — both passed on rerun.
 - **2026-07-23 (pm):** Discord bot v1 shipped. **#185/PR #187** — `DiscordLink` model,
   timing-safe `X-Bot-Api-Key` middleware, `/api/integrations/discord/{link-token,link,rooms}`
   (Joi validation — repo convention, not spec's "zod"), client `/link/discord` page; review
