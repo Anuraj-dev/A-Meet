@@ -9,7 +9,7 @@
 // resumes the drained bucket instead of resetting it.
 //
 // A bucket holds up to `capacity` tokens and refills at `refillPerSec`; every
-// guarded event spends one token. When a bucket runs dry the event is DROPPED —
+// guarded event spends one token unless it supplies a size-based cost. When a bucket runs dry the event is DROPPED —
 // the handler never runs — and, if the event carried an ack callback, that
 // callback receives a structured `{ error, retryAfterMs }` (the same shape the
 // HTTP 429 body uses) so the client can back off. We never disconnect on an
@@ -44,27 +44,46 @@ export interface BucketState {
 
 export interface ConsumeResult {
   allowed: boolean;
-  /** When denied, ms until enough tokens refill to allow one event. */
+  /** When denied, ms until enough tokens refill to cover the requested cost. */
   retryAfterMs: number;
 }
 
 /**
- * Refill by elapsed time, then try to spend one token. Mutates `state`.
+ * Refill by elapsed time, then try to spend the requested number of tokens. Mutates `state`.
  * Pure aside from the mutation + the injected `now`, so it unit-tests cleanly.
  */
-export function consumeToken(state: BucketState, config: BucketConfig, now: number): ConsumeResult {
+export function consumeToken(state: BucketState, config: BucketConfig, now: number, cost = 1): ConsumeResult {
   const elapsedSec = Math.max(0, (now - state.last) / 1000);
   state.tokens = Math.min(config.capacity, state.tokens + elapsedSec * config.refillPerSec);
   state.last = now;
 
-  if (state.tokens >= 1) {
-    state.tokens -= 1;
+  if (state.tokens >= cost) {
+    state.tokens -= cost;
     return { allowed: true, retryAfterMs: 0 };
   }
 
-  const deficit = 1 - state.tokens;
+  const deficit = cost - state.tokens;
   const retryAfterMs = Math.ceil((deficit / config.refillPerSec) * 1000);
   return { allowed: false, retryAfterMs };
+}
+
+/** Serialized byte size of a chat event's first argument, or null if it cannot be encoded. */
+export function chatPayloadByteLength(payload: unknown): number | null {
+  try {
+    const serialized = JSON.stringify(payload);
+    return typeof serialized === 'string' ? Buffer.byteLength(serialized, 'utf8') : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Cost of a complete chat payload in UTF-8 kilobyte tokens. */
+export function chatMessageTokenCost(payload: unknown): number {
+  const bytes = chatPayloadByteLength(payload);
+  // A value Socket.IO cannot serialize must never become a cheap rate-limit bypass.
+  return bytes === null
+    ? env.rateLimit.socket.chat.capacity
+    : Math.max(1, Math.ceil(bytes / 1000));
 }
 
 /**
@@ -119,6 +138,10 @@ export interface SocketRateLimiter {
     bucket: string,
     event: string,
     handler: (...args: A) => void,
+    options?: {
+      cost?: (...args: A) => number;
+      rateLimitAck?: (retryAfterMs: number) => unknown;
+    },
   ): (...args: A) => void;
   /** Exposed for tests: the actor's bucket state (created on demand). */
   getState(socket: Socket, bucket: string): BucketState;
@@ -185,6 +208,10 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
     bucket: string,
     event: string,
     handler: (...args: A) => void,
+    options?: {
+      cost?: (...args: A) => number;
+      rateLimitAck?: (retryAfterMs: number) => unknown;
+    },
   ): (...args: A) => void {
     const config = opts.buckets[bucket];
     if (!config) throw new Error(`Unknown rate-limit bucket: ${bucket}`);
@@ -194,7 +221,14 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
 
     return (...args: A): void => {
       const state = getState(socket, bucket);
-      const { allowed, retryAfterMs } = consumeToken(state, config, now());
+      const requestedCost = options?.cost?.(...args) ?? 1;
+      // Clamp deliberately: a legal message may cost more than capacity (for
+      // example 16,000 CJK characters). It is admitted once and drains this
+      // bucket instead of being permanently impossible to send.
+      const cost = Number.isFinite(requestedCost) && requestedCost > 0
+        ? Math.min(Math.ceil(requestedCost), config.capacity)
+        : 1;
+      const { allowed, retryAfterMs } = consumeToken(state, config, now(), cost);
 
       if (allowed) {
         state.violations = 0;
@@ -229,7 +263,7 @@ export function createSocketRateLimiter(opts: SocketRateLimiterOptions): SocketR
       // event is silently dropped (no ack channel to answer on).
       const maybeCallback = args[args.length - 1];
       if (typeof maybeCallback === 'function') {
-        (maybeCallback as (ack: { error: string; retryAfterMs: number }) => void)({
+        (maybeCallback as (ack: unknown) => void)(options?.rateLimitAck?.(retryAfterMs) ?? {
           error: 'Rate limit exceeded — slow down and try again.',
           retryAfterMs,
         });

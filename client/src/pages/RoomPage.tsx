@@ -101,6 +101,8 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [users, setUsers] = useState<RoomUser[]>([]);
   const [input, setInput] = useState('');
+  const [chatError, setChatError] = useState('');
+  const [chatSendPending, setChatSendPending] = useState(false);
   // Single right rail: only one of Chat / People / Transcript is open at a time (Meet-style).
   const [activePanel, setActivePanel] = useState<ActivePanel>(null); // 'chat' | 'people' | 'transcript' | null
   const showChat = activePanel === 'chat';
@@ -350,7 +352,14 @@ export default function RoomPage() {
       playSound('leave');
     });
     socket.on('chat-message', (msg) => {
-      setMessages((prev) => [...prev, { type: 'chat', ...msg }]);
+      setMessages((prev) => [...prev, {
+        type: 'chat',
+        id: msg.id,
+        kind: msg.kind,
+        sender: msg.sender,
+        text: msg.text,
+        ts: msg.sentAt,
+      }]);
       const fromOther = msg.sender?.id !== userIdRef.current;
       if (fromOther) playSound('message');
       // When the chat is closed, surface a Meet-style preview + unread badge.
@@ -472,10 +481,22 @@ export default function RoomPage() {
 
   function sendMessage(e: FormEvent) {
     e.preventDefault();
-    const text = input.trim();
-    if (!text) return;
-    socket.emit('chat-message', { roomId, text });
-    setInput('');
+    if (!input.trim() || chatSendPending) return;
+    const sentText = input;
+    setChatSendPending(true);
+    socket.timeout(8000).emit('chat-message', { text: sentText }, (err, response) => {
+      setChatSendPending(false);
+      if (err || !response) {
+        setChatError("Couldn't send — try again");
+        return;
+      }
+      if (response.ok) {
+        setInput((current) => current === sentText ? '' : current);
+        setChatError('');
+        return;
+      }
+      setChatError(response.message);
+    });
   }
 
 
@@ -1416,8 +1437,13 @@ export default function RoomPage() {
           <ChatPanel
             messages={messages}
             input={input}
-            setInput={setInput}
+            setInput={(value) => {
+              setInput(value);
+              setChatError('');
+            }}
             onSend={sendMessage}
+            sendError={chatError}
+            sending={chatSendPending}
             currentUserId={user?.id}
             onClose={() => setActivePanel(null)}
           />

@@ -38,6 +38,11 @@ vi.mock('../src/config/logger.js', () => ({
 import { registerHandlers } from '../src/socket/handlers.js';
 import { registerWebrtcHandlers } from '../src/socket/webrtc.js';
 import { registerSfuHandlers } from '../src/socket/sfu-handlers.js';
+// The REAL limiter — handlers.test.js deliberately does not mock it, so the
+// chat guard these tests exercise is the production one, wired with production
+// options and the production env bucket config.
+import { chatMessageTokenCost, socketRateLimiter } from '../src/socket/rate-limit.js';
+import { env } from '../src/config/env.js';
 import {
   addUser, removeUser, getRoomUsers, isUserInRoom, getUserRoom,
 } from '../src/socket/room-manager.js';
@@ -304,48 +309,176 @@ describe('disconnect grace window', () => {
 // chat-message
 // ---------------------------------------------------------------------------
 describe('chat-message', () => {
-  it('broadcasts chat-message to the room with sender + text + ts', () => {
-    const { handlers, ioEmits } = setup();
+  it('rejects malformed event arguments without throwing and uses a trailing acknowledgement', () => {
+    getUserRoom.mockReturnValue(ROOM);
 
-    handlers['chat-message']({ roomId: ROOM, text: 'Hello' });
+    const noPayload = setup({ ...USER, id: 'user-no-payload' });
+    expect(() => noPayload.handlers['chat-message']()).not.toThrow();
+
+    const nullPayload = setup({ ...USER, id: 'user-null-payload' });
+    const nullCallback = vi.fn();
+    expect(() => nullPayload.handlers['chat-message'](null, nullCallback)).not.toThrow();
+    expect(nullCallback).toHaveBeenCalledWith({
+      ok: false,
+      code: 'EMPTY_MESSAGE',
+      message: expect.any(String),
+    });
+
+    const extraArgument = setup({ ...USER, id: 'user-extra-argument' });
+    const callback = vi.fn();
+    expect(() => extraArgument.handlers['chat-message']({ text: 'x' }, 'extra', callback)).not.toThrow();
+    expect(callback).toHaveBeenCalledWith({ ok: true, messageId: expect.any(String) });
+  });
+
+  it('delivers an exactly 16,000-character message intact with server-minted metadata', () => {
+    const { handlers, ioEmits } = setup();
+    const callback = vi.fn();
+    const text = 'x'.repeat(16_000);
+    getUserRoom.mockReturnValue(ROOM);
+
+    handlers['chat-message']({ text }, callback);
 
     const msg = ioEmits.find((e) => e.event === 'chat-message');
     expect(msg).toBeDefined();
+    expect(msg.target).toBe(ROOM);
     expect(msg.payload.sender).toEqual(USER);
-    expect(msg.payload.text).toBe('Hello');
-    expect(typeof msg.payload.ts).toBe('number');
+    expect(msg.payload.text).toBe(text);
+    expect(msg.payload.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(msg.payload.kind).toBe('text');
+    expect(typeof msg.payload.sentAt).toBe('number');
+    expect(callback).toHaveBeenCalledWith({ ok: true, messageId: msg.payload.id });
   });
 
-  it('ignores empty text', () => {
+  it('rejects empty text without broadcasting it', () => {
     const { handlers, ioEmits } = setup();
-    handlers['chat-message']({ roomId: ROOM, text: '' });
+    const callback = vi.fn();
+    getUserRoom.mockReturnValue(ROOM);
+    handlers['chat-message']({ text: '' }, callback);
+
+    expect(callback).toHaveBeenCalledWith({ ok: false, code: 'EMPTY_MESSAGE', message: expect.any(String) });
     expect(ioEmits.some((e) => e.event === 'chat-message')).toBe(false);
   });
 
-  it('ignores whitespace-only text', () => {
+  it('rejects a sender that is not in a room', () => {
     const { handlers, ioEmits } = setup();
-    handlers['chat-message']({ roomId: ROOM, text: '   ' });
+    const callback = vi.fn();
+    getUserRoom.mockReturnValue(null);
+    handlers['chat-message']({ text: 'Hi' }, callback);
+
+    expect(callback).toHaveBeenCalledWith({ ok: false, code: 'NOT_IN_ROOM', message: expect.any(String) });
     expect(ioEmits.some((e) => e.event === 'chat-message')).toBe(false);
   });
 
-  it('ignores non-string text', () => {
-    const { handlers, ioEmits } = setup();
-    handlers['chat-message']({ roomId: ROOM, text: 42 });
-    expect(ioEmits.some((e) => e.event === 'chat-message')).toBe(false);
+  it('rejects a 16,001-character message without broadcasting it', () => {
+    const { handlers, ioEmits } = setup({ ...USER, id: 'user-oversized-message' });
+    const callback = vi.fn();
+    getUserRoom.mockReturnValue(ROOM);
+
+    handlers['chat-message']({ text: 'x'.repeat(16_001) }, callback);
+
+    expect(callback).toHaveBeenCalledWith({
+      ok: false,
+      code: 'MESSAGE_TOO_LONG',
+      message: expect.any(String),
+      maxLength: 16_000,
+    });
+    expect(ioEmits.some((event) => event.event === 'chat-message')).toBe(false);
   });
 
-  it('ignores missing roomId', () => {
-    const { handlers, ioEmits } = setup();
-    handlers['chat-message']({ text: 'Hi' });
-    expect(ioEmits.some((e) => e.event === 'chat-message')).toBe(false);
+  it('rejects a payload whose serialized size exceeds the chat byte backstop', () => {
+    const { handlers, ioEmits } = setup({ ...USER, id: 'user-padded-payload' });
+    const callback = vi.fn();
+    getUserRoom.mockReturnValue(ROOM);
+
+    handlers['chat-message']({ text: 'ok', padding: 'x'.repeat(64 * 1024) }, callback);
+
+    expect(callback).toHaveBeenCalledWith({
+      ok: false,
+      code: 'MESSAGE_TOO_LONG',
+      message: expect.any(String),
+      maxLength: 16_000,
+    });
+    expect(ioEmits.some((event) => event.event === 'chat-message')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// chat-message rate limiting — asserts the PRODUCTION guard options, not a
+// reconstruction of them. socket/rate-limit.js is not mocked in this file, so
+// `handlers['chat-message']` IS the guarded wrapper handlers.js registered,
+// spending tokens from the real env-configured chat bucket.
+// ---------------------------------------------------------------------------
+describe('chat-message rate limiting (production wiring)', () => {
+  it('guards chat-message on the chat bucket with the production cost + rateLimitAck options', () => {
+    const guardSpy = vi.spyOn(socketRateLimiter, 'guard');
+    try {
+      setup({ ...USER, id: 'user-guard-options' }, 'sock-guard-options');
+
+      const chatGuard = guardSpy.mock.calls
+        .find(([, bucket, event]) => bucket === 'chat' && event === 'chat-message');
+      expect(chatGuard, 'handlers.js must guard chat-message on the chat bucket').toBeDefined();
+
+      const options = chatGuard[4];
+      expect(options, 'handlers.js must pass cost + rateLimitAck options').toBeDefined();
+
+      // cost() is the size-weighted cost of the WHOLE payload — padding beyond
+      // the text field is charged, so it cannot be a flat per-event 1.
+      const small = { text: 'hello' };
+      const padded = { text: 'ok', padding: 'x'.repeat(15_000) };
+      expect(options.cost(small)).toBe(chatMessageTokenCost(small));
+      expect(options.cost(padded)).toBe(chatMessageTokenCost(padded));
+      expect(options.cost(padded)).toBeGreaterThan(options.cost(small));
+
+      // rateLimitAck() mints exactly the locked wire shape, echoing retryAfterMs.
+      const ack = options.rateLimitAck(1_234);
+      expect(ack).toEqual({
+        ok: false,
+        code: 'RATE_LIMITED',
+        message: expect.any(String),
+        retryAfterMs: 1_234,
+      });
+      expect(ack.message.length).toBeGreaterThan(0);
+    } finally {
+      guardSpy.mockRestore();
+    }
   });
 
-  it('trims and caps text to 1000 characters', () => {
-    const { handlers, ioEmits } = setup();
-    const long = 'x'.repeat(1500);
-    handlers['chat-message']({ roomId: ROOM, text: '  ' + long + '  ' });
-    const msg = ioEmits.find((e) => e.event === 'chat-message');
-    expect(msg.payload.text.length).toBe(1000);
+  it('drops an over-budget send through the production guard and acks the locked RATE_LIMITED shape', () => {
+    const { handlers, ioEmits } = setup(
+      { ...USER, id: 'user-production-rate-limit' },
+      'sock-production-rate-limit',
+    );
+    getUserRoom.mockReturnValue(ROOM);
+
+    // Each send is deliberately big enough to cost several tokens, so the
+    // bucket drains in a handful of calls no matter how fast the loop runs
+    // (the limiter reads the real clock; refill over a few ms is negligible).
+    const text = 'x'.repeat(4_000);
+    const costPerSend = chatMessageTokenCost({ text });
+    const { capacity } = env.rateLimit.socket.chat;
+    const sends = Math.ceil(capacity / costPerSend) + 3;
+
+    const acks = [];
+    for (let i = 0; i < sends; i += 1) {
+      handlers['chat-message']({ text: `${i}-${text}` }, (ack) => acks.push(ack));
+    }
+
+    const accepted = acks.filter((ack) => ack.ok);
+    const denied = acks.filter((ack) => !ack.ok);
+    expect(accepted.length).toBeGreaterThan(0);
+    expect(denied.length).toBeGreaterThan(0);
+
+    expect(denied[0]).toEqual({
+      ok: false,
+      code: 'RATE_LIMITED',
+      message: expect.any(String),
+      retryAfterMs: expect.any(Number),
+    });
+    expect(denied[0].message.length).toBeGreaterThan(0);
+    expect(denied[0].retryAfterMs).toBeGreaterThan(0);
+
+    // A denied send never reaches the room: exactly one broadcast per ok ack.
+    expect(ioEmits.filter((e) => e.event === 'chat-message')).toHaveLength(accepted.length);
   });
 });
 

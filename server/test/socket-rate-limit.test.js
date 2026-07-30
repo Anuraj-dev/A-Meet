@@ -12,7 +12,8 @@ vi.mock('../src/config/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() },
 }));
 
-import { actorKeyFor, consumeToken, createSocketRateLimiter } from '../src/socket/rate-limit.js';
+import { actorKeyFor, chatMessageTokenCost, consumeToken, createSocketRateLimiter } from '../src/socket/rate-limit.js';
+import { env } from '../src/config/env.js';
 
 // Fake socket supporting multiple 'disconnect' listeners (like real socket.io).
 function makeSocket({ id = 'sock-1', userId = 'user-1', headers = {}, address = '10.0.0.9' } = {}) {
@@ -114,6 +115,40 @@ describe('createSocketRateLimiter — guard', () => {
     expect(ack.retryAfterMs).toBeGreaterThan(0);
   });
 
+  it('uses the chat contract rate-limit acknowledgement when a chat send is over budget', () => {
+    const limiter = createSocketRateLimiter({
+      ...opts(),
+      buckets: { chat: { capacity: 1, refillPerSec: 1 }, signaling: { capacity: 5, refillPerSec: 5 } },
+    });
+    const socket = makeSocket();
+    const handler = vi.fn();
+    const callback = vi.fn();
+    const wrapped = limiter.guard(socket, 'chat', 'chat-message', handler, {
+      cost: (payload) => chatMessageTokenCost(payload),
+      rateLimitAck: (retryAfterMs) => ({
+        ok: false,
+        code: 'RATE_LIMITED',
+        message: 'Rate limit exceeded — slow down and try again.',
+        retryAfterMs,
+      }),
+    });
+
+    wrapped({ text: 'first' }, callback);
+    wrapped({ text: 'second' }, callback);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(callback).toHaveBeenCalledWith({
+      ok: false,
+      code: 'RATE_LIMITED',
+      message: expect.any(String),
+      retryAfterMs: expect.any(Number),
+    });
+    const ack = callback.mock.calls[0][0];
+    expect(ack.message).not.toHaveLength(0);
+    expect(ack.retryAfterMs).toBeGreaterThan(0);
+  });
+
   it('drops silently (no throw) when the over-limit event has no ack callback', () => {
     const limiter = createSocketRateLimiter(opts());
     const socket = makeSocket();
@@ -140,6 +175,45 @@ describe('createSocketRateLimiter — guard', () => {
     now += 1000;
     wrapped({});
     expect(handler).toHaveBeenCalledTimes(3);
+  });
+
+  it('admits a legal 16,000-character multibyte chat message and drains the bucket', () => {
+    const limiter = createSocketRateLimiter({
+      ...opts(),
+      buckets: { chat: { capacity: 20, refillPerSec: 1 }, signaling: { capacity: 5, refillPerSec: 5 } },
+    });
+    const socket = makeSocket();
+    const handler = vi.fn();
+    const wrapped = limiter.guard(socket, 'chat', 'chat-message', handler, {
+      cost: (payload) => chatMessageTokenCost(payload),
+    });
+
+    wrapped({ text: '漢'.repeat(16_000) });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(limiter.getState(socket, 'chat').tokens).toBe(0);
+  });
+
+  it('charges an unserializable chat payload at the full chat bucket capacity', () => {
+    expect(chatMessageTokenCost({ text: 'hi', invalid: BigInt(1) }))
+      .toBe(env.rateLimit.socket.chat.capacity);
+  });
+
+  it('charges padding in the complete chat payload instead of its tiny text field', () => {
+    const limiter = createSocketRateLimiter({
+      ...opts(),
+      buckets: { chat: { capacity: 20, refillPerSec: 1 }, signaling: { capacity: 5, refillPerSec: 5 } },
+    });
+    const socket = makeSocket({ id: 'padded-socket' });
+    const handler = vi.fn();
+    const wrapped = limiter.guard(socket, 'chat', 'chat-message', handler, {
+      cost: (payload) => chatMessageTokenCost(payload),
+    });
+
+    wrapped({ text: 'ok', padding: 'x'.repeat(15_000) });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(limiter.getState(socket, 'chat').tokens).toBe(4);
   });
 
   it('disconnects the socket only after sustained flooding past the threshold', () => {

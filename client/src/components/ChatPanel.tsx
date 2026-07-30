@@ -13,12 +13,16 @@ import {
 import { usePanelDialog } from '../hooks/usePanelDialog';
 
 interface ChatSender { id: string; name?: string; avatar?: string }
-export interface ChatMessage { id?: string; type?: 'event' | 'chat'; text: string; ts: string | number | Date; sender?: ChatSender }
+export interface ChatMessage { id?: string; kind?: 'text'; type?: 'event' | 'chat'; text: string; ts: string | number | Date; sender?: ChatSender }
+const CHAT_MESSAGE_LIMIT = 16_000;
+const CHAT_COUNTER_THRESHOLD = 14_000;
 interface ChatPanelProps {
   messages: ChatMessage[];
   input: string;
   setInput: (value: string) => void;
   onSend: (event: FormEvent) => void;
+  sendError?: string;
+  sending: boolean;
   currentUserId?: string;
   onClose: () => void;
 }
@@ -55,7 +59,7 @@ function messageKey(msg: ChatMessage): string {
 
 // In-call chat. Desktop: a 372px wide in-flow side column.
 // Mobile: a bottom sheet (62vh, slides up over the video, with backdrop).
-export default function ChatPanel({ messages, input, setInput, onSend, currentUserId, onClose }: ChatPanelProps) {
+export default function ChatPanel({ messages, input, setInput, onSend, sendError, sending, currentUserId, onClose }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const copyFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Monotonic token so only the latest copy request may apply feedback.
@@ -64,6 +68,18 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
   const isMobile = useMediaQuery((theme) => theme.breakpoints.down('sm'));
   const { initialFocusRef, panelRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
+  const tooLong = input.length > CHAT_MESSAGE_LIMIT;
+  const composerError = tooLong
+    ? `Messages can be at most ${CHAT_MESSAGE_LIMIT} characters.`
+    : sendError;
+
+  function handleSubmit(event: FormEvent) {
+    if (tooLong) {
+      event.preventDefault();
+      return;
+    }
+    onSend(event);
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -276,7 +292,7 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
       </Box>
 
       {/* Composer */}
-      <Box component="form" onSubmit={onSend} sx={{ px: 2, py: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+      <Box component="form" onSubmit={handleSubmit} sx={{ px: 2, py: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
         <TextField
           fullWidth
           size="small"
@@ -284,12 +300,14 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
           value={input}
           onChange={(e) => setInput(e.target.value)}
           autoComplete="off"
+          error={Boolean(composerError)}
+          helperText={composerError}
           slotProps={{
             input: {
               sx: { borderRadius: 999, bgcolor: 'rgba(255,255,255,0.04)' },
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton type="submit" size="small" aria-label="Send message" disabled={!input.trim()} color="primary">
+                  <IconButton type="submit" size="small" aria-label="Send message" disabled={!input.trim() || tooLong || sending} color="primary">
                     <SendIcon fontSize="small" />
                   </IconButton>
                 </InputAdornment>
@@ -297,6 +315,15 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
             },
           }}
         />
+        {input.length > CHAT_COUNTER_THRESHOLD && (
+          <Typography
+            variant="caption"
+            color={tooLong ? 'error' : 'text.secondary'}
+            sx={{ display: 'block', mt: 0.5, textAlign: 'right' }}
+          >
+            {input.length} / {CHAT_MESSAGE_LIMIT}
+          </Typography>
+        )}
       </Box>
     </Box>
   );
