@@ -1,5 +1,5 @@
 import { createContext, useEffect, useState, type ReactNode } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router';
 import { Box, CircularProgress } from '@mui/material';
 import api from '../api/axios';
 import CheckMeetingCode from '../pages/CheckMeetingCode';
