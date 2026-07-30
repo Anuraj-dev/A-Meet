@@ -144,6 +144,21 @@ describe('startContributor', () => {
     expect(mockSessionInstance.start).toHaveBeenCalledTimes(1);
   });
 
+  // Contract-level removal makes an interim emit a type error; this fake-io assertion covers the existing server seam.
+  it('does not broadcast provider interim results to room participants', async () => {
+    const socketId = uid();
+    const { io, emits } = makeIo();
+    const socket = makeSocket(socketId);
+    env.transcription.deepgramApiKey = 'key';
+
+    await startContributor({ io, socket, roomId: ROOM });
+
+    const { onInterim } = DeepgramMeetingSession.mock.calls.at(-1)[0];
+    onInterim({ utteranceId: 'utterance-1', text: 'still speaking' });
+
+    expect(emits).not.toContainEqual(expect.objectContaining({ event: 'transcript-interim' }));
+  });
+
   it('cleans up the sessions map if session.start() throws', async () => {
     const socketId = uid();
     const { io } = makeIo();

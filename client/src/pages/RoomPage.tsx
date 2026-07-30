@@ -32,7 +32,6 @@ import ChatPanel from '../components/ChatPanel';
 import PeoplePanel from '../components/PeoplePanel';
 import MediaReconnectingAlert from '../components/MediaReconnectingAlert';
 import TranscriptPanel from '../components/TranscriptPanel';
-import LiveCaptions from '../components/LiveCaptions';
 import CallNotifications from '../components/CallNotifications';
 import ReactionsOverlay from '../components/ReactionsOverlay';
 import type { ChatMessage } from '../components/ChatPanel';
@@ -43,7 +42,6 @@ import type {
   RoomUser,
   TranscriptContributorState,
   TranscriptEntry,
-  TranscriptInterim,
   TranscriptState,
 } from '@a-meet/contracts';
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
@@ -113,13 +111,10 @@ export default function RoomPage() {
   });
   const [transcriptEntries, setTranscriptEntries] = useState<TranscriptEntry[]>([]);
   const [transcriptConfigured, setTranscriptConfigured] = useState<boolean | null>(null);
-  const [transcriptInterims, setTranscriptInterims] = useState<Record<string, TranscriptInterim>>({});
   const [contributorState, setContributorState] = useState<ContributorViewState>({ status: 'idle', provider: null, error: '' });
   const [transcriptConsent, setTranscriptConsent] = useState(hasTranscriptConsent);
   const [transcriptConsentOpen, setTranscriptConsentOpen] = useState(false);
   const pendingTranscriptStartRef = useRef(false);
-  const [latestCaption, setLatestCaption] = useState<TranscriptEntry | null>(null);
-  const captionTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [unreadCount, setUnreadCount] = useState(0);
   // Host asked us to unmute — surfaced as a one-tap prompt (never forced).
   const [unmuteRequestFrom, setUnmuteRequestFrom] = useState<string | null>(null);
@@ -240,9 +235,6 @@ export default function RoomPage() {
     audioTrack: localAudioOn ? audioTrack : null,
     onChunk: sendTranscriptAudio,
   });
-  const transcriptInterimList = Object.values(transcriptInterims).sort((a, b) => a.ts - b.ts);
-  const latestInterim = transcriptInterimList[transcriptInterimList.length - 1] ?? null;
-
   useEffect(() => {
     if (!shouldContributeTranscript || !pcmCapture.supported) return undefined;
     let cancelled = false;
@@ -356,9 +348,6 @@ export default function RoomPage() {
       setMessages((prev) => [...prev, { type: 'event', text: `${u.name} left`, ts: Date.now() }]);
       pushNote({ kind: 'event', variant: 'leave', name: u.name, avatar: u.avatar });
       playSound('leave');
-      setTranscriptInterims((current) => Object.fromEntries(
-        Object.entries(current).filter(([, interim]) => interim.speaker?.id !== u.id),
-      ));
     });
     socket.on('chat-message', (msg) => {
       setMessages((prev) => [...prev, { type: 'chat', ...msg }]);
@@ -393,7 +382,6 @@ export default function RoomPage() {
     });
     socket.on('transcript-state', (state) => {
       setTranscriptState(state);
-      setTranscriptInterims({});
       if (state.active) {
         setActivePanel('transcript');
         if (!hasTranscriptConsent()
@@ -404,17 +392,6 @@ export default function RoomPage() {
     });
     socket.on('transcript-segment', (entry) => {
       setTranscriptEntries((current) => mergeTranscriptEntries(current, [entry]));
-      setLatestCaption(entry);
-      clearTimeout(captionTimerRef.current);
-      captionTimerRef.current = setTimeout(() => setLatestCaption(null), 6500);
-    });
-    socket.on('transcript-interim', (interim) => {
-      setTranscriptInterims((current) => {
-        const next = { ...current };
-        if (interim.text) next[interim.utteranceId] = interim;
-        else delete next[interim.utteranceId];
-        return next;
-      });
     });
     socket.on('transcript-contributor-state', (state) => {
       setContributorState({
@@ -443,7 +420,6 @@ export default function RoomPage() {
       socket.off('transcript-snapshot');
       socket.off('transcript-state');
       socket.off('transcript-segment');
-      socket.off('transcript-interim');
       socket.off('transcript-contributor-state');
       socket.off('sfu-meeting-ended');
       socket.off('sfu-hand-raise-update', onPeerHandRaise);
@@ -454,7 +430,6 @@ export default function RoomPage() {
       // the packet doesn't flush before disconnect, the grace window still covers it.
       socket.emit('leave-room', roomId);
       socket.disconnect();
-      clearTimeout(captionTimerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
@@ -1285,11 +1260,6 @@ export default function RoomPage() {
           {/* Bottom-left floating emoji stream (M7.5) */}
           <ReactionsOverlay reactions={floatingReactions} />
 
-          <LiveCaptions
-            entry={transcriptState.active ? latestCaption : null}
-            interim={transcriptState.active ? latestInterim : null}
-          />
-
           {/* Top overlay: meeting info (left) + participants (right) */}
           <Box
             sx={{
@@ -1470,8 +1440,6 @@ export default function RoomPage() {
           open={showTranscript}
           entries={transcriptEntries}
           active={transcriptState.active}
-          interims={transcriptInterimList}
-          contributorStatus={shouldContributeTranscript ? contributorState.status : (localAudioOn ? 'idle' : 'paused')}
           contributorError={contributorState.error || pcmCapture.error}
           isHost={isHost}
           canContribute={transcriptConsent && pcmCapture.supported && !!transcriptConfigured}
