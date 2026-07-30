@@ -142,7 +142,7 @@ describe('DeepgramMeetingSession provider lifecycle', () => {
 });
 
 describe('DeepgramMeetingSession turn assembly', () => {
-  it('broadcasts interim text and finalizes one audio-backed utterance', () => {
+  it('accumulates interim text and finalizes one audio-backed utterance', () => {
     const onInterim = vi.fn();
     const onFinal = vi.fn();
     const session = new DeepgramMeetingSession({

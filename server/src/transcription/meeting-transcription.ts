@@ -31,14 +31,9 @@ export async function startContributor({ io, socket, roomId }: { io: Server; soc
   const session = new DeepgramMeetingSession({
     socketId: socket.id,
     onStatus: (state) => socket.emit('transcript-contributor-state', state),
-    onInterim: ({ utteranceId, text }) => {
-      io.to(roomId).emit('transcript-interim', {
-        utteranceId,
-        speaker: { id: user.id, name: user.name, avatar: user.avatar || '' },
-        text,
-        ts: Date.now(),
-      });
-    },
+    // Deepgram still returns interims so it can assemble a complete final turn.
+    // They are deliberately not sent to meeting participants.
+    onInterim: () => {},
     onFinal: ({ utteranceId, text, audio }) => {
       const appended = appendTranscriptSegment(roomId, user, {
         clientSegmentId: `provider:${utteranceId}`,

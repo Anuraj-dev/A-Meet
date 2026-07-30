@@ -1,9 +1,15 @@
-import { useEffect, useRef, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   Avatar, Box, Chip, IconButton, InputAdornment, Modal, TextField, Tooltip, Typography,
   useMediaQuery,
 } from '@mui/material';
-import { Close as CloseIcon, Send as SendIcon } from '@mui/icons-material';
+import {
+  Check as CheckIcon,
+  Close as CloseIcon,
+  ContentCopy as ContentCopyIcon,
+  ErrorOutlineOutlined as ErrorOutlineIcon,
+  Send as SendIcon,
+} from '@mui/icons-material';
 import { usePanelDialog } from '../hooks/usePanelDialog';
 
 interface ChatSender { id: string; name?: string; avatar?: string }
@@ -17,8 +23,16 @@ interface ChatPanelProps {
   onClose: () => void;
 }
 
+type CopyFeedback = { key: string; status: 'copied' | 'failed' };
+
+const COPY_FEEDBACK_MS = 1800;
+
 function formatTime(ts: string | number | Date): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function senderLabel(msg: ChatMessage): string {
+  return msg.sender?.name?.trim() || 'Unknown';
 }
 
 // Stable React key tied to message identity, not array position — so React
@@ -43,12 +57,48 @@ function messageKey(msg: ChatMessage): string {
 // Mobile: a bottom sheet (62vh, slides up over the video, with backdrop).
 export default function ChatPanel({ messages, input, setInput, onSend, currentUserId, onClose }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const copyFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonic token so only the latest copy request may apply feedback.
+  const copyRequestId = useRef(0);
+  const unmountedRef = useRef(false);
   const isMobile = useMediaQuery((theme) => theme.breakpoints.down('sm'));
   const { initialFocusRef, panelRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      if (copyFeedbackTimer.current) clearTimeout(copyFeedbackTimer.current);
+    };
+  }, []);
+
+  function showCopyFeedback(key: string, status: CopyFeedback['status']) {
+    if (unmountedRef.current) return;
+    if (copyFeedbackTimer.current) clearTimeout(copyFeedbackTimer.current);
+    setCopyFeedback({ key, status });
+    copyFeedbackTimer.current = setTimeout(() => {
+      setCopyFeedback(null);
+      copyFeedbackTimer.current = null;
+    }, COPY_FEEDBACK_MS);
+  }
+
+  async function copyMessage(key: string, text: string) {
+    const requestId = ++copyRequestId.current;
+    try {
+      await navigator.clipboard.writeText(text);
+      // Ignore stale settlements and post-unmount completions.
+      if (unmountedRef.current || requestId !== copyRequestId.current) return;
+      showCopyFeedback(key, 'copied');
+    } catch {
+      if (unmountedRef.current || requestId !== copyRequestId.current) return;
+      showCopyFeedback(key, 'failed');
+    }
+  }
 
   const panel = (
     <Box
@@ -139,6 +189,13 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
             );
           }
           const isMe = msg.sender?.id === currentUserId;
+          const from = senderLabel(msg);
+          const idleCopyLabel = `Copy message from ${from}`;
+          const feedback = copyFeedback?.key === key ? copyFeedback.status : null;
+          const copyLabel =
+            feedback === 'copied' ? 'Copied'
+              : feedback === 'failed' ? "Couldn't copy"
+                : idleCopyLabel;
           return (
             <Box
               key={key}
@@ -146,8 +203,11 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
                 display: 'flex',
                 flexDirection: isMe ? 'row-reverse' : 'row',
                 alignItems: 'flex-end',
-                gap: 1,
+                gap: 0.5,
                 mb: 1.5,
+                // Reveal copy control on row hover / keyboard focus; always on touch.
+                '&:hover .chat-copy-btn, &:focus-within .chat-copy-btn': { opacity: 1 },
+                '@media (hover: none)': { '& .chat-copy-btn': { opacity: 1 } },
               }}
             >
               {!isMe && (
@@ -182,6 +242,33 @@ export default function ChatPanel({ messages, input, setInput, onSend, currentUs
                   {formatTime(msg.ts)}
                 </Typography>
               </Box>
+              {/* Copy sits at the bubble edge (sibling, not absolute — avoids overflow clip). */}
+              <Tooltip title={copyLabel}>
+                <IconButton
+                  className="chat-copy-btn"
+                  size="small"
+                  aria-label={copyLabel}
+                  onClick={() => { void copyMessage(key, msg.text); }}
+                  sx={{
+                    alignSelf: 'center',
+                    opacity: 0,
+                    transition: 'opacity 0.15s ease',
+                    color: 'text.secondary',
+                    width: 28,
+                    height: 28,
+                    // Stay visible while keyboard-focused even after hover ends.
+                    '&:focus-visible': { opacity: 1 },
+                  }}
+                >
+                  {feedback === 'copied' ? (
+                    <CheckIcon sx={{ fontSize: 16 }} />
+                  ) : feedback === 'failed' ? (
+                    <ErrorOutlineIcon sx={{ fontSize: 16 }} />
+                  ) : (
+                    <ContentCopyIcon sx={{ fontSize: 16 }} />
+                  )}
+                </IconButton>
+              </Tooltip>
             </Box>
           );
         })}
