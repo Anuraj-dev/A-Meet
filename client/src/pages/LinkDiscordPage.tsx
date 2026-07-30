@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { Box, Button, CircularProgress, Paper, Stack, Typography } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,

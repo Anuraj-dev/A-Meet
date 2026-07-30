@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import {
   Box, Stack, Typography, Button, IconButton, Menu, MenuItem, ListItemIcon,
   CircularProgress, Snackbar, Dialog, DialogTitle, DialogContent, DialogActions,
