@@ -187,3 +187,17 @@ evidence. Terra high gets the heavy tickets (#192, #194), Grok 4.5 the mid ticke
 high for security-sensitive #192); merge only on READY TO MERGE + green CI; 3 failed
 tries → Opus 5 escalation. Outcomes logged to docs/model-benchmark-2026-07-30.md with
 per-model routing verdicts.
+
+## 2026-07-30 — Linkification trusts the whitespace-token, not the boundary char
+**Why:** Three review rounds proved single-character boundary checks can't stop scheme
+smuggling (`data:text/plain,https://…`, quote-separated forms). The invariant that held:
+a whitespace-delimited token is swept for foreign schemes across ALL segments — segment
+boundaries defined as exactly the candidate-terminator set — before any candidate in it may
+link. Rejected: linkify-it dependency (hand-rolled tokenizer kept the allowlist auditable).
+
+## 2026-07-30 — Backend deploy prunes ALL unused images before pulling
+**Why:** Releases are immutable tagged `:sha` images; the old dangling-only `prune -f` never
+removed them, so the EC2 disk filled after ~a month and a deploy died mid-pull (ENOSPC).
+`prune -af` runs pre-pull in deploy + rollback: the running last-good container pins its image
+through the prune, so the rollback target survives by construction. Rejected: out-of-band
+cron cleanup (fix belongs in the path that creates the garbage).
