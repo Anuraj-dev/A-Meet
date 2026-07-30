@@ -11,4 +11,5 @@
 | agents/coder-loop.md | Claude-codes / Codex-reviews background loop convention |
 | specs/ | Approved feature specs (see `/spec`) |
 | specs/2026-07-23-discord-bot-design.md | Discord bot v1 design — source of truth for tickets #185/#186 |
+| specs/2026-07-30-chat-and-transcription-rework.md | Chat rework + background-only transcription — source of truth for #192–#197 |
 | sessions/ | One append-only log per day |

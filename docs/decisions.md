@@ -159,3 +159,31 @@ validation library for two routes.
 ## 2026-07-23 — Discord integration routes bypass the room rate-limiter
 **Why:** all bot traffic egresses from one host IP; the per-IP room limiter would throttle legitimate
 `/meet create` usage. The timing-safe bot API key gate is the abuse control. Reviewer-approved.
+
+## 2026-07-30 — Chat: never truncate; 16k cap enforced by rejection + ack contract
+**Why:** Server silently sliced every message at 1000 chars — data loss with no signal
+(root cause of "compacted messages"). Rejected alternative: auto-converting oversized text
+to a message.txt "attachment" — with zero storage infra it's a fake file; collapse +
+Show more + copy-full solves the same need. New wire contract (server-minted id,
+kind:'text', sentAt, send ack with error codes, room from socket membership) adopted in
+full per Sol consult; size-weighted rate-limit tokens so 16KB pastes can't spam cheaply.
+
+## 2026-07-30 — Transcription is background-only: interim broadcast removed, not just the overlay
+**Why:** The feature is meeting transcription, not captioning; users found the overlay
+annoying. Rejected alternative: keeping interim "listening…" rows in the panel — that
+retains nearly all the broadcast load (interims fan out room-wide several times/sec per
+speaker) for no product need. Finals-only panel (~1 event per speech turn); Deepgram
+session keeps interims internally for final accumulation, so provider cost unchanged.
+
+## 2026-07-30 — Chat attachments/images out of scope; `kind` discriminator is the only future-proofing
+**Why:** Zero upload infrastructure exists and messages are ephemeral; real attachments
+need storage/authz/lifecycle design. Deliberately deferred to a future effort rather than
+half-built now.
+
+## 2026-07-30 — Tickets #192–#197 double as a model benchmark (Terra / Grok 4.5 / Luna)
+**Why:** Raja has never used gpt-5.6-terra, grok 4.5, or gpt-5.6-luna and wants routing
+evidence. Terra high gets the heavy tickets (#192, #194), Grok 4.5 the mid tickets
+(#193, #196, #197), Luna medium the smallest (#195). Sol reviews every PR (low effort;
+high for security-sensitive #192); merge only on READY TO MERGE + green CI; 3 failed
+tries → Opus 5 escalation. Outcomes logged to docs/model-benchmark-2026-07-30.md with
+per-model routing verdicts.
