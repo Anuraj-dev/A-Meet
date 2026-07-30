@@ -8,10 +8,21 @@ import type { SocketAck } from './sfu';
 
 export interface RoomUser extends AuthUserDto { socketId?: string }
 export interface ChatMessagePayload {
+  id: string;
+  kind: 'text';
   sender: AuthUserDto;
   text: string;
-  ts: number;
+  sentAt: number;
 }
+export type SendChatMessageAck =
+  | { ok: true; messageId: string }
+  | {
+    ok: false;
+    code: 'EMPTY_MESSAGE' | 'MESSAGE_TOO_LONG' | 'RATE_LIMITED' | 'NOT_IN_ROOM';
+    message: string;
+    maxLength?: number;
+    retryAfterMs?: number;
+  };
 export interface TranscriptState {
   active: boolean;
   startedAt: number | null;
@@ -111,7 +122,7 @@ export interface ServerToClientEvents extends WebRtcServerToClientEvents {
 export interface RoomClientToServerEvents {
   'join-room': (roomId: string) => void;
   'leave-room': (roomId?: string) => void;
-  'chat-message': (payload: { roomId: string; text: string }) => void;
+  'chat-message': (payload: { text: string }, callback: (response: SendChatMessageAck) => void) => void;
   'transcript-start': (payload: Record<string, never>, callback: (response: TranscriptControlAck) => void) => void;
   'transcript-stop': (payload: Record<string, never>, callback: (response: TranscriptControlAck) => void) => void;
   'transcript-contributor-start': (payload: Record<string, never>, callback: (response: SocketAck<{ ok: true }>) => void) => void;

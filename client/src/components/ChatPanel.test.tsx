@@ -25,25 +25,45 @@ beforeAll(() => {
   }));
 });
 
-// ChatPanel is fully controlled (input/setInput/onSend come from the parent, which
-// also clears the input on send). This harness mirrors RoomPage's real wiring so
-// tests exercise the true contract: onSend reads the current input, then clears it.
-interface HarnessProps { onSendSpy?: (input: string) => void; messages?: ChatMessage[]; currentUserId?: string; onClose?: () => void }
+type ChatAck = { ok: true } | { ok: false; code: string; message: string };
+type AckCallback = (error: Error | null, response?: ChatAck) => void;
+
+// ChatPanel is fully controlled. This harness mirrors RoomPage's acked send
+// contract: the send remains pending until the callback settles, then only a
+// successful acknowledgement may clear the original draft.
+interface HarnessProps { onSendSpy?: (input: string, ack: AckCallback) => void; messages?: ChatMessage[]; currentUserId?: string; onClose?: () => void }
 function Harness({ onSendSpy = vi.fn(), messages = [], currentUserId = 'me', onClose = vi.fn() }: HarnessProps) {
   const [input, setInput] = useState('');
+  const [sendError, setSendError] = useState('');
+  const [sending, setSending] = useState(false);
   const handleSend = (e: FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    onSendSpy(input);
-    setInput('');
+    if (!input.trim() || sending) return;
+    const sentText = input;
+    setSending(true);
+    onSendSpy(sentText, (error, response) => {
+      setSending(false);
+      if (error) {
+        setSendError("Couldn't send — try again");
+        return;
+      }
+      if (response?.ok) {
+        setInput((current) => current === sentText ? '' : current);
+        setSendError('');
+        return;
+      }
+      setSendError(response?.message ?? "Couldn't send — try again");
+    });
   };
   return (
     <ThemeProvider theme={theme}>
       <ChatPanel
         messages={messages}
         input={input}
-        setInput={setInput}
+        setInput={(value) => { setInput(value); setSendError(''); }}
         onSend={handleSend}
+        sendError={sendError}
+        sending={sending}
         currentUserId={currentUserId}
         onClose={onClose}
       />
@@ -122,8 +142,8 @@ describe('ChatPanel', () => {
   });
 
   describe('sending a message', () => {
-    it('invokes the send handler with the typed text and clears the input', () => {
-      const onSendSpy = vi.fn();
+    it('clears the composer after an ok acknowledgement', () => {
+      const onSendSpy = vi.fn((_input, ack: AckCallback) => ack(null, { ok: true }));
       render(<Harness messages={[]} onSendSpy={onSendSpy} />);
 
       fireEvent.change(composer(), { target: { value: 'Hello team' } });
@@ -132,9 +152,77 @@ describe('ChatPanel', () => {
       fireEvent.click(sendButton());
 
       expect(onSendSpy).toHaveBeenCalledTimes(1);
-      expect(onSendSpy).toHaveBeenCalledWith('Hello team');
-      // Parent clears the controlled input after send.
+      expect(onSendSpy.mock.calls[0][0]).toBe('Hello team');
       expect(composer()).toHaveValue('');
+    });
+
+    it('keeps an over-limit draft, blocks send, and shows its error and counter', () => {
+      const onSendSpy = vi.fn();
+      render(<Harness messages={[]} onSendSpy={onSendSpy} />);
+      const overLimit = 'x'.repeat(16_001);
+
+      fireEvent.change(composer(), { target: { value: overLimit } });
+
+      expect(composer()).toHaveValue(overLimit);
+      expect(screen.getByText('16001 / 16000')).toBeInTheDocument();
+      expect(screen.getByText(/Messages can be at most 16000 characters/i)).toBeInTheDocument();
+      expect(sendButton()).toBeDisabled();
+      fireEvent.click(sendButton());
+      expect(onSendSpy).not.toHaveBeenCalled();
+    });
+
+    it('keeps the draft and shows the server message when the acknowledgement rejects', () => {
+      const onSendSpy = vi.fn((_input, ack: AckCallback) => ack(null, {
+        ok: false,
+        code: 'MESSAGE_TOO_LONG',
+        message: 'Messages can be at most 16000 characters.',
+      }));
+      render(<Harness messages={[]} onSendSpy={onSendSpy} />);
+
+      fireEvent.change(composer(), { target: { value: 'A draft to revise' } });
+      fireEvent.click(sendButton());
+
+      expect(composer()).toHaveValue('A draft to revise');
+      expect(screen.getByText('Messages can be at most 16000 characters.')).toBeInTheDocument();
+    });
+
+    it('keeps the draft and offers a retry when the acknowledgement times out', () => {
+      const onSendSpy = vi.fn((_input, ack: AckCallback) => ack(new Error('operation has timed out')));
+      render(<Harness messages={[]} onSendSpy={onSendSpy} />);
+
+      fireEvent.change(composer(), { target: { value: 'A draft to retry' } });
+      fireEvent.click(sendButton());
+
+      expect(composer()).toHaveValue('A draft to retry');
+      expect(screen.getByText("Couldn't send — try again")).toBeInTheDocument();
+      expect(sendButton()).toBeEnabled();
+    });
+
+    it('disables repeat sends while awaiting an acknowledgement and preserves a newer draft', () => {
+      let acknowledge: AckCallback | undefined;
+      const onSendSpy = vi.fn((_input, ack: AckCallback) => { acknowledge = ack; });
+      render(<Harness messages={[]} onSendSpy={onSendSpy} />);
+
+      fireEvent.change(composer(), { target: { value: 'first' } });
+      fireEvent.click(sendButton());
+
+      expect(sendButton()).toBeDisabled();
+      fireEvent.change(composer(), { target: { value: 'second' } });
+      fireEvent.click(sendButton());
+      expect(onSendSpy).toHaveBeenCalledTimes(1);
+
+      acknowledge?.(null, { ok: true });
+      expect(composer()).toHaveValue('second');
+    });
+
+    it('shows the character counter only after 14,000 characters', () => {
+      render(<Harness messages={[]} />);
+
+      fireEvent.change(composer(), { target: { value: 'x'.repeat(14_000) } });
+      expect(screen.queryByText('14000 / 16000')).not.toBeInTheDocument();
+
+      fireEvent.change(composer(), { target: { value: 'x'.repeat(14_001) } });
+      expect(screen.getByText('14001 / 16000')).toBeInTheDocument();
     });
   });
 

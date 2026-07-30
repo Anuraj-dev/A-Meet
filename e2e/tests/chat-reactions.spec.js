@@ -98,6 +98,182 @@ test.describe('two-peer chat relay', () => {
   });
 });
 
+test.describe('chat send contract', () => {
+  test('keeps an over-limit draft, shows its error, and delivers nothing to the other peer', async ({ browser }) => {
+    const { pageA, pageB, close } = await joinedPair(browser);
+    const chatPanelA = pageA.getByTestId('chat-panel');
+    const chatPanelB = pageB.getByTestId('chat-panel');
+    const composerA = pageA.getByPlaceholder('Send a message to everyone');
+    const overLimit = 'x'.repeat(16_001);
+
+    await openChat(pageA);
+    await openChat(pageB);
+
+    // fill() assigns the complete draft in one operation; typing 16k keys would
+    // make this contract test slow and unlike a pasted draft.
+    await composerA.fill(overLimit);
+
+    await expect(composerA).toHaveValue(overLimit);
+    await expect(chatPanelA.getByText(/Messages can be at most 16000 characters/i)).toBeVisible();
+    await expect(pageA.getByRole('button', { name: 'Send message' })).toBeDisabled();
+
+    // The send button is disabled, so exercise the OTHER submit path too —
+    // Enter in the composer — and confirm the draft is still sitting there
+    // afterwards instead of having been consumed by an attempted send.
+    await composerA.press('Enter');
+    await expect(composerA).toHaveValue(overLimit);
+
+    // Non-delivery only means something once a LATER message has arrived: an
+    // empty panel satisfies toHaveCount(0) instantly. Send a normal sentinel
+    // from the same peer and wait for B to render it — the over-limit draft was
+    // submitted first, had the whole round trip to surface, and still has not.
+    const sentinel = `sentinel-after-over-limit-${Date.now()}`;
+    await composerA.fill(sentinel);
+    await pageA.getByRole('button', { name: 'Send message' }).click();
+    await expect(chatPanelB.getByText(sentinel, { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(chatPanelB.getByText(overLimit, { exact: true })).toHaveCount(0);
+
+    await close();
+  });
+
+  test('delivers an exactly-16,000-character message intact and clears the sender composer', async ({ browser }) => {
+    const { pageA, pageB, close } = await joinedPair(browser);
+    const chatPanelB = pageB.getByTestId('chat-panel');
+    const composerA = pageA.getByPlaceholder('Send a message to everyone');
+    const exactLimit = 'x'.repeat(16_000);
+
+    await openChat(pageA);
+    await openChat(pageB);
+    await composerA.fill(exactLimit);
+    await pageA.getByRole('button', { name: 'Send message' }).click();
+
+    const receivedMessage = chatPanelB.getByText(exactLimit, { exact: true });
+    await expect(receivedMessage).toBeVisible({ timeout: 15_000 });
+    await expect(receivedMessage).toHaveText(exactLimit);
+    await expect(composerA).toHaveValue('', { timeout: 15_000 });
+
+    await close();
+  });
+
+  // The server's own rejection path, end to end. The chat bucket (capacity 20,
+  // refill 5/s) charges each send by its serialized payload size, so a burst of
+  // ~4 KB messages costs ~5 tokens apiece and drains it within a handful of
+  // sends. What is under test is what RoomPage does with the resulting
+  // `{ ok:false, code:'RATE_LIMITED', … }` ack: surface its message, KEEP the
+  // draft, and stay usable once tokens refill.
+  test('surfaces the server rate-limit rejection, keeps the draft, and recovers', async ({ browser }) => {
+    // Two-peer setup + a send burst + waiting out a real token refill does not
+    // fit the 30 s default; the budget is generous rather than a fixed wait.
+    test.setTimeout(120_000);
+
+    const { pageA, pageB, close } = await joinedPair(browser);
+    const chatPanelA = pageA.getByTestId('chat-panel');
+    const chatPanelB = pageB.getByTestId('chat-panel');
+    const composerA = pageA.getByPlaceholder('Send a message to everyone');
+    const sendA = pageA.getByRole('button', { name: 'Send message' });
+    const rateLimitError = chatPanelA.getByText(/rate limit exceeded/i);
+
+    await openChat(pageA);
+    await openChat(pageB);
+
+    // Send `text` from A, retrying ONLY while the server keeps refusing it.
+    //
+    // Retrying is safe after a RATE_LIMITED ack: the guard dropped the event, so
+    // nothing was broadcast. It is NOT safe after RoomPage's 8 s ack timeout —
+    // that timeout does not cancel the already-emitted Socket.IO event, so the
+    // server may have accepted and broadcast the text while only the ack was
+    // late. Re-sending there would manufacture a second LEGITIMATE delivery and
+    // corrupt the exact-count assertion below, so an ambiguous settle records a
+    // failure and emits nothing further.
+    async function sendUntilAccepted(text) {
+      let ambiguousSettle = null;
+      await expect(async () => {
+        await composerA.fill(text);
+        await sendA.click();
+
+        // Wait for THIS attempt's ack callback to run: RoomPage clears
+        // chatSendPending inside it, so either the draft cleared (ok ack) or the
+        // send button came back enabled with the draft intact (a failure path).
+        // The window exceeds RoomPage's own 8 s ack timeout, so the callback has
+        // certainly fired one way or the other by the time this resolves.
+        await expect
+          .poll(
+            async () => (await composerA.inputValue()) === '' || (await sendA.isEnabled()),
+            { timeout: 15_000 },
+          )
+          .toBe(true);
+
+        if ((await composerA.inputValue()) === '') return; // ok ack → accepted.
+
+        // The draft survived, so this attempt took a failure path — and that
+        // same callback wrote chatError in the same React batch that cleared
+        // chatSendPending. The copy on screen right now is therefore THIS
+        // attempt's: no earlier attempt could have re-enabled the button without
+        // also overwriting the very error being read here, and an accepted send
+        // clears it outright. RoomPage's two failure copies are distinct, and
+        // only the rate-limit one is safe to retry.
+        if (!(await rateLimitError.isVisible())) {
+          ambiguousSettle = "the send failed without a RATE_LIMITED error — RoomPage showed its ack-timeout copy, and that timeout does not cancel the emitted event, so the server may already have broadcast this text";
+          return; // Ends the retry loop without re-sending; asserted below.
+        }
+        throw new Error('rate limited — retry once the chat bucket refills');
+      }).toPass({ timeout: 60_000 });
+
+      expect(
+        ambiguousSettle,
+        `chat send must settle on a definitive rejection before it is retried; instead ${ambiguousSettle}`,
+      ).toBeNull();
+    }
+
+    // Burst until the server denies one. Each iteration settles on exactly one
+    // of two visible outcomes — accepted (the ok ack clears the composer) or
+    // denied (the error surfaces) — so the loop polls real state, never sleeps.
+    let blockedDraft = null;
+    for (let attempt = 0; attempt < 60 && blockedDraft === null; attempt += 1) {
+      const text = `burst-${attempt}-${'x'.repeat(4_000)}`;
+      await composerA.fill(text);
+      await sendA.click();
+      await expect
+        .poll(
+          async () => (await rateLimitError.isVisible()) || (await composerA.inputValue()) === '',
+          { timeout: 15_000 },
+        )
+        .toBe(true);
+      if (await rateLimitError.isVisible()) blockedDraft = text;
+    }
+
+    expect(blockedDraft, 'the chat bucket should deny a send within the burst').not.toBeNull();
+
+    // The rejection is visible on A and the draft survived it. Whether the
+    // denied send leaked to B is NOT asserted here: the denial ack reaches A
+    // over a channel independent of any broadcast reaching B, so a count check
+    // at this instant could simply be outrunning the leak. That is established
+    // below, ordered behind a later arrival.
+    await expect(rateLimitError).toBeVisible();
+    await expect(composerA).toHaveValue(blockedDraft);
+
+    // …and that very same draft goes through once the bucket refills, so the
+    // limit is a transient back-off rather than a wedged composer.
+    await sendUntilAccepted(blockedDraft);
+    await expect(rateLimitError).toBeHidden();
+
+    // Now order the non-delivery proof: send a sentinel AFTER the recovery and
+    // wait for B to render it. Everything A sent earlier has had its full round
+    // trip by then, so the blocked draft must appear on B EXACTLY once — that
+    // one copy is the recovery send; a second would be the rate-limited send
+    // having leaked through despite its RATE_LIMITED ack.
+    const sentinel = `after-recovery-sentinel-${Date.now()}`;
+    await sendUntilAccepted(sentinel);
+    await expect(chatPanelB.getByText(sentinel, { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    const deliveredDraft = chatPanelB.getByText(blockedDraft, { exact: true });
+    await expect(deliveredDraft).toHaveCount(1);
+    await expect(deliveredDraft).toBeVisible();
+
+    await close();
+  });
+});
+
 test.describe('chat unread badge', () => {
   test('a message arriving while the panel is closed badges the toggle, clearing on open', async ({ browser }) => {
     const { pageA, pageB, close } = await joinedPair(browser);

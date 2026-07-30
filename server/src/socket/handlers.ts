@@ -18,8 +18,18 @@ import {
   transcriptionConfigured,
 } from '../transcription/meeting-transcription.js';
 import { logger } from '../config/logger.js';
-import { socketRateLimiter } from './rate-limit.js';
+import { chatMessageTokenCost, chatPayloadByteLength, socketRateLimiter } from './rate-limit.js';
 import type { Server } from 'socket.io';
+import { randomUUID } from 'node:crypto';
+
+const MAX_CHAT_MESSAGE_LENGTH = 16_000;
+const MAX_CHAT_MESSAGE_BYTES = 64 * 1024;
+
+function chatTextFromPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const { text } = payload as { text?: unknown };
+  return typeof text === 'string' ? text : undefined;
+}
 
 // A dropped connection (network blip, reload, server restart) makes Socket.IO
 // reconnect with a brand-new socket: the old socket fires `disconnect` (→
@@ -104,16 +114,47 @@ export function registerHandlers(io: Server) {
       if (getRoomUsers(roomId).length === 0) scheduleTranscriptExpiry(roomId);
     });
 
-    socket.on('chat-message', socketRateLimiter.guard(socket, 'chat', 'chat-message', ({ roomId, text }) => {
-      if (!roomId || !text || typeof text !== 'string') return;
-      const trimmed = text.trim().slice(0, 1000);
-      if (!trimmed) return;
+    socket.on('chat-message', socketRateLimiter.guard(socket, 'chat', 'chat-message', (...args: unknown[]) => {
+      const payload = args[0];
+      const text = chatTextFromPayload(payload);
+      const maybeCallback = args.at(-1);
+      const callback = typeof maybeCallback === 'function'
+        ? maybeCallback as (response: unknown) => void
+        : undefined;
+      const roomId = getUserRoom(socket.id);
+      if (!roomId) {
+        return callback?.({ ok: false, code: 'NOT_IN_ROOM', message: 'Join a room before sending a message.' });
+      }
+      if (typeof text !== 'string' || !text.trim()) {
+        return callback?.({ ok: false, code: 'EMPTY_MESSAGE', message: 'Enter a message before sending.' });
+      }
+      const payloadBytes = chatPayloadByteLength(payload);
+      if (text.length > MAX_CHAT_MESSAGE_LENGTH || payloadBytes === null || payloadBytes > MAX_CHAT_MESSAGE_BYTES) {
+        return callback?.({
+          ok: false,
+          code: 'MESSAGE_TOO_LONG',
+          message: `Messages can be at most ${MAX_CHAT_MESSAGE_LENGTH.toLocaleString()} characters.`,
+          maxLength: MAX_CHAT_MESSAGE_LENGTH,
+        });
+      }
 
+      const messageId = randomUUID();
       io.to(roomId).emit('chat-message', {
+        id: messageId,
+        kind: 'text',
         sender: socket.user,
-        text: trimmed,
-        ts: Date.now(),
+        text,
+        sentAt: Date.now(),
       });
+      return callback?.({ ok: true, messageId });
+    }, {
+      cost: (payload: unknown) => chatMessageTokenCost(payload),
+      rateLimitAck: (retryAfterMs) => ({
+        ok: false,
+        code: 'RATE_LIMITED',
+        message: 'Rate limit exceeded — slow down and try again.',
+        retryAfterMs,
+      }),
     }));
 
     // Shared transcription is host-controlled and server-authoritative. Clients
