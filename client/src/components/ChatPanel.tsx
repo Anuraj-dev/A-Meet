@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
-  Avatar, Box, Chip, IconButton, InputAdornment, Modal, TextField, Tooltip, Typography,
+  Avatar, Box, Button, Chip, IconButton, InputAdornment, Modal, TextField, Tooltip, Typography,
   useMediaQuery,
 } from '@mui/material';
 import {
@@ -16,6 +16,16 @@ interface ChatSender { id: string; name?: string; avatar?: string }
 export interface ChatMessage { id?: string; kind?: 'text'; type?: 'event' | 'chat'; text: string; ts: string | number | Date; sender?: ChatSender }
 const CHAT_MESSAGE_LIMIT = 16_000;
 const CHAT_COUNTER_THRESHOLD = 14_000;
+/** Collapse when text exceeds this many characters (spec: ~800). */
+const COLLAPSE_CHAR_LIMIT = 800;
+/** Collapse when text spans more than this many lines (spec: ~12). */
+const COLLAPSE_LINE_LIMIT = 12;
+
+function messageNeedsCollapse(text: string): boolean {
+  if (text.length > COLLAPSE_CHAR_LIMIT) return true;
+  // split counts hard newlines as rendered line breaks (pre-wrap).
+  return text.split('\n').length > COLLAPSE_LINE_LIMIT;
+}
 interface ChatPanelProps {
   messages: ChatMessage[];
   input: string;
@@ -68,6 +78,8 @@ export default function ChatPanel({ messages, input, setInput, onSend, sendError
   const isMobile = useMediaQuery((theme) => theme.breakpoints.down('sm'));
   const { initialFocusRef, panelRef, onKeyDown } = usePanelDialog<HTMLHeadingElement>(onClose);
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
+  // Session-local expansion for long messages — per client, per message key.
+  const [expandedMessages, setExpandedMessages] = useState<ReadonlySet<string>>(() => new Set());
   const tooLong = input.length > CHAT_MESSAGE_LIMIT;
   const composerError = tooLong
     ? `Messages can be at most ${CHAT_MESSAGE_LIMIT} characters.`
@@ -114,6 +126,15 @@ export default function ChatPanel({ messages, input, setInput, onSend, sendError
       if (unmountedRef.current || requestId !== copyRequestId.current) return;
       showCopyFeedback(key, 'failed');
     }
+  }
+
+  function toggleMessageExpanded(key: string) {
+    setExpandedMessages((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   const panel = (
@@ -212,6 +233,9 @@ export default function ChatPanel({ messages, input, setInput, onSend, sendError
             feedback === 'copied' ? 'Copied'
               : feedback === 'failed' ? "Couldn't copy"
                 : idleCopyLabel;
+          const collapsible = messageNeedsCollapse(msg.text);
+          const expanded = expandedMessages.has(key);
+          const collapsed = collapsible && !expanded;
           return (
             <Box
               key={key}
@@ -248,7 +272,42 @@ export default function ChatPanel({ messages, input, setInput, onSend, sendError
                     wordBreak: 'break-word',
                   }}
                 >
-                  <Typography variant="body2">{msg.text}</Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      whiteSpace: 'pre-wrap',
+                      ...(collapsed && {
+                        display: '-webkit-box',
+                        WebkitBoxOrient: 'vertical',
+                        WebkitLineClamp: COLLAPSE_LINE_LIMIT,
+                        overflow: 'hidden',
+                      }),
+                    }}
+                  >
+                    {msg.text}
+                  </Typography>
+                  {collapsible && (
+                    <Button
+                      type="button"
+                      size="small"
+                      onClick={() => toggleMessageExpanded(key)}
+                      aria-expanded={expanded}
+                      sx={{
+                        mt: 0.5,
+                        p: 0,
+                        minWidth: 0,
+                        textTransform: 'none',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        lineHeight: 1.4,
+                        color: isMe ? 'inherit' : 'primary.main',
+                        opacity: isMe ? 0.9 : 1,
+                        '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' },
+                      }}
+                    >
+                      {expanded ? 'Show less' : 'Show more'}
+                    </Button>
+                  )}
                 </Box>
                 <Typography
                   variant="caption"
