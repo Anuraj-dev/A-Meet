@@ -17,17 +17,10 @@ interface TranscriptEntry {
   ts: string | number | Date;
   text: string;
 }
-interface TranscriptInterim {
-  utteranceId: string;
-  speaker?: TranscriptSpeaker;
-  text: string;
-}
 interface TranscriptPanelProps {
   open: boolean;
   entries: TranscriptEntry[];
   active: boolean;
-  interims: TranscriptInterim[];
-  contributorStatus: string;
   contributorError?: string;
   isHost: boolean;
   canContribute: boolean;
@@ -45,8 +38,6 @@ export default function TranscriptPanel({
   open,
   entries,
   active,
-  interims,
-  contributorStatus,
   contributorError,
   isHost,
   canContribute,
@@ -58,7 +49,7 @@ export default function TranscriptPanel({
   const bottomRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [open, entries.length, interims.length]);
+  }, [open, entries.length]);
 
   if (!open) return null;
 
@@ -138,7 +129,7 @@ export default function TranscriptPanel({
       ) : null}
 
       <Box sx={{ flex: 1, overflowY: 'auto', px: 2.25, py: 2, contentVisibility: 'auto' }}>
-        {!entries.length && !interims.length ? (
+        {!entries.length ? (
           <Stack sx={{ alignItems: 'center', justifyContent: 'center', minHeight: 260, color: 'text.secondary', textAlign: 'center', px: 3 }}>
             <NotesIcon sx={{ fontSize: 36, mb: 1.5, opacity: 0.5 }} />
             <Typography sx={{ fontWeight: 650, color: 'text.primary' }}>The conversation will appear here</Typography>
@@ -162,19 +153,6 @@ export default function TranscriptPanel({
                 <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.55, mt: 0.35, wordBreak: 'break-word' }}>
                   {entry.text}
                 </Typography>
-              </Box>
-            </Box>
-          ))}
-          {interims.map((interim) => (
-            <Box key={interim.utteranceId} role="status" aria-live="polite" sx={{ display: 'flex', gap: 1.25, textAlign: 'left', opacity: 0.76 }}>
-              <Box sx={{ width: 30, display: 'grid', placeItems: 'center' }}>
-                <ListeningIcon sx={{ color: 'info.main', animation: 'blink 1.4s ease-in-out infinite' }} />
-              </Box>
-              <Box>
-                <Typography variant="caption" sx={{ color: 'info.main', fontWeight: 700 }}>
-                  {interim.speaker?.name || 'Participant'} · {contributorStatus === 'error' ? 'provider issue' : 'listening'}
-                </Typography>
-                <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>{interim.text}</Typography>
               </Box>
             </Box>
           ))}

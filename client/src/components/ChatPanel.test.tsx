@@ -1,9 +1,20 @@
 import { useState, type FormEvent } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThemeProvider } from '@mui/material/styles';
 import theme from '../theme/theme';
 import ChatPanel, { type ChatMessage } from './ChatPanel';
+
+/** Manually settled promise — drives out-of-order clipboard races in tests. */
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 // ChatPanel uses responsive sx but no useMediaQuery branch in its logic; jsdom
 // still lacks matchMedia, so stub it defensively for any MUI internals.
@@ -321,6 +332,173 @@ describe('ChatPanel', () => {
       render(<Harness messages={[{ sender: { id: 'bob', name: 'Bob' }, text: 'Hi', ts: Date.now() }]} />);
 
       expect(screen.getByRole('log', { name: 'Chat messages' })).toBeInTheDocument();
+    });
+  });
+
+  // Copy affordance on every chat bubble (#193): copies canonical payload text
+  // via the async clipboard API; hover/focus reveal is CSS (not unit-tested here).
+  describe('copy message', () => {
+    const fullText = [
+      'Line one of a long paste',
+      'Line two with more detail',
+      'Trailing content that must survive copy intact',
+    ].join('\n');
+
+    function mockClipboard(writeText: ReturnType<typeof vi.fn>) {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+      });
+    }
+
+    it('names the copy action with the message sender', () => {
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: 'Hi everyone', ts: Date.now() },
+          ]}
+        />,
+      );
+
+      expect(
+        screen.getByRole('button', { name: 'Copy message from Bob' }),
+      ).toBeInTheDocument();
+    });
+
+    it('copies the full canonical message text to the clipboard', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      mockClipboard(writeText);
+
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: fullText, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message from Bob' }));
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledTimes(1);
+      });
+      expect(writeText).toHaveBeenCalledWith(fullText);
+    });
+
+    it('shows success feedback after a successful copy', async () => {
+      mockClipboard(vi.fn().mockResolvedValue(undefined));
+
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: 'Snippet to grab', ts: Date.now() },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message from Bob' }));
+
+      // Success must be announced/visible — name flips so assistive tech hears it.
+      expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    });
+
+    it('shows a distinct failure state when clipboard write fails', async () => {
+      mockClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: 'Cannot copy this', ts: Date.now() },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message from Bob' }));
+
+      // Failure must never look like success.
+      expect(await screen.findByRole('button', { name: /couldn.?t copy/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
+    });
+
+    it('does not put a copy control on system event messages', () => {
+      render(
+        <Harness messages={[{ type: 'event', text: 'Bob joined the call', ts: Date.now() }]} />,
+      );
+
+      expect(screen.queryByRole('button', { name: /copy message/i })).not.toBeInTheDocument();
+    });
+
+    it('ignores a stale clipboard settlement after a newer copy completes', async () => {
+      // A starts first (slow reject) then B (fast resolve). B must keep "Copied"
+      // when A's late failure settles — stale feedback must not overwrite.
+      const first = deferred<void>();
+      const second = deferred<void>();
+      let call = 0;
+      const writeText = vi.fn().mockImplementation(() => {
+        call += 1;
+        return call === 1 ? first.promise : second.promise;
+      });
+      mockClipboard(writeText);
+
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'a', name: 'Alice' }, text: 'slow fail', ts: Date.now() },
+            { sender: { id: 'b', name: 'Bob' }, text: 'fast ok', ts: Date.now() + 1 },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message from Alice' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message from Bob' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+
+      await act(async () => {
+        second.resolve();
+      });
+      expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Copy message from Alice' })).toBeInTheDocument();
+
+      await act(async () => {
+        first.reject(new Error('denied'));
+      });
+
+      // Stale rejection must not flip feedback to failure on either row.
+      expect(screen.queryByRole('button', { name: /couldn.?t copy/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Copy message from Alice' })).toBeInTheDocument();
+    });
+
+    it('ignores clipboard settlement after the panel unmounts', async () => {
+      // Late writeText resolve must not re-arm feedback state/timer post-unmount.
+      const pending = deferred<void>();
+      mockClipboard(vi.fn().mockReturnValue(pending.promise));
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+      const { unmount } = render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: 'pending copy', ts: Date.now() },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message from Bob' }));
+      unmount();
+      const timeoutsBeforeSettle = setTimeoutSpy.mock.calls.length;
+
+      // Settling after unmount must be a no-op (no throw, no orphaned feedback timer).
+      await act(async () => {
+        pending.resolve();
+      });
+
+      expect(screen.queryByRole('dialog', { name: 'In-call messages' })).not.toBeInTheDocument();
+      // showCopyFeedback schedules a 1.8s clear — must not re-arm after unmount.
+      const rearmed = setTimeoutSpy.mock.calls
+        .slice(timeoutsBeforeSettle)
+        .some((args) => args[1] === 1800);
+      expect(rearmed).toBe(false);
+      setTimeoutSpy.mockRestore();
     });
   });
 });

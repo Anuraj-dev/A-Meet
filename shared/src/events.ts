@@ -39,12 +39,6 @@ export interface TranscriptEntry {
   provisional: boolean;
   revisedAt?: number;
 }
-export interface TranscriptInterim {
-  utteranceId: string;
-  speaker: { id: string; name: string; avatar: string };
-  text: string;
-  ts: number;
-}
 export interface TranscriptSnapshot extends TranscriptState {
   entries: TranscriptEntry[];
   configured: boolean;
@@ -111,7 +105,6 @@ export interface ServerToClientEvents extends WebRtcServerToClientEvents {
   'transcript-snapshot': (snapshot: TranscriptSnapshot) => void;
   'transcript-state': (state: TranscriptState) => void;
   'transcript-segment': (entry: TranscriptEntry) => void;
-  'transcript-interim': (interim: TranscriptInterim) => void;
   'transcript-contributor-state': (state: TranscriptContributorState) => void;
   'sfu-meeting-ended': () => void;
   'sfu-force-muted': () => void;

@@ -52,8 +52,8 @@ You can self-host it, read every line, break it, and understand why it broke. Th
 - Auto-hide control bar during screen share; hover to reveal; pin/unpin toggle
 - RTC stats overlay for debugging
 - Shared English transcript — each browser streams only its own microphone as 16 kHz PCM;
-  Deepgram Nova-3 supplies live captions and Groq Whisper refines completed turns
-- Live captions + reconnect-safe transcript panel; every participant can download the same
+  Deepgram Nova-3 supplies background transcription and Groq Whisper refines completed turns
+- Background meeting transcription + reconnect-safe transcript panel; every participant can download the same
   canonical `.txt` transcript (ephemeral in v1, not saved to MongoDB)
 
 ### Meetings
