@@ -501,4 +501,161 @@ describe('ChatPanel', () => {
       setTimeoutSpy.mockRestore();
     });
   });
+
+  // Long-message rendering (#196): pre-wrap newlines; collapse past ~800 chars
+  // or ~12 lines with session-local Show more / Show less; copy always full text.
+  describe('long-message rendering', () => {
+    const longByChars = 'x'.repeat(801);
+    const longByLines = Array.from({ length: 13 }, (_, i) => `line ${i + 1}`).join('\n');
+    const shortMultiline = 'First line\nSecond line\nThird line';
+
+    it('preserves newlines with pre-wrap so multi-line text does not collapse', () => {
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: shortMultiline, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      // Match the text node host (not a parent that also has the same textContent).
+      const bubbleText = screen.getByText((_, el) =>
+        el?.tagName === 'P' && el.textContent === shortMultiline);
+      expect(bubbleText).toHaveStyle({ whiteSpace: 'pre-wrap' });
+    });
+
+    it('does not offer Show more on short messages', () => {
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: 'Hi everyone', ts: Date.now() },
+          ]}
+        />,
+      );
+
+      expect(screen.getByText('Hi everyone')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /show less/i })).not.toBeInTheDocument();
+    });
+
+    it('collapses a message over 800 characters with a Show more control', () => {
+      render(
+        <Harness
+          messages={[
+            { id: 'msg-long-chars', sender: { id: 'bob', name: 'Bob' }, text: longByChars, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      const showMore = screen.getByRole('button', { name: /show more/i });
+      expect(showMore).toBeInTheDocument();
+      expect(showMore).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('collapses a message with more than 12 lines with a Show more control', () => {
+      render(
+        <Harness
+          messages={[
+            { id: 'msg-long-lines', sender: { id: 'bob', name: 'Bob' }, text: longByLines, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: /show more/i })).toBeInTheDocument();
+    });
+
+    it('expands on Show more and re-collapses on Show less', () => {
+      render(
+        <Harness
+          messages={[
+            { id: 'msg-toggle', sender: { id: 'bob', name: 'Bob' }, text: longByChars, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /show more/i }));
+
+      const showLess = screen.getByRole('button', { name: /show less/i });
+      expect(showLess).toBeInTheDocument();
+      expect(showLess).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+
+      fireEvent.click(showLess);
+
+      const showMoreAgain = screen.getByRole('button', { name: /show more/i });
+      expect(showMoreAgain).toBeInTheDocument();
+      expect(showMoreAgain).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByRole('button', { name: /show less/i })).not.toBeInTheDocument();
+    });
+
+    it('keeps expansion state independent per message', () => {
+      render(
+        <Harness
+          messages={[
+            { id: 'a', sender: { id: 'alice', name: 'Alice' }, text: longByChars, ts: Date.now() },
+            { id: 'b', sender: { id: 'bob', name: 'Bob' }, text: `${longByChars}y`, ts: Date.now() + 1 },
+          ]}
+        />,
+      );
+
+      const showMoreButtons = screen.getAllByRole('button', { name: /show more/i });
+      expect(showMoreButtons).toHaveLength(2);
+
+      fireEvent.click(showMoreButtons[0]);
+
+      expect(screen.getByRole('button', { name: /show less/i })).toBeInTheDocument();
+      // Second message remains collapsed.
+      expect(screen.getAllByRole('button', { name: /show more/i })).toHaveLength(1);
+    });
+
+    // Pins native <button> affordances (role, focusability, tagName). Enter/Space
+    // activation then follows from the platform; jsdom does not synthesize it.
+    it('is a focusable native button that toggles on activation', () => {
+      render(
+        <Harness
+          messages={[
+            { id: 'msg-kb', sender: { id: 'bob', name: 'Bob' }, text: longByChars, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      const showMore = screen.getByRole('button', { name: /show more/i });
+      expect(showMore.tagName).toBe('BUTTON');
+      showMore.focus();
+      expect(showMore).toHaveFocus();
+
+      fireEvent.click(showMore);
+
+      expect(screen.getByRole('button', { name: /show less/i })).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('copies the full canonical text while the bubble is still collapsed', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+      });
+
+      const fullPaste = `${'Line of a long prompt with extra padding text\n'.repeat(40)}TAIL_MARKER`;
+      expect(fullPaste.length).toBeGreaterThan(800);
+
+      render(
+        <Harness
+          messages={[
+            { id: 'msg-copy-collapsed', sender: { id: 'bob', name: 'Bob' }, text: fullPaste, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      // Still collapsed when we copy.
+      expect(screen.getByRole('button', { name: /show more/i })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message from Bob' }));
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledTimes(1);
+      });
+      expect(writeText).toHaveBeenCalledWith(fullPaste);
+    });
+  });
 });
