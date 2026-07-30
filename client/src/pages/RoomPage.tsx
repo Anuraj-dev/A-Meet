@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState, type ComponentProps, type FormEvent } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router';
 import {
   Alert, Avatar, AvatarGroup, Box, Button, Chip, Dialog, DialogActions,
   DialogContent, DialogTitle, IconButton, Popover,

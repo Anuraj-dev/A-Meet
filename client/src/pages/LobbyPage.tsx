@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, type MouseEvent, type ElementType } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import { motion } from 'framer-motion';
 import {
   Avatar, Box, Button, FormControl,
