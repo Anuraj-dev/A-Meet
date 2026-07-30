@@ -9,8 +9,8 @@ import {
   CallEnd as CallEndIcon,
   Chat as ChatIcon,
   ChatOutlined as ChatOutlineIcon,
-  ClosedCaption as CaptionIcon,
-  ClosedCaptionOff as CaptionOffIcon,
+  Description as TranscriptIcon,
+  DescriptionOutlined as TranscriptOffIcon,
   ContentCopy as ContentCopyIcon,
   AutoAwesomeMosaic as AutoLayoutIcon,
   Check as CheckIcon,
@@ -220,7 +220,7 @@ export default function ControlBar({
           variant={transcriptActive ? 'active' : 'idle'}
           pressed={transcriptAvailable ? showTranscript : undefined}
         >
-          {transcriptActive ? <CaptionIcon /> : <CaptionOffIcon />}
+          {transcriptActive ? <TranscriptIcon /> : <TranscriptOffIcon sx={{ opacity: 0.5 }} />}
         </CircleButton>
       )}
 
@@ -452,7 +452,7 @@ export default function ControlBar({
         )}
         {isMobile && (
           <MenuItem disabled={transcriptDisabled} onClick={() => { closeMore(); onToggleTranscript(); }}>
-            <ListItemIcon>{transcriptActive ? <CaptionIcon fontSize="small" /> : <CaptionOffIcon fontSize="small" />}</ListItemIcon>
+            <ListItemIcon>{transcriptActive ? <TranscriptIcon fontSize="small" /> : <TranscriptOffIcon fontSize="small" sx={{ opacity: 0.5 }} />}</ListItemIcon>
             <ListItemText>{transcriptAvailable ? 'Meeting transcript' : 'Start shared transcript'}</ListItemText>
           </MenuItem>
         )}
