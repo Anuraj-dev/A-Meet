@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
-  Avatar, Box, Button, Chip, IconButton, InputAdornment, Modal, TextField, Tooltip, Typography,
+  Avatar, Box, Button, Chip, IconButton, InputAdornment, Link, Modal, TextField, Tooltip, Typography,
   useMediaQuery,
 } from '@mui/material';
 import {
@@ -25,6 +25,225 @@ function messageNeedsCollapse(text: string): boolean {
   if (text.length > COLLAPSE_CHAR_LIMIT) return true;
   // split counts hard newlines as rendered line breaks (pre-wrap).
   return text.split('\n').length > COLLAPSE_LINE_LIMIT;
+}
+
+// Web-URL-only linkification (#197): tokenizer producing React nodes — never
+// dangerouslySetInnerHTML. Allowlist http/https only; www. → https://www.
+// Other schemes (javascript:, data:, mailto:, custom) stay plain inert text.
+
+/** Punctuation commonly trailing a URL in prose (excluded from the href). */
+const TRAILING_PUNCT = /[.,;:!?)"'\]]/;
+/**
+ * Characters that can continue a URL, hostname, or email token. When one sits
+ * immediately before a candidate, that candidate is a fragment of a larger
+ * token (`foohttps://x`, `bob@www.x.com`, `mail.www.x.com`, `file://www.x.com`),
+ * not a link of its own. Every other character — prose punctuation, markdown,
+ * dashes, smart quotes, `=`, `>` — is a real boundary.
+ */
+const URL_CONTINUATION_BEFORE = /[\p{L}\p{M}\p{N}_.\-@+~%/:]/u;
+/** A `scheme:`, matched in place (sticky) so no substring is materialized. */
+const SCHEME_AT = /[A-Za-z][A-Za-z0-9+.-]*:/y;
+/** Wrapper a scheme can hide behind — `(`, `"`, `>`, `*` … — skipped before the check. */
+const WRAPPER_CHAR = /[^\p{L}\p{N}]/u;
+/**
+ * Characters that end a candidate without ending a token — exactly the
+ * candidate charset's non-whitespace exclusions. Each one starts a new segment,
+ * because every position where a fresh candidate can begin must also be a
+ * position where a fresh scheme is looked for; otherwise a scheme hides in a
+ * segment's interior (`https://ok.example"javascript:https://evil.example`).
+ */
+const SEGMENT_SEPARATOR = /[<>"'`{},;|\\^[\]\p{Cc}]/u;
+/** Token delimiter: tokens are the unit the scheme guard poisons or clears. */
+const WHITESPACE = /\s/;
+
+/**
+ * The code point ending at `index`, as a string. Reading `text[index - 1]` alone
+ * would expose only the low surrogate of an astral character, so `𐐀https://…`
+ * would escape a `\p{L}` test and linkify.
+ */
+function codePointBefore(text: string, index: number): string {
+  const prev = text.charCodeAt(index - 1);
+  const isLowSurrogate = prev >= 0xdc00 && prev <= 0xdfff;
+  if (isLowSurrogate && index >= 2) {
+    const high = text.charCodeAt(index - 2);
+    if (high >= 0xd800 && high <= 0xdbff) return text.slice(index - 2, index);
+  }
+  return text[index - 1]!;
+}
+
+/** True when `href` parses as an http(s) URL with a dotted hostname. */
+function isWebUrl(href: string): boolean {
+  try {
+    const parsed = new URL(href);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && parsed.hostname.includes('.');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when `text[from, to)` opens with a scheme other than http/https. Indices
+ * only — nothing is sliced but the scheme name itself, so repeated checks over
+ * one long token stay linear rather than materializing growing prefixes.
+ */
+function segmentHasForeignScheme(text: string, from: number, to: number): boolean {
+  let i = from;
+  while (i < to && WRAPPER_CHAR.test(text[i]!)) i += 1;
+  if (i >= to) return false;
+  SCHEME_AT.lastIndex = i;
+  // Scheme characters exclude `,`, `;` and whitespace, so a sticky match can
+  // never run past `to` — the segment's own end always stops it.
+  const scheme = SCHEME_AT.exec(text)?.[0];
+  if (!scheme) return false;
+  const name = scheme.slice(0, -1).toLowerCase();
+  return name !== 'http' && name !== 'https';
+}
+
+/**
+ * True when any `,`/`;` segment of the token `text[tokenStart, tokenEnd)` opens
+ * with a non-web scheme. The whole token is then inert — `data:text/plain,https://…`,
+ * `javascript:;https://…`, and equally `https://ok.example,javascript:https://evil`,
+ * where the foreign scheme trails the candidate. Security cannot rest on the one
+ * character before a candidate, since `,`/`;` are legitimate prose boundaries.
+ */
+function tokenHasForeignScheme(text: string, tokenStart: number, tokenEnd: number): boolean {
+  let segmentStart = tokenStart;
+  for (let i = tokenStart; i <= tokenEnd; i += 1) {
+    if (i === tokenEnd || SEGMENT_SEPARATOR.test(text[i]!)) {
+      if (segmentHasForeignScheme(text, segmentStart, i)) return true;
+      segmentStart = i + 1;
+    }
+  }
+  return false;
+}
+
+/**
+ * Scan `text` for http(s) and bare-www URLs; return an array of text spans and
+ * MUI Link elements. Malformed candidates and non-web schemes are left as text.
+ */
+function linkifyMessageText(text: string): ReactNode[] {
+  // Match http://, https://, or www. then a run of URL-ish characters. The
+  // excluded characters terminate a candidate, so adjacent URLs never fuse into
+  // a single anchor (a genuine trailing `,`/`;` was peeled off anyway); the
+  // non-whitespace ones are exactly `SEGMENT_SEPARATOR`, keeping "where a
+  // candidate may start" and "where a scheme is checked" the same set.
+  const candidateRe = /(?:https?:\/\/|www\.)[^\s<>"'`{},;|\\^[\]\p{Cc}]+/giu;
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  let cursor = 0;
+  // A match found while scanning an earlier token, held until the token walk
+  // reaches the token it falls in. Matches arrive in order, so the regex never
+  // rescans: `lastIndex` only moves forward and each character is examined once.
+  let carried: RegExpExecArray | null = null;
+  let exhausted = false;
+
+  // Walk whitespace-delimited tokens. A token is the unit of trust: it is swept
+  // for foreign schemes *in full* before any of its candidates may become a
+  // link, so a scheme trailing the candidate poisons it just as one leading it
+  // does. Every character is visited once by the token walk and once by the
+  // regex — O(n) overall.
+  while (cursor < text.length) {
+    if (WHITESPACE.test(text[cursor]!)) {
+      cursor += 1;
+      continue;
+    }
+    const tokenStart = cursor;
+    while (cursor < text.length && !WHITESPACE.test(text[cursor]!)) cursor += 1;
+    const tokenEnd = cursor;
+
+    if (tokenHasForeignScheme(text, tokenStart, tokenEnd)) {
+      // Poisoned: drop a carried match belonging to this token and resume the
+      // regex past the token, so none of its candidates can be linked.
+      if (carried !== null && carried.index < tokenEnd) carried = null;
+      if (candidateRe.lastIndex < tokenEnd) candidateRe.lastIndex = tokenEnd;
+      continue;
+    }
+
+    // Candidates exclude whitespace, so a match starting inside the token also
+    // ends inside it; one starting past `tokenEnd` belongs to a later token.
+    for (;;) {
+      let match: RegExpExecArray | null = carried;
+      carried = null;
+      if (match === null) {
+        if (exhausted) break;
+        if (candidateRe.lastIndex < tokenStart) candidateRe.lastIndex = tokenStart;
+        match = candidateRe.exec(text);
+        if (match === null) {
+          exhausted = true;
+          break;
+        }
+      }
+      if (match.index >= tokenEnd) {
+        carried = match;
+        break;
+      }
+      let raw = match[0];
+      const start = match.index;
+
+      // Require a real boundary before the candidate so "foohttps://..." stays text.
+      if (start > 0 && URL_CONTINUATION_BEFORE.test(codePointBefore(text, start))) {
+        continue;
+      }
+
+      // Peel trailing punctuation so "https://example.com." keeps the period outside.
+      // Count parens once, then peel by index and slice once — O(n) total, not O(n²).
+      let openParens = 0;
+      let closeParens = 0;
+      for (let i = 0; i < raw.length; i += 1) {
+        const ch = raw[i]!;
+        if (ch === '(') openParens += 1;
+        else if (ch === ')') closeParens += 1;
+      }
+      let end = raw.length;
+      while (end > 0 && TRAILING_PUNCT.test(raw[end - 1]!)) {
+        const last = raw[end - 1]!;
+        // Keep a closing ')' when the URL still has an unmatched '('.
+        if (last === ')') {
+          if (openParens >= closeParens) break;
+          closeParens -= 1;
+        }
+        end -= 1;
+      }
+      raw = raw.slice(0, end);
+
+      if (!raw) continue;
+
+      const href = raw.toLowerCase().startsWith('www.') ? `https://${raw}` : raw;
+
+      // Validate with the URL parser: only http/https with a real hostname
+      // survive. Malformed (e.g. bare "https://") stays plain text via lastIndex.
+      if (!isWebUrl(href)) continue;
+
+      if (start > lastIndex) {
+        nodes.push(text.slice(lastIndex, start));
+      }
+      nodes.push(
+        <Link
+          key={`link-${key}`}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          underline="always"
+          color="inherit"
+          // Inherit bubble text color so links read on both own/other bubbles.
+          sx={{ wordBreak: 'break-all' }}
+        >
+          {raw}
+        </Link>,
+      );
+      key += 1;
+      lastIndex = start + raw.length;
+      // Reposition regex after the linked span (trailing punct stays for next slice).
+      candidateRe.lastIndex = lastIndex;
+    }
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes.length > 0 ? nodes : [text];
 }
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -284,7 +503,7 @@ export default function ChatPanel({ messages, input, setInput, onSend, sendError
                       }),
                     }}
                   >
-                    {msg.text}
+                    {linkifyMessageText(msg.text)}
                   </Typography>
                   {collapsible && (
                     <Button
