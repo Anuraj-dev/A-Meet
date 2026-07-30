@@ -118,6 +118,14 @@ jobs:
             git fetch --quiet origin main
             git checkout --quiet --force --detach "$DEPLOY_SHA"
             export SERVER_IMAGE
+            # Free disk BEFORE pulling. Releases are immutable TAGGED :<sha>
+            # images, and dangling-only pruning (`prune -f`) never removes a
+            # tagged image — so one image per deploy accumulates until the disk
+            # fills and the pull itself dies with ENOSPC. `-a` removes every
+            # image not used by a running container; the currently-running
+            # last-good image (just recorded in .rollback-image) is in use, so
+            # the rollback target always survives this.
+            docker image prune -af
             # Pull the exact published tag and (re)start. `set -e` makes the deploy
             # fail fast if the pull or container start fails.
             docker compose -f docker-compose.prod.yml pull
@@ -180,6 +188,10 @@ jobs:
             git fetch --quiet origin main
             git checkout --quiet --force --detach "$PREV_SHA"
             export SERVER_IMAGE="$PREV_IMAGE"
+            # Same ENOSPC guard as the deploy step: drop unused tagged images
+            # before pulling. The bad-but-running new image stays (in use) and
+            # gets cleaned up by the next successful deploy's pre-pull prune.
+            docker image prune -af
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f
