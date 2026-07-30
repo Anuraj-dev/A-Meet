@@ -9,9 +9,11 @@ import type { ControlBarProps } from './ControlBar';
 // matchMedia, so we stub it to "desktop" (matches: false) — the layout under test,
 // where every inline control (screen share, reactions, layout chooser, transcript)
 // is rendered rather than folded into the More menu.
+let isMobile = false;
+
 beforeAll(() => {
   window.matchMedia = vi.fn().mockImplementation((query) => ({
-    matches: false,
+    matches: isMobile,
     media: query,
     onchange: null,
     addListener: vi.fn(),
@@ -84,6 +86,7 @@ const queryBtn = (name: string) => screen.queryByRole('button', { name });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  isMobile = false;
 });
 
 describe('ControlBar', () => {
@@ -184,6 +187,55 @@ describe('ControlBar', () => {
 
       fireEvent.click(btn('Start shared transcript'));
       expect(props.onToggleTranscript).toHaveBeenCalledTimes(1);
+    });
+
+    it('transcript: shows a document icon with a clear active or inactive state', () => {
+      const { rerender } = render(
+        <ThemeProvider theme={theme}>
+          <ControlBar {...makeProps({ transcriptActive: true, transcriptAvailable: true })} />
+        </ThemeProvider>,
+      );
+
+      expect(screen.getByTestId('DescriptionIcon')).toBeInTheDocument();
+      expect(screen.queryByTestId('DescriptionOutlinedIcon')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('ClosedCaptionIcon')).not.toBeInTheDocument();
+
+      rerender(
+        <ThemeProvider theme={theme}>
+          <ControlBar {...makeProps({ transcriptActive: false, transcriptAvailable: true })} />
+        </ThemeProvider>,
+      );
+
+      expect(screen.getByTestId('DescriptionOutlinedIcon')).toBeInTheDocument();
+      expect(screen.queryByTestId('DescriptionIcon')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('ClosedCaptionOffIcon')).not.toBeInTheDocument();
+    });
+
+    it('transcript: uses the same document icon states in the mobile menu', () => {
+      isMobile = true;
+      const { rerender } = render(
+        <ThemeProvider theme={theme}>
+          <ControlBar {...makeProps({ transcriptActive: true, transcriptAvailable: true })} />
+        </ThemeProvider>,
+      );
+      fireEvent.click(btn('More options'));
+
+      const menu = screen.getByRole('menu');
+      expect(within(menu).getByTestId('DescriptionIcon')).toBeInTheDocument();
+      expect(within(menu).queryByTestId('ClosedCaptionIcon')).not.toBeInTheDocument();
+
+      fireEvent.keyDown(menu, { key: 'Escape' });
+      rerender(
+        <ThemeProvider theme={theme}>
+          <ControlBar {...makeProps({ transcriptActive: false, transcriptAvailable: true })} />
+        </ThemeProvider>,
+      );
+      fireEvent.click(btn('More options'));
+
+      const inactiveMenu = screen.getByRole('menu');
+      expect(within(inactiveMenu).getByTestId('DescriptionOutlinedIcon')).toBeInTheDocument();
+      expect(within(inactiveMenu).queryByTestId('DescriptionIcon')).not.toBeInTheDocument();
+      expect(within(inactiveMenu).queryByTestId('ClosedCaptionOffIcon')).not.toBeInTheDocument();
     });
 
   });

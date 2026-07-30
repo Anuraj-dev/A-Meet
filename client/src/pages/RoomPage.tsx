@@ -1555,7 +1555,7 @@ export default function RoomPage() {
               A Meet will stream only your microphone in English to the meeting server. Every participant's results are merged into one shared, speaker-labelled transcript.
             </Typography>
             <Alert severity="info" variant="outlined">
-              Audio is sent to Deepgram Nova-3 for live captions. Completed speech turns may also be sent to Groq Whisper for accuracy and jargon correction. A Meet does not save the audio.
+              Audio is sent to Deepgram Nova-3 for background meeting transcription. Completed speech turns may also be sent to Groq Whisper for accuracy and jargon correction. A Meet does not save the audio.
             </Alert>
             <Typography variant="caption" color="text.disabled">
               This choice is remembered on this browser. You can mute your microphone to pause your contribution.
