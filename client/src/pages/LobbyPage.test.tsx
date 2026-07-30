@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { ThemeProvider } from '@mui/material/styles';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import theme from '../theme/theme';
@@ -7,7 +7,7 @@ import theme from '../theme/theme';
 // Capture router navigation without a real history. useParams stays real so the
 // page still reads :roomId from the route.
 const navigateMock = vi.fn();
-vi.mock('react-router-dom', async (importOriginal) => ({
+vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal()),
   useNavigate: () => navigateMock,
 }));
