@@ -658,4 +658,407 @@ describe('ChatPanel', () => {
       expect(writeText).toHaveBeenCalledWith(fullPaste);
     });
   });
+
+  // Safe web-link linkification (#197): http/https/www → MUI Link (new tab,
+  // noopener noreferrer); other schemes stay plain text; no HTML injection;
+  // composes with pre-wrap + collapse; copy still returns raw original text.
+  describe('clickable web links', () => {
+    function mockClipboard(writeText: ReturnType<typeof vi.fn>) {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+      });
+    }
+
+    it('renders an https URL as a link that opens in a new tab with noopener noreferrer', () => {
+      render(
+        <Harness
+          messages={[
+            {
+              sender: { id: 'bob', name: 'Bob' },
+              text: 'Docs: https://example.com/path',
+              ts: Date.now(),
+            },
+          ]}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: 'https://example.com/path' });
+      expect(link).toHaveAttribute('href', 'https://example.com/path');
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    });
+
+    it('renders a bare www URL as an https link', () => {
+      render(
+        <Harness
+          messages={[
+            {
+              sender: { id: 'bob', name: 'Bob' },
+              text: 'Site: www.example.com',
+              ts: Date.now(),
+            },
+          ]}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: 'www.example.com' });
+      expect(link).toHaveAttribute('href', 'https://www.example.com');
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    });
+
+    it('leaves javascript:, data:, mailto:, and custom schemes as plain inert text', () => {
+      const text = [
+        'javascript:alert(1)',
+        'data:text/html,hi',
+        'mailto:user@example.com',
+        'ftp://files.example.com',
+        'custom://app/open',
+      ].join(' ');
+
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      // Full original text still visible as plain content (no anchors).
+      expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === text)).toBeInTheDocument();
+    });
+
+    // Scheme-smuggling: a non-allowlisted scheme token must stay entirely inert —
+    // never promote an embedded https/www tail into a nested anchor.
+    it('does not linkify an https tail smuggled after javascript:', () => {
+      const text = 'javascript:https://example.com';
+
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === text)).toBeInTheDocument();
+    });
+
+    it('does not linkify a www tail smuggled after file://', () => {
+      const text = 'file://www.example.com';
+
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === text)).toBeInTheDocument();
+    });
+
+    // Comma is prose punctuation — a URL right after it must still linkify.
+    it('linkifies a URL immediately after a comma boundary', () => {
+      render(
+        <Harness
+          messages={[
+            {
+              sender: { id: 'bob', name: 'Bob' },
+              text: 'See,https://example.com',
+              ts: Date.now(),
+            },
+          ]}
+        />,
+      );
+
+      const links = screen.getAllByRole('link');
+      expect(links).toHaveLength(1);
+      expect(links[0]).toHaveAttribute('href', 'https://example.com');
+      expect(links[0]).toHaveTextContent('https://example.com');
+    });
+
+    it('keeps trailing punctuation outside the link and leaves malformed URLs as text', () => {
+      render(
+        <Harness
+          messages={[
+            {
+              sender: { id: 'bob', name: 'Bob' },
+              text: 'See https://example.com. Also https://',
+              ts: Date.now(),
+            },
+          ]}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: 'https://example.com' });
+      expect(link).toHaveAttribute('href', 'https://example.com');
+      // Only the valid URL becomes a link; trailing period and bare scheme stay text.
+      expect(screen.getAllByRole('link')).toHaveLength(1);
+      const bubble = screen.getByText((_, el) =>
+        el?.tagName === 'P' && el.textContent === 'See https://example.com. Also https://');
+      expect(bubble).toBeInTheDocument();
+      // Period sits after the anchor, not inside it.
+      expect(link.nextSibling?.textContent?.startsWith('.')).toBe(true);
+    });
+
+    it('preserves newlines and keeps links working inside collapsed and expanded states', () => {
+      const url = 'https://example.com/docs';
+      // Over 12 lines so the bubble collapses; URL on line 2 must stay linkified.
+      const lines = [
+        'Intro line',
+        `Read ${url}`,
+        ...Array.from({ length: 12 }, (_, i) => `line ${i + 3}`),
+      ];
+      const text = lines.join('\n');
+      expect(text.split('\n').length).toBeGreaterThan(12);
+
+      render(
+        <Harness
+          messages={[
+            { id: 'msg-link-collapse', sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      const bubble = screen.getByText((_, el) =>
+        el?.tagName === 'P' && el.textContent === text);
+      expect(bubble).toHaveStyle({ whiteSpace: 'pre-wrap' });
+
+      // Collapsed: link still present and correct.
+      expect(screen.getByRole('button', { name: /show more/i })).toBeInTheDocument();
+      const collapsedLink = screen.getByRole('link', { name: url });
+      expect(collapsedLink).toHaveAttribute('href', url);
+      expect(collapsedLink).toHaveAttribute('target', '_blank');
+      expect(collapsedLink).toHaveAttribute('rel', 'noopener noreferrer');
+
+      fireEvent.click(screen.getByRole('button', { name: /show more/i }));
+
+      // Expanded: same link behavior, Show less available.
+      expect(screen.getByRole('button', { name: /show less/i })).toBeInTheDocument();
+      const expandedLink = screen.getByRole('link', { name: url });
+      expect(expandedLink).toHaveAttribute('href', url);
+      expect(expandedLink).toHaveAttribute('target', '_blank');
+      expect(expandedLink).toHaveAttribute('rel', 'noopener noreferrer');
+    });
+
+    it('copies the raw original message text, never markup, when links are present', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      mockClipboard(writeText);
+
+      const original = 'Check https://example.com and www.example.org please.';
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: original, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      // Sanity: links are rendered (so we know we aren't testing a no-link path).
+      expect(screen.getByRole('link', { name: 'https://example.com' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'www.example.org' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy message from Bob' }));
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledTimes(1);
+      });
+      expect(writeText).toHaveBeenCalledWith(original);
+    });
+
+    // Balanced path-parens stay in the href; a prose-wrapping closer is peeled.
+    it('keeps a balanced closing paren that belongs to the URL path', () => {
+      const url = 'https://en.wikipedia.org/wiki/Foo_(bar)';
+      render(
+        <Harness
+          messages={[
+            { sender: { id: 'bob', name: 'Bob' }, text: `See ${url}`, ts: Date.now() },
+          ]}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: url });
+      expect(link).toHaveAttribute('href', url);
+    });
+
+    it('excludes a prose-wrapping closing paren after the URL', () => {
+      render(
+        <Harness
+          messages={[
+            {
+              sender: { id: 'bob', name: 'Bob' },
+              text: '(see https://example.com)',
+              ts: Date.now(),
+            },
+          ]}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: 'https://example.com' });
+      expect(link).toHaveAttribute('href', 'https://example.com');
+      // Closing paren of the prose wrap sits outside the anchor.
+      expect(link.nextSibling?.textContent?.startsWith(')')).toBe(true);
+    });
+
+    // Pathological trailing-`)` run: pins peel correctness (algorithm is O(n)).
+    it('peels a long run of trailing closing parens without including them in the href', () => {
+      const url = 'https://example.com/path';
+      const trail = ')'.repeat(300);
+      const text = `${url}${trail}`;
+
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: url });
+      expect(link).toHaveAttribute('href', url);
+      expect(screen.getAllByRole('link')).toHaveLength(1);
+      // Full original text still present; peeled parens remain as plain text after the link.
+      expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === text)).toBeInTheDocument();
+      expect(link.nextSibling?.textContent).toBe(trail);
+    });
+
+    // Scheme smuggling through punctuation the tokenizer treats as prose: the
+    // invariant is token-level — a token carrying a non-web scheme is inert in
+    // full, no matter what separates the scheme from the https tail.
+    it.each([
+      ['a data: token with a comma', 'data:text/plain,https://example.com'],
+      ['a javascript: token with a semicolon', 'javascript:;https://example.com'],
+      ['a paren-wrapped javascript: token', '(javascript:;https://example.com)'],
+      ['a paren-wrapped data: token', '(data:text/plain,https://example.com)'],
+      ['a quoted data: token', '"data:text/plain,https://example.com"'],
+      // A foreign scheme *trailing* a candidate poisons the token just as one
+      // leading it does — the token is the unit of trust, in both directions.
+      ['a foreign scheme after a real URL', 'https://ok.example,javascript:https://evil.example'],
+      ['a foreign scheme after a real URL, no second URL', 'https://ok.example,javascript:alert(1)'],
+      ['a semicolon-separated foreign scheme after a real URL', 'https://ok.example;data:text/html,hi'],
+      // Every character that ends a candidate without ending the token must also
+      // start a new segment, or a scheme hides in a segment's interior.
+      ['a quote-separated foreign scheme after a real URL', 'https://ok.example"javascript:https://evil.example'],
+      ['a backtick-separated foreign scheme after a real URL', 'https://ok.example`javascript:https://evil.example'],
+      ['an angle-bracket-separated foreign scheme after a real URL', 'https://ok.example<javascript:https://evil.example'],
+      ['a brace-separated foreign scheme after a real URL', 'https://ok.example}data:text/html,hi'],
+    ])('keeps the whole token inert around %s', (_label, text) => {
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      // Nothing in a poisoned token may become an anchor — not the smuggled
+      // tail, and not an otherwise-valid URL sharing the token with it.
+      expect(screen.queryAllByRole('link')).toHaveLength(0);
+      expect(screen.getByText((_m, el) => el?.tagName === 'P' && el.textContent === text)).toBeInTheDocument();
+    });
+
+    // Same token, no foreign scheme anywhere: each URL still stands on its own.
+    // Pins the shape whose repeated scheme checks must not go quadratic.
+    it('linkifies every URL in a quote-chained token', () => {
+      const text = '"https://a.example"https://b.example"';
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      const links = screen.getAllByRole('link');
+      expect(links).toHaveLength(2);
+      expect(links[0]).toHaveAttribute('href', 'https://a.example');
+      expect(links[1]).toHaveAttribute('href', 'https://b.example');
+    });
+
+    // Many plain tokens before the only URL: pins that a far-away candidate is
+    // still found once the token walk reaches it (the scan carries the match
+    // forward rather than re-scanning the tail for every token).
+    it('linkifies a URL that follows many short plain tokens', () => {
+      const text = `${'a '.repeat(200)}https://example.com`;
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: 'https://example.com' });
+      expect(link).toHaveAttribute('href', 'https://example.com');
+      expect(screen.getAllByRole('link')).toHaveLength(1);
+    });
+
+    // The carried match must not survive into a poisoned token: a URL far ahead
+    // of many plain tokens is still inert when its own token carries a scheme.
+    it('keeps a far-away URL inert when its token carries a foreign scheme', () => {
+      const text = `${'a '.repeat(200)}data:text/plain,https://example.com`;
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      expect(screen.queryAllByRole('link')).toHaveLength(0);
+    });
+
+    // Adjacent URLs separated only by punctuation must not merge into one anchor.
+    it('renders comma-adjacent URLs as two separate links', () => {
+      render(
+        <Harness
+          messages={[
+            {
+              sender: { id: 'bob', name: 'Bob' },
+              text: 'https://one.example,https://two.example',
+              ts: Date.now(),
+            },
+          ]}
+        />,
+      );
+
+      const links = screen.getAllByRole('link');
+      expect(links).toHaveLength(2);
+      expect(links[0]).toHaveAttribute('href', 'https://one.example');
+      expect(links[0]).toHaveTextContent('https://one.example');
+      expect(links[1]).toHaveAttribute('href', 'https://two.example');
+      expect(links[1]).toHaveTextContent('https://two.example');
+    });
+
+    // Prose and markup prefixes are punctuation, not part of the URL token —
+    // they must not suppress linkification.
+    it.each([
+      ['a quote marker', '>https://example.com'],
+      ['markdown bold', '**https://example.com'],
+      ['a key=value prefix', 'URL=https://example.com'],
+      ['an em dash', '—https://example.com'],
+      ['a smart quote', '“https://example.com'],
+    ])('linkifies a URL preceded by %s', (_label, text) => {
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      const link = screen.getByRole('link', { name: 'https://example.com' });
+      expect(link).toHaveAttribute('href', 'https://example.com');
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    });
+
+    // A URL glued to a word, or sitting inside a larger host/email token, is a
+    // fragment of that token — never its own link.
+    it.each([
+      ['a URL glued to a word', 'foohttps://example.com'],
+      ['a www host inside an email address', 'bob@www.example.com'],
+      ['a www label inside a longer host', 'mail.www.example.com'],
+      // Boundary checks must read whole code points: an astral letter exposes
+      // only its low surrogate, and a combining mark trails its base letter.
+      ['a URL glued to an astral letter', '\u{10400}https://example.com'],
+      ['a URL glued to a decomposed accented letter', 'e\u0301https://example.com'],
+    ])('leaves %s as plain text', (_label, text) => {
+      render(
+        <Harness
+          messages={[{ sender: { id: 'bob', name: 'Bob' }, text, ts: Date.now() }]}
+        />,
+      );
+
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+      expect(screen.getByText((_m, el) => el?.tagName === 'P' && el.textContent === text)).toBeInTheDocument();
+    });
+  });
 });
