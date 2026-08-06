@@ -13,4 +13,5 @@
 | specs/2026-07-23-discord-bot-design.md | Discord bot v1 design — source of truth for tickets #185/#186 |
 | specs/2026-07-30-chat-and-transcription-rework.md | Chat rework + background-only transcription — source of truth for #192–#197 |
 | model-benchmark-2026-07-30.md | Full dispatch/review log of the #192–#197 run + per-model routing verdicts |
+| codebase-quality-report-2026-07-04.md | Point-in-time codebase quality audit (backend/frontend/infra/tests/docs) |
 | sessions/ | One append-only log per day |
