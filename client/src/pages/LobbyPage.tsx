@@ -70,6 +70,7 @@ function PreviewToggle({ title, on, onClick, OnIcon, OffIcon, disabled }: Previe
     <IconButton
       onClick={onClick}
       disabled={disabled}
+      aria-label={title}
       sx={{
         width: 50, height: 50, borderRadius: '50%',
         bgcolor: on ? DK.surface2 : DK.emberSoft,

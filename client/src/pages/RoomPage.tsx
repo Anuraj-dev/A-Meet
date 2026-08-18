@@ -211,8 +211,8 @@ export default function RoomPage() {
   const devices = {
     videoDeviceId: locationState?.videoDeviceId,
     audioDeviceId: locationState?.audioDeviceId,
-    startVideoOn: locationState?.startVideoOn ?? true,
-    startAudioOn: locationState?.startAudioOn ?? true,
+    startVideoOn: locationState?.startVideoOn ?? false,
+    startAudioOn: locationState?.startAudioOn ?? false,
   };
 
   const {

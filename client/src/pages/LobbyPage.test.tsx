@@ -140,10 +140,14 @@ describe('LobbyPage', () => {
     );
   });
 
-  it('navigates to the room and passes the full device choices on join', async () => {
+  it('starts with camera and microphone off, and joins that way', async () => {
     mockDeviceSet();
     renderLobby();
     await screen.findByText('Cam One');
+
+    expect(screen.getByText('Camera is off')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unmute' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Turn on camera' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Join now/i }));
 
@@ -153,10 +157,59 @@ describe('LobbyPage', () => {
         fromLobby: true,
         videoDeviceId: 'cam-1',
         audioDeviceId: 'mic-1',
-        startVideoOn: true,
-        startAudioOn: true,
+        startVideoOn: false,
+        startAudioOn: false,
       },
     });
+  });
+
+  it('keeps camera and mic off when the user only switches devices', async () => {
+    mockDeviceSet();
+    renderLobby();
+    await screen.findByText('Cam One');
+
+    fireEvent.mouseDown(screen.getByText('Cam One'));
+    fireEvent.click(await screen.findByRole('option', { name: /Cam Two/i }));
+    expect(await screen.findByText('Cam Two')).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByText('Mic One'));
+    fireEvent.click(await screen.findByRole('option', { name: /Mic Two/i }));
+    expect(await screen.findByText('Mic Two')).toBeInTheDocument();
+
+    expect(screen.getByText('Camera is off')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unmute' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Join now/i }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledTimes(1));
+    expect(navigateMock).toHaveBeenCalledWith(
+      `/room/${ROOM_ID}`,
+      expect.objectContaining({
+        state: expect.objectContaining({
+          videoDeviceId: 'cam-2',
+          audioDeviceId: 'mic-2',
+          startVideoOn: false,
+          startAudioOn: false,
+        }),
+      }),
+    );
+  });
+
+  it('carries an explicit unmute + camera-on into the room', async () => {
+    mockDeviceSet();
+    renderLobby();
+    await screen.findByText('Cam One');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unmute' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Turn on camera' }));
+    fireEvent.click(screen.getByRole('button', { name: /Join now/i }));
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledTimes(1));
+    expect(navigateMock).toHaveBeenCalledWith(
+      `/room/${ROOM_ID}`,
+      expect.objectContaining({
+        state: expect.objectContaining({ startVideoOn: true, startAudioOn: true }),
+      }),
+    );
   });
 
   it('handles a getUserMedia denial gracefully (recoverable, still joinable)', async () => {
