@@ -11,6 +11,10 @@ export function useLobbyMedia() {
   const [permissionDenied, setPermissionDenied] = useState(false);
 
   const streamRef = useRef<MediaStream | null>(null);
+  const videoOnRef = useRef(false);
+  const audioOnRef = useRef(false);
+  videoOnRef.current = videoOn;
+  audioOnRef.current = audioOn;
 
   async function enumerateAndUpdate(stream: MediaStream) {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -65,10 +69,11 @@ export function useLobbyMedia() {
         return;
       }
 
+      stream.getTracks().forEach((t) => { t.enabled = false; });
       streamRef.current = stream;
       setPreviewStream(new MediaStream(stream.getTracks()));
-      setVideoOn(stream.getVideoTracks().length > 0);
-      setAudioOn(stream.getAudioTracks().length > 0);
+      setVideoOn(false);
+      setAudioOn(false);
       await enumerateAndUpdate(stream);
     }
 
@@ -82,8 +87,11 @@ export function useLobbyMedia() {
     streamRef.current?.getVideoTracks().forEach((t) => { t.stop(); streamRef.current!.removeTrack(t); });
     try {
       const v = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
-      v.getVideoTracks().forEach((t) => streamRef.current!.addTrack(t));
-      setVideoOn(true);
+      v.getVideoTracks().forEach((t) => {
+        t.enabled = videoOnRef.current;
+        streamRef.current!.addTrack(t);
+      });
+      setVideoOn(videoOnRef.current);
     } catch {
       setVideoOn(false);
     }
@@ -95,8 +103,11 @@ export function useLobbyMedia() {
     streamRef.current?.getAudioTracks().forEach((t) => { t.stop(); streamRef.current!.removeTrack(t); });
     try {
       const a = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
-      a.getAudioTracks().forEach((t) => streamRef.current!.addTrack(t));
-      setAudioOn(true);
+      a.getAudioTracks().forEach((t) => {
+        t.enabled = audioOnRef.current;
+        streamRef.current!.addTrack(t);
+      });
+      setAudioOn(audioOnRef.current);
     } catch {
       setAudioOn(false);
     }

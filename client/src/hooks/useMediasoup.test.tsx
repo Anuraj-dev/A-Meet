@@ -370,6 +370,18 @@ describe('useMediasoup', () => {
     expect(result.current.hasCamera).toBe(false);
   });
 
+  it('defaults to muted camera-off when start flags are omitted', async () => {
+    const { result } = mount({});
+    await waitForSetup();
+
+    expect(result.current.localAudioOn).toBe(false);
+    expect(result.current.localVideoOn).toBe(false);
+    expect(H.request).toHaveBeenCalledWith(
+      'sfu-pause-producer',
+      expect.objectContaining({ producerId: expect.any(String) }),
+    );
+  });
+
   it('produces in the paused state when joining muted with camera off', async () => {
     const { result } = mount({ startAudioOn: false, startVideoOn: false });
     await waitForSetup();

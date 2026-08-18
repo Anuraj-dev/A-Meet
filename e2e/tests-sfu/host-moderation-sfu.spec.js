@@ -58,7 +58,10 @@ test.describe('SFU host moderation (real media)', () => {
     // also (transiently) match the "Gina Guest joined" presence toast.
     await expect(pageA.getByText(guest.name, { exact: true })).toBeVisible({ timeout: 60_000 });
 
-    // The guest joined with its mic on — its own control offers to turn it OFF.
+    // Lobby/room default is mic off. Turn it on so the host mute has a live
+    // producer to pause — otherwise there is nothing to enforce.
+    await expect(pageB.getByRole('button', { name: 'Turn on microphone' })).toBeVisible({ timeout: 30_000 });
+    await pageB.getByRole('button', { name: 'Turn on microphone' }).click();
     await expect(pageB.getByRole('button', { name: 'Turn off microphone' })).toBeVisible({ timeout: 30_000 });
 
     // Host opens People and mutes the guest. The per-person "Mute" item only

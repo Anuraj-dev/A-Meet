@@ -145,8 +145,8 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
   // has finished creating producers yet. On first join the local camera/mic is
   // available a little before the SFU negotiation completes; without these
   // refs, a click in that window was silently ignored.
-  const desiredAudioOnRef = useRef(devices.startAudioOn ?? true);
-  const desiredVideoOnRef = useRef(devices.startVideoOn ?? true);
+  const desiredAudioOnRef = useRef(devices.startAudioOn ?? false);
+  const desiredVideoOnRef = useRef(devices.startVideoOn ?? false);
   const initializedRef = useRef(false);
   const retryAttemptRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
