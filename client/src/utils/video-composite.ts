@@ -1,6 +1,6 @@
-// Canvas compositing helpers shared by the Picture-in-Picture mini player and
-// the in-call screenshot feature. These draw camera tiles (live video frames or
-// camera-off avatar placeholders) onto a 2D canvas.
+// Canvas compositing helpers used by the Picture-in-Picture mini player. These
+// draw camera tiles (live video frames or camera-off avatar placeholders) onto
+// a 2D canvas.
 //
 // Drawing MediaStream frames to canvas does NOT taint it (tainting only comes
 // from cross-origin <img>/<video src>), so a captureStream()/toBlob() of the

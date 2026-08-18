@@ -76,8 +76,31 @@ describe('useScreenShare', () => {
       localScreenStream: null,
     }));
     expect(result.current.shares).toEqual([]);
-    // hasScreen still reflects the sharing intent.
+    // Sharing requested, picker/produce still pending — no presentation stage.
+    expect(result.current.hasScreen).toBe(false);
+  });
+
+  it('keeps hasScreen false when sharing is requested but no stream exists yet', () => {
+    const { result, rerender } = renderHook((props: ScreenShareOptions) => useScreenShare(props), {
+      initialProps: {
+        ...baseProps,
+        isScreenSharing: true,
+        localScreenStream: null,
+      } as ScreenShareOptions,
+    });
+
+    expect(result.current.hasScreen).toBe(false);
+    expect(result.current.pinnedShare).toBeNull();
+
+    const local = stream('local');
+    rerender({
+      ...baseProps,
+      isScreenSharing: true,
+      localScreenStream: local,
+      localScreenSurface: 'window',
+    });
     expect(result.current.hasScreen).toBe(true);
+    expect(result.current.pinnedShare?.stream).toBe(local);
   });
 
   it('prefers a remote share over the local one when nothing is pinned', () => {

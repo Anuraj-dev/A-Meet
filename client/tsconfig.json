@@ -15,7 +15,6 @@
     "src/components/ReactionsOverlay.tsx",
     "src/components/RemoteAudio.tsx",
     "src/components/RtcStatsOverlay.tsx",
-    "src/utils/capture-screenshot.ts",
     "src/utils/peer-color.ts",
     "src/utils/room-entry.ts",
     "src/utils/transcript.ts",

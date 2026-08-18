@@ -32,7 +32,8 @@ export interface ScreenShareEntry {
 //                       the first remote share, then the first share, then null.
 //                       This replaces the previous setState-in-effect that reset
 //                       `pinnedShareKey` whenever the list changed.
-//   • hasScreen       — whether the presentation layout should take the stage.
+//   • hasScreen       — whether a real screen MediaStream is on stage (local
+//                       share only counts once localScreenStream exists).
 //   • showScreenAnyway — opt-in reveal past the local "infinity mirror" guard,
 //                       reset whenever the local share stops so a fresh share
 //                       re-arms the guard.
@@ -89,7 +90,10 @@ export function useScreenShare({
     ?? shares[0]
     ?? null;
 
-  const hasScreen = isScreenSharing || remoteScreenEntries.length > 0;
+  // Intent (`isScreenSharing`) is not enough: clicking Share can flip that
+  // true before getDisplayMedia returns a stream. Presentation/black stage
+  // only belongs on a live local or remote MediaStream.
+  const hasScreen = shares.length > 0;
 
   // Opt-in reveal past the local "infinity mirror" guard. Keyed to the *specific*
   // local stream the user revealed, so the guard re-arms automatically: stopping
