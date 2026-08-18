@@ -23,7 +23,6 @@ import {
   MoreVert as MoreVertIcon,
   PanTool as PanToolIcon,
   PeopleAlt as PeopleAltIcon,
-  PhotoCamera as PhotoCameraIcon,
   PictureInPictureAlt as PipIcon,
   PresentToAll as PresentIcon,
   CancelPresentation as StopPresentIcon,
@@ -77,7 +76,7 @@ export interface ControlBarProps {
   layoutMode?: LayoutMode; onLayoutChange: (mode: LayoutMode) => void;
   soundEnabled: boolean; onToggleSound: () => void;
   pipSupported: boolean; pipActive: boolean; onTogglePip: () => void;
-  onCopyLink: () => void; onScreenshot: () => void; onLeave: () => void;
+  onCopyLink: () => void; onLeave: () => void;
   micGain?: number; onMicGainChange: (value: number) => void;
   outputVolume?: number; onOutputVolumeChange: (value: number) => void;
   showPinToggle?: boolean; pinned?: boolean; onTogglePin?: () => void;
@@ -138,7 +137,6 @@ export default function ControlBar({
   soundEnabled, onToggleSound,
   pipSupported, pipActive, onTogglePip,
   onCopyLink,
-  onScreenshot,
   onLeave,
   micGain = 1, onMicGainChange,
   outputVolume = 1, onOutputVolumeChange,
@@ -459,26 +457,18 @@ export default function ControlBar({
         {isMobile && <Divider />}
         <MenuItem onClick={() => { closeMore(); onCopyLink(); }}>
           <ListItemIcon><ContentCopyIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>Copy joining link</ListItemText>
+          <ListItemText>Copy meeting link</ListItemText>
         </MenuItem>
-        {onScreenshot && (
-          <MenuItem onClick={() => { closeMore(); onScreenshot(); }}>
-            <ListItemIcon><PhotoCameraIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>Take screenshot</ListItemText>
-          </MenuItem>
-        )}
         {pipSupported && (
           <MenuItem onClick={() => { closeMore(); onTogglePip(); }}>
             <ListItemIcon><PipIcon fontSize="small" /></ListItemIcon>
             <ListItemText>{pipActive ? 'Close mini player' : 'Open mini player'}</ListItemText>
           </MenuItem>
         )}
+        <Divider />
         <MenuItem onClick={() => { onToggleSound(); }}>
           <ListItemIcon>{soundEnabled ? <VolumeUpIcon fontSize="small" /> : <VolumeOffIcon fontSize="small" />}</ListItemIcon>
-          <ListItemText>Sound effects</ListItemText>
-          <Box component="span" sx={{ ml: 2, color: 'text.secondary', fontSize: 13 }}>
-            {soundEnabled ? 'On' : 'Off'}
-          </Box>
+          <ListItemText primary="Sound effects" secondary={soundEnabled ? 'On' : 'Off'} />
         </MenuItem>
         <Divider />
         <MenuItem onClick={() => { closeMore(); onLeave(); }} sx={{ color: 'error.main' }}>

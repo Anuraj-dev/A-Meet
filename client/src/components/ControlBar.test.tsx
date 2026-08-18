@@ -57,7 +57,6 @@ function makeProps(overrides: Partial<ControlBarProps> = {}): ControlBarProps {
     pipActive: false,
     onTogglePip: vi.fn(),
     onCopyLink: vi.fn(),
-    onScreenshot: vi.fn(),
     onLeave: vi.fn(),
     micGain: 1,
     onMicGainChange: vi.fn(),
@@ -260,9 +259,51 @@ describe('ControlBar', () => {
     });
   });
 
-  // A11y baseline (#164): toggles expose pressed state, menu triggers expose
-  // popup/expanded state, and local state flips are narrated via a polite
-  // live region — the contract screen readers depend on.
+  describe('leave pill and overflow menu', () => {
+    it('keeps a dedicated Leave pill visible and usable', () => {
+      const props = renderBar();
+
+      const leave = btn('Leave call');
+      expect(leave).toBeVisible();
+      fireEvent.click(leave);
+      expect(props.onLeave).toHaveBeenCalledTimes(1);
+    });
+
+    it('groups overflow actions and has no screenshot entry', () => {
+      const props = renderBar({ pipSupported: true, pipActive: false, soundEnabled: true });
+
+      fireEvent.click(btn('More options'));
+      const menu = screen.getByRole('menu');
+
+      expect(within(menu).queryByText('Take screenshot')).not.toBeInTheDocument();
+      expect(within(menu).queryByText(/screenshot/i)).not.toBeInTheDocument();
+
+      expect(within(menu).getByRole('menuitem', { name: /copy meeting link/i })).toBeInTheDocument();
+      expect(within(menu).getByRole('menuitem', { name: /open mini player/i })).toBeInTheDocument();
+      expect(within(menu).getByRole('menuitem', { name: /sound effects/i })).toHaveTextContent('On');
+      expect(within(menu).getByRole('menuitem', { name: /leave call/i })).toBeInTheDocument();
+
+      const items = within(menu).getAllByRole('menuitem').map((el) => el.textContent);
+      expect(items).toEqual([
+        'Copy meeting link',
+        'Open mini player',
+        'Sound effectsOn',
+        'Leave call',
+      ]);
+
+      fireEvent.click(within(menu).getByRole('menuitem', { name: /copy meeting link/i }));
+      expect(props.onCopyLink).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps Leave in the overflow menu as a secondary path', () => {
+      const props = renderBar();
+
+      fireEvent.click(btn('More options'));
+      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /leave call/i }));
+      expect(props.onLeave).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('accessibility', () => {
     function renderRerenderable(overrides: Partial<ControlBarProps> = {}) {
       const view = render(

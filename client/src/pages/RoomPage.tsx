@@ -45,7 +45,6 @@ import type {
   TranscriptState,
 } from '@a-meet/contracts';
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
-import { copyMeetingScreenshot, downloadMeetingScreenshot } from '../utils/capture-screenshot';
 import { appLogger } from '../utils/logger';
 import { downloadTranscript, mergeTranscriptEntries } from '../utils/transcript';
 
@@ -585,35 +584,12 @@ export default function RoomPage() {
       pushNote({ kind: 'event', variant: 'info', text: "Couldn't open the mini player" }),
     );
   };
-  // Capture the current meeting view (camera tiles + any on-stage share) and
-  // copy it to the clipboard as a PNG. Falls back to a file download when the
-  // browser can't write images to the clipboard (e.g. Firefox).
-  async function handleScreenshot() {
-    const tiles = cameraTiles().map(({ key, stream, name, videoOn, audioOn, mirror }) =>
-      ({ key, stream, name, videoOn, audioOn, mirror }));
-    // Prefix the share key so it can't collide with the 'local' camera tile.
-    const share = pinnedShare
-      ? { key: `share-${pinnedShare.key}`, stream: pinnedShare.stream, name: pinnedShare.name }
-      : null;
-    try {
-      await copyMeetingScreenshot({ tiles, share });
-      playSound('toggleOn');
-      pushNote({ kind: 'event', variant: 'info', text: 'Screenshot copied to clipboard' });
-    } catch {
-      try {
-        await downloadMeetingScreenshot({ tiles, share }, `a-meet-${roomId}`);
-        pushNote({ kind: 'event', variant: 'info', text: 'Screenshot saved' });
-      } catch {
-        pushNote({ kind: 'event', variant: 'info', text: "Couldn't capture a screenshot" });
-      }
-    }
-  }
 
   async function handleCopyLink() {
     const link = `${window.location.origin}/lobby/${roomId}`;
     try {
       await navigator.clipboard.writeText(link);
-      pushNote({ kind: 'event', variant: 'info', text: 'Joining link copied' });
+      pushNote({ kind: 'event', variant: 'info', text: 'Meeting link copied' });
     } catch {
       pushNote({ kind: 'event', variant: 'info', text: 'Press the link button to copy' });
     }
@@ -1416,7 +1392,6 @@ export default function RoomPage() {
               soundEnabled={soundEnabled} onToggleSound={handleToggleSound}
               pipSupported={pipSupported} pipActive={pipActive} onTogglePip={handleTogglePip}
               onCopyLink={handleCopyLink}
-              onScreenshot={handleScreenshot}
               onLeave={handleLeave}
               micGain={micGain} onMicGainChange={setMicGain}
               outputVolume={outputVolume} onOutputVolumeChange={setOutputVolume}
