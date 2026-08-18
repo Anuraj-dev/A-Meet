@@ -13,8 +13,15 @@ export function useLobbyMedia() {
   const streamRef = useRef<MediaStream | null>(null);
   const videoOnRef = useRef(false);
   const audioOnRef = useRef(false);
-  videoOnRef.current = videoOn;
-  audioOnRef.current = audioOn;
+
+  const setVideoOnState = useCallback((next: boolean) => {
+    videoOnRef.current = next;
+    setVideoOn(next);
+  }, []);
+  const setAudioOnState = useCallback((next: boolean) => {
+    audioOnRef.current = next;
+    setAudioOn(next);
+  }, []);
 
   async function enumerateAndUpdate(stream: MediaStream) {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -72,14 +79,14 @@ export function useLobbyMedia() {
       stream.getTracks().forEach((t) => { t.enabled = false; });
       streamRef.current = stream;
       setPreviewStream(new MediaStream(stream.getTracks()));
-      setVideoOn(false);
-      setAudioOn(false);
+      setVideoOnState(false);
+      setAudioOnState(false);
       await enumerateAndUpdate(stream);
     }
 
     init();
     return () => { cancelled = true; };
-  }, []);
+  }, [setVideoOnState, setAudioOnState]);
 
   const setVideoDevice = useCallback(async (deviceId: string) => {
     setSelectedVideoId(deviceId);
@@ -91,12 +98,12 @@ export function useLobbyMedia() {
         t.enabled = videoOnRef.current;
         streamRef.current!.addTrack(t);
       });
-      setVideoOn(videoOnRef.current);
+      setVideoOnState(videoOnRef.current);
     } catch {
-      setVideoOn(false);
+      setVideoOnState(false);
     }
     setPreviewStream(new MediaStream(streamRef.current!.getTracks()));
-  }, []);
+  }, [setVideoOnState]);
 
   const setAudioDevice = useCallback(async (deviceId: string) => {
     setSelectedAudioId(deviceId);
@@ -107,28 +114,28 @@ export function useLobbyMedia() {
         t.enabled = audioOnRef.current;
         streamRef.current!.addTrack(t);
       });
-      setAudioOn(audioOnRef.current);
+      setAudioOnState(audioOnRef.current);
     } catch {
-      setAudioOn(false);
+      setAudioOnState(false);
     }
     if (streamRef.current) setPreviewStream(new MediaStream(streamRef.current.getTracks()));
-  }, []);
+  }, [setAudioOnState]);
 
   const toggleVideo = useCallback(() => {
     const tracks = streamRef.current?.getVideoTracks() ?? [];
     if (tracks.length === 0) return;
     const next = !tracks[0].enabled;
     tracks.forEach((t) => { t.enabled = next; });
-    setVideoOn(next);
-  }, []);
+    setVideoOnState(next);
+  }, [setVideoOnState]);
 
   const toggleAudio = useCallback(() => {
     const tracks = streamRef.current?.getAudioTracks() ?? [];
     if (tracks.length === 0) return;
     const next = !tracks[0].enabled;
     tracks.forEach((t) => { t.enabled = next; });
-    setAudioOn(next);
-  }, []);
+    setAudioOnState(next);
+  }, [setAudioOnState]);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());

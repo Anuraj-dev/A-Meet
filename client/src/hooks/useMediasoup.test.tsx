@@ -376,10 +376,10 @@ describe('useMediasoup', () => {
 
     expect(result.current.localAudioOn).toBe(false);
     expect(result.current.localVideoOn).toBe(false);
-    expect(H.request).toHaveBeenCalledWith(
-      'sfu-pause-producer',
-      expect.objectContaining({ producerId: expect.any(String) }),
-    );
+    const producedTags = H.produced.map((p: { appData?: { mediaTag?: string } }) => p.appData?.mediaTag);
+    expect(producedTags).toEqual(expect.arrayContaining(['audio', 'video']));
+    const pauseCalls = H.request.mock.calls.filter(([event]: [string]) => event === 'sfu-pause-producer');
+    expect(pauseCalls).toHaveLength(2);
   });
 
   it('produces in the paused state when joining muted with camera off', async () => {
@@ -392,7 +392,8 @@ describe('useMediasoup', () => {
     const producedTags = H.produced.map((p: any) => p.appData?.mediaTag);
     expect(producedTags).toContain('audio');
     expect(producedTags).toContain('video');
-    expect(H.request).toHaveBeenCalledWith('sfu-pause-producer', expect.objectContaining({ producerId: expect.any(String) }));
+    const pauseCalls = H.request.mock.calls.filter(([event]: [string]) => event === 'sfu-pause-producer');
+    expect(pauseCalls).toHaveLength(2);
   });
 
   it('ignores a screen-share that the user cancels', async () => {
