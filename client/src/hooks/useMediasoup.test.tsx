@@ -38,7 +38,7 @@ const H = vi.hoisted(() => {
     return {
       id: `producer-${appData?.mediaTag ?? appData?.source ?? 'x'}-${++state.pid}`,
       appData, paused: false,
-      on: vi.fn(), pause: vi.fn(), resume: vi.fn(), close: vi.fn(),
+      on: vi.fn(), pause: vi.fn(), resume: vi.fn(), close: vi.fn(), replaceTrack: vi.fn(async () => {}),
     };
   }
   function makeConsumer(id: string, producerId: string, kind: string) {
@@ -281,13 +281,69 @@ describe('useMediasoup', () => {
     expect(H.request).toHaveBeenCalledWith('sfu-resume-producer', expect.objectContaining({ producerId: expect.any(String) }));
   });
 
-  it('pauses the local video producer when toggled off', async () => {
+  it('pauses video and releases the captured camera track when toggled off', async () => {
     const { result } = mount();
     await waitForSetup();
     expect(result.current.localVideoOn).toBe(true);
+    const cameraTrack = result.current.localStream?.getVideoTracks()[0];
+    expect(cameraTrack).toBeDefined();
 
     await act(async () => { await result.current.toggleVideo(); });
     expect(result.current.localVideoOn).toBe(false);
+    expect(cameraTrack?.stop).toHaveBeenCalledOnce();
+    expect(result.current.localStream?.getVideoTracks()).toHaveLength(0);
+    expect(H.request).toHaveBeenCalledWith(
+      'sfu-pause-producer',
+      expect.objectContaining({ producerId: expect.any(String) }),
+    );
+  });
+
+  it('reacquires camera video and resumes the existing producer after camera-off', async () => {
+    const { result } = mount({ startAudioOn: true, startVideoOn: true, videoDeviceId: 'cam-1' });
+    await waitForSetup();
+    const firstTrack = result.current.localStream?.getVideoTracks()[0];
+
+    await act(async () => { await result.current.toggleVideo(); });
+    await act(async () => { await result.current.toggleVideo(); });
+
+    expect(result.current.localVideoOn).toBe(true);
+    const replacementTrack = result.current.localStream?.getVideoTracks()[0];
+    expect(replacementTrack).toBeDefined();
+    expect(replacementTrack).not.toBe(firstTrack);
+    expect(replacementTrack?.getSettings().deviceId).toBe('cam-1');
+    const videoRequests = vi.mocked(navigator.mediaDevices.getUserMedia).mock.calls
+      .filter(([constraints]) => Boolean(constraints?.video));
+    expect(videoRequests).toHaveLength(2);
+    expect(H.request).toHaveBeenCalledWith(
+      'sfu-resume-producer',
+      expect.objectContaining({ producerId: expect.any(String) }),
+    );
+  });
+
+  it('acquires and produces camera video when enabled after joining camera-off', async () => {
+    const { result } = mount({ startAudioOn: true, startVideoOn: false, videoDeviceId: 'cam-1' });
+    await waitForSetup();
+    expect(H.produced.map((p: any) => p.appData?.mediaTag)).not.toContain('video');
+
+    await act(async () => { await result.current.toggleVideo(); });
+
+    expect(result.current.localVideoOn).toBe(true);
+    expect(result.current.localStream?.getVideoTracks()).toHaveLength(1);
+    expect(H.produced.map((p: any) => p.appData?.mediaTag)).toContain('video');
+  });
+
+  it('keeps camera off without leaking a track when reacquisition fails', async () => {
+    const { result } = mount({ startAudioOn: true, startVideoOn: true });
+    await waitForSetup();
+
+    await act(async () => { await result.current.toggleVideo(); });
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(
+      Object.assign(new Error('blocked'), { name: 'NotAllowedError' }),
+    );
+    await act(async () => { await result.current.toggleVideo(); });
+
+    expect(result.current.localVideoOn).toBe(false);
+    expect(result.current.localStream?.getVideoTracks()).toHaveLength(0);
   });
 
   it('toggles raise-hand on then off, emitting both states', async () => {
@@ -370,6 +426,18 @@ describe('useMediasoup', () => {
     expect(result.current.hasCamera).toBe(false);
   });
 
+  it('does not acquire or produce camera video when joining camera-off', async () => {
+    const { result } = mount({ startAudioOn: true, startVideoOn: false });
+    await waitForSetup();
+
+    expect(result.current.localVideoOn).toBe(false);
+    const videoRequests = vi.mocked(navigator.mediaDevices.getUserMedia).mock.calls
+      .filter(([constraints]) => Boolean(constraints?.video));
+    expect(videoRequests).toHaveLength(0);
+    const producedTags = H.produced.map((p: { appData?: { mediaTag?: string } }) => p.appData?.mediaTag);
+    expect(producedTags).not.toContain('video');
+  });
+
   it('defaults to muted camera-off when start flags are omitted', async () => {
     const { result } = mount({});
     await waitForSetup();
@@ -377,12 +445,12 @@ describe('useMediasoup', () => {
     expect(result.current.localAudioOn).toBe(false);
     expect(result.current.localVideoOn).toBe(false);
     const producedTags = H.produced.map((p: { appData?: { mediaTag?: string } }) => p.appData?.mediaTag);
-    expect(producedTags).toEqual(expect.arrayContaining(['audio', 'video']));
+    expect(producedTags).toEqual(['audio']);
     const pauseCalls = H.request.mock.calls.filter(([event]: [string]) => event === 'sfu-pause-producer');
-    expect(pauseCalls).toHaveLength(2);
+    expect(pauseCalls).toHaveLength(1);
   });
 
-  it('produces in the paused state when joining muted with camera off', async () => {
+  it('produces muted audio without acquiring camera video when both start off', async () => {
     const { result } = mount({ startAudioOn: false, startVideoOn: false });
     await waitForSetup();
 
@@ -391,9 +459,9 @@ describe('useMediasoup', () => {
     expect(result.current.localVideoOn).toBe(false);
     const producedTags = H.produced.map((p: any) => p.appData?.mediaTag);
     expect(producedTags).toContain('audio');
-    expect(producedTags).toContain('video');
+    expect(producedTags).not.toContain('video');
     const pauseCalls = H.request.mock.calls.filter(([event]: [string]) => event === 'sfu-pause-producer');
-    expect(pauseCalls).toHaveLength(2);
+    expect(pauseCalls).toHaveLength(1);
   });
 
   it('ignores a screen-share that the user cancels', async () => {

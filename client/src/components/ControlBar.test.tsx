@@ -265,6 +265,7 @@ describe('ControlBar', () => {
 
       const leave = btn('Leave call');
       expect(leave).toBeVisible();
+      expect(screen.getAllByRole('button', { name: 'Leave call' })).toHaveLength(1);
       fireEvent.click(leave);
       expect(props.onLeave).toHaveBeenCalledTimes(1);
     });
@@ -281,27 +282,19 @@ describe('ControlBar', () => {
       expect(within(menu).getByRole('menuitem', { name: /copy meeting link/i })).toBeInTheDocument();
       expect(within(menu).getByRole('menuitem', { name: /open mini player/i })).toBeInTheDocument();
       expect(within(menu).getByRole('menuitem', { name: /sound effects/i })).toHaveTextContent('On');
-      expect(within(menu).getByRole('menuitem', { name: /leave call/i })).toBeInTheDocument();
+      expect(within(menu).queryByRole('menuitem', { name: /leave call/i })).not.toBeInTheDocument();
 
       const items = within(menu).getAllByRole('menuitem').map((el) => el.textContent);
       expect(items).toEqual([
         'Copy meeting link',
         'Open mini player',
         'Sound effectsOn',
-        'Leave call',
       ]);
 
       fireEvent.click(within(menu).getByRole('menuitem', { name: /copy meeting link/i }));
       expect(props.onCopyLink).toHaveBeenCalledTimes(1);
     });
 
-    it('keeps Leave in the overflow menu as a secondary path', () => {
-      const props = renderBar();
-
-      fireEvent.click(btn('More options'));
-      fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /leave call/i }));
-      expect(props.onLeave).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe('accessibility', () => {

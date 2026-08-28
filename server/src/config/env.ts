@@ -89,7 +89,7 @@ export const env = {
     groqApiKey: process.env.GROQ_API_KEY || '',
     deepgramModel: process.env.DEEPGRAM_TRANSCRIPTION_MODEL || 'nova-3',
     groqModel: process.env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3',
-    mergeModel: process.env.GROQ_TRANSCRIPT_MERGE_MODEL || 'llama-3.3-70b-versatile',
+    mergeModel: process.env.GROQ_TRANSCRIPT_MERGE_MODEL || 'qwen/qwen3.6-27b',
   },
 };
 

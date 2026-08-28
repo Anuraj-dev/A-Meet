@@ -188,49 +188,91 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
   const toggleVideo = useCallback(async () => {
     const next = !desiredVideoOnRef.current;
     desiredVideoOnRef.current = next;
-    localStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = next; });
-    setLocalVideoOn(next && Boolean(localStreamRef.current?.getVideoTracks().length));
-    const producer = producersRef.current.get('video');
-    if (producer) {
-      try {
-        if (next) {
-          producer.resume();
-          await request('sfu-resume-producer', { producerId: producer.id });
-        } else {
-          producer.pause();
+
+    if (!next) {
+      setLocalVideoOn(false);
+      const producer = producersRef.current.get('video');
+      producer?.pause();
+
+      const stream = localStreamRef.current;
+      stream?.getVideoTracks().forEach((track) => {
+        stream.removeTrack(track);
+        track.stop();
+      });
+      if (stream) setLocalStream(new MediaStream(stream.getTracks()));
+      setHasCamera(false);
+
+      if (producer) {
+        try {
           await request('sfu-pause-producer', { producerId: producer.id });
+        } catch (err: unknown) {
+          if (import.meta.env.DEV) console.warn('[sfu] toggle video failed:', errorMessage(err));
         }
-      } catch (err: unknown) {
-        if (import.meta.env.DEV) console.warn('[sfu] toggle video failed:', errorMessage(err));
       }
       return;
     }
 
-    // The common first-join path already has a camera track. If there is no
-    // track (permission was granted later / no camera at entry), wait until the
-    // send transport exists rather than pretending the camera is on.
-    if (!next) return;
-    const sendTransport = sendTransportRef.current;
-    if (!sendTransport || !deviceRef.current?.canProduce('video')) return;
+    const localStream = localStreamRef.current;
+    if (!localStream) {
+      desiredVideoOnRef.current = false;
+      return;
+    }
+
     const { videoDeviceId } = devicesRef.current;
     const constraint = videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true;
+    let track: MediaStreamTrack | undefined;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: constraint });
-      const track = stream.getVideoTracks()[0];
-      if (!track || !localStreamRef.current) return;
-      localStreamRef.current.addTrack(track);
-      setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-      const newProducer = await sendTransport.produce({
-        track,
-        encodings: CAM_VIDEO_ENCODINGS,
-        codecOptions: CAM_VIDEO_CODEC_OPTIONS,
-        appData: { source: 'camera', mediaTag: 'video' },
+      track = stream.getVideoTracks()[0];
+      if (!track) {
+        stream.getTracks().forEach((candidate) => candidate.stop());
+        desiredVideoOnRef.current = false;
+        return;
+      }
+      if (!desiredVideoOnRef.current) {
+        track.stop();
+        return;
+      }
+
+      let producer = producersRef.current.get('video');
+      if (producer) {
+        await producer.replaceTrack({ track });
+        producer.resume();
+      } else {
+        const sendTransport = sendTransportRef.current;
+        if (sendTransport && deviceRef.current?.canProduce('video')) {
+          producer = await sendTransport.produce({
+            track,
+            encodings: CAM_VIDEO_ENCODINGS,
+            codecOptions: CAM_VIDEO_CODEC_OPTIONS,
+            appData: { source: 'camera', mediaTag: 'video' },
+          });
+          producersRef.current.set('video', producer);
+          producer.on('transportclose', () => producersRef.current.delete('video'));
+        }
+      }
+
+      localStream.getVideoTracks().forEach((oldTrack) => {
+        localStream.removeTrack(oldTrack);
+        oldTrack.stop();
       });
-      producersRef.current.set('video', newProducer);
-      newProducer.on('transportclose', () => producersRef.current.delete('video'));
-      setLocalVideoOn(desiredVideoOnRef.current);
+      localStream.addTrack(track);
+      setLocalStream(new MediaStream(localStream.getTracks()));
+      setLocalVideoOn(true);
       setHasCamera(true);
+
+      if (producer) {
+        try {
+          await request('sfu-resume-producer', { producerId: producer.id });
+        } catch (err: unknown) {
+          if (import.meta.env.DEV) console.warn('[sfu] toggle video failed:', errorMessage(err));
+        }
+      }
     } catch (err: unknown) {
+      track?.stop();
+      desiredVideoOnRef.current = false;
+      setLocalVideoOn(false);
+      setHasCamera(false);
       if (import.meta.env.DEV) console.warn('[sfu] camera still unavailable:', errorName(err));
     }
   }, []);
@@ -823,12 +865,14 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
       } catch (err: unknown) {
         if (errorName(err) === 'NotAllowedError' || errorName(err) === 'NotFoundError') deniedCount++;
       }
-      try {
-        const c = videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true;
-        const s = await navigator.mediaDevices.getUserMedia({ video: c });
-        s.getVideoTracks().forEach((t) => stream.addTrack(t));
-      } catch (err: unknown) {
-        if (errorName(err) === 'NotAllowedError' || errorName(err) === 'NotFoundError') deniedCount++;
+      if (desiredVideoOnRef.current) {
+        try {
+          const c = videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true;
+          const s = await navigator.mediaDevices.getUserMedia({ video: c });
+          s.getVideoTracks().forEach((t) => stream.addTrack(t));
+        } catch (err: unknown) {
+          if (errorName(err) === 'NotAllowedError' || errorName(err) === 'NotFoundError') deniedCount++;
+        }
       }
 
       if (deniedCount === 2) setPermissionDenied(true);
