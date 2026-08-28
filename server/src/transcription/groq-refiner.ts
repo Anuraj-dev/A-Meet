@@ -102,6 +102,7 @@ export class GroqTranscriptRefiner {
         try {
           const completion = await this.client.chat.completions.create({
             model: env.transcription.mergeModel,
+            reasoning_effort: 'none',
             temperature: 0,
             max_completion_tokens: 320,
             messages: [
