@@ -470,11 +470,6 @@ export default function ControlBar({
           <ListItemIcon>{soundEnabled ? <VolumeUpIcon fontSize="small" /> : <VolumeOffIcon fontSize="small" />}</ListItemIcon>
           <ListItemText primary="Sound effects" secondary={soundEnabled ? 'On' : 'Off'} />
         </MenuItem>
-        <Divider />
-        <MenuItem onClick={() => { closeMore(); onLeave(); }} sx={{ color: 'error.main' }}>
-          <ListItemIcon><CallEndIcon fontSize="small" sx={{ color: 'error.main' }} /></ListItemIcon>
-          <ListItemText>Leave call</ListItemText>
-        </MenuItem>
       </Menu>
     </Box>
   );
