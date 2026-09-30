@@ -47,6 +47,8 @@ import type {
 import { playSound, isSoundEnabled, toggleSound } from '../services/sounds';
 import { appLogger } from '../utils/logger';
 import { downloadTranscript, mergeTranscriptEntries } from '../utils/transcript';
+import { copyText } from '../utils/copy-text';
+import ShareLinkFallback from '../components/ShareLinkFallback';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '👏', '🎉'];
 const TRANSCRIPT_CONSENT_KEY = 'ameet:transcription-consent-v2';
@@ -130,6 +132,7 @@ export default function RoomPage() {
   const [soundEnabled, setSoundEnabled] = useState(() => isSoundEnabled());
   const [isHost, setIsHost] = useState(false);
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [manualLink, setManualLink] = useState<string | null>(null);
   // Bottom-left transient flashes: join/leave, chat previews, copy confirmation.
   const [notes, setNotes] = useState<RoomNotificationNote[]>([]);
   const noteIdRef = useRef(0);
@@ -587,12 +590,13 @@ export default function RoomPage() {
 
   async function handleCopyLink() {
     const link = `${window.location.origin}/lobby/${roomId}`;
-    try {
-      await navigator.clipboard.writeText(link);
+    if (await copyText(link)) {
+      setManualLink(null);
       pushNote({ kind: 'event', variant: 'info', text: 'Meeting link copied' });
-    } catch {
-      pushNote({ kind: 'event', variant: 'info', text: 'Press the link button to copy' });
+      return;
     }
+    // The info toast clips long text, so a failed copy opens the link itself.
+    setManualLink(link);
   }
 
   // --- Camera tiles (shared by presentation rail) ---
@@ -1486,6 +1490,8 @@ export default function RoomPage() {
           {unmuteRequestFrom} asked you to unmute
         </Alert>
       </Snackbar>
+
+      <ShareLinkFallback link={manualLink} onClose={() => setManualLink(null)} />
 
       {/* Host leave confirmation — non-hosts leave immediately (no dialog) */}
       <Dialog
