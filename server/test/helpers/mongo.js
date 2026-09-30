@@ -18,8 +18,10 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
  * `mongod` binary into its cache (~/.cache/mongodb-binaries) from
  * fastdl.mongodb.org, then reuses it on later runs. That fetch is a *runtime*
  * step performed by the test, not an npm postinstall — so it is unaffected by
- * CI's `npm ci --ignore-scripts` and keeps installs fast. The first CI run on
- * a cold cache pays the one-time download.
+ * CI's `npm ci --ignore-scripts` and keeps installs fast. The first run on a
+ * cold cache pays the one-time download (~120MB). Vitest's default hook
+ * timeout is 10s, which aborts that download and fails the suite, so this
+ * hook allows 3 minutes. A warm cache still finishes in well under a second.
  */
 export function useMongoMemoryServer() {
   let mongod;
@@ -27,7 +29,7 @@ export function useMongoMemoryServer() {
   beforeAll(async () => {
     mongod = await MongoMemoryServer.create();
     await mongoose.connect(mongod.getUri());
-  });
+  }, 180_000);
 
   afterEach(async () => {
     // Drop all documents between tests so state never leaks across cases,

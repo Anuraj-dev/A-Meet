@@ -27,6 +27,7 @@ import EtherealShadow from "../components/EtherealShadow";
 import ScheduleMeetingDialog from "../components/ScheduleMeetingDialog";
 import UpcomingMeetings from "../components/UpcomingMeetings";
 import type { RoomMetadataDto, ScheduledMeetingDto } from "@a-meet/contracts";
+import { parseMeetingCode } from "../utils/meeting-code";
 // Warm graphite + ember + dusty sage. Smoke, not glow. Shared with the lobby.
 import { DK } from "../theme/theme";
 
@@ -55,6 +56,16 @@ const primaryBtn = {
   },
 };
 
+const fieldErrorSx = {
+  maxWidth: 440,
+  mt: 1,
+  textAlign: "center",
+  fontFamily: DK.font,
+  fontSize: 13.5,
+  lineHeight: 1.45,
+  color: "#ffb4a8",
+};
+
 // framer-motion entrance: a staggered rise for the hero column.
 const container = {
   hidden: {},
@@ -69,6 +80,8 @@ export default function LandingPage() {
   const { user, login, logout } = useAuth();
   const navigate = useNavigate();
   const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [createError, setCreateError] = useState("");
   const [creating, setCreating] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [editingMeeting, setEditingMeeting] = useState<ScheduledMeetingDto | null>(null);
@@ -77,6 +90,8 @@ export default function LandingPage() {
 
   async function handleNewMeeting() {
     setCreating(true);
+    setCreateError("");
+    setJoinError("");
     try {
       const { data } = await api.post<RoomMetadataDto>("/rooms");
       // The creator instant-joins (Google-Meet behaviour) — straight into the
@@ -84,6 +99,8 @@ export default function LandingPage() {
       // RoomGuard uses to allow this; anyone opening the shared link later (even
       // this same account in another browser) has no marker and hits the lobby.
       navigate(`/room/${data.roomId}`, { state: { fromCreate: true } });
+    } catch {
+      setCreateError("Could not start the meeting. Check your connection and try again.");
     } finally {
       setCreating(false);
     }
@@ -107,11 +124,14 @@ export default function LandingPage() {
 
   function handleJoin(e: FormEvent) {
     e.preventDefault();
-    let code = joinCode.trim();
-    if (!code) return;
-    if (code.includes("/")) code = code.split("/").filter(Boolean).pop() ?? "";
-    code = code.toLowerCase().replace(/\s+/g, "");
-    if (code) navigate(`/lobby/${encodeURIComponent(code)}`);
+    const code = parseMeetingCode(joinCode);
+    if (!code) {
+      setJoinError("That does not look like a meeting code. Use a code like abc-defg-hij, or paste the invite link.");
+      return;
+    }
+    setJoinError("");
+    setCreateError("");
+    navigate(`/lobby/${code}`);
   }
 
   return (
@@ -374,72 +394,104 @@ export default function LandingPage() {
                 alignItems: "center",
                 justifyContent: "center",
               }}>
-              <Button
-                startIcon={<VideocamIcon />}
-                onClick={handleNewMeeting}
-                disabled={creating}
-                sx={{ ...primaryBtn, width: { xs: "100%", md: "auto" } }}>
-                {creating ? "Starting…" : "New meeting"}
-              </Button>
-
-              {/* Join-by-code pill */}
               <Box
-                component="form"
-                onSubmit={handleJoin}
                 sx={{
                   display: "flex",
+                  flexDirection: "column",
                   alignItems: "center",
-                  height: 56,
-                  width: { xs: "100%", md: 440 },
-                  pl: 2,
-                  pr: 0.75,
-                  borderRadius: "999px",
-                  bgcolor: DK.surface,
-                  backdropFilter: "blur(12px)",
-                  border: `1px solid ${DK.line2}`,
-                  transition: "border-color 0.2s",
-                  "&:focus-within": { borderColor: DK.ember },
+                  width: { xs: "100%", md: "auto" },
                 }}>
-                <KeyboardIcon
-                  sx={{ color: DK.dim, fontSize: 21, mr: 1.25, flexShrink: 0 }}
-                />
-                <InputBase
-                  fullWidth
-                  placeholder="Enter a code or link"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  autoComplete="off"
-                  sx={{
-                    fontFamily: DK.font,
-                    fontSize: 15,
-                    color: DK.ink,
-                    "& input::placeholder": { color: DK.faint, opacity: 1 },
-                  }}
-                />
                 <Button
-                  type="submit"
-                  disabled={!joinCode.trim()}
-                  endIcon={<ArrowIcon sx={{ fontSize: "18px !important" }} />}
-                  sx={{
-                    flexShrink: 0,
-                    borderRadius: "999px",
-                    px: 2.25,
-                    height: 44,
-                    ml: 1,
-                    fontFamily: DK.font,
-                    fontWeight: 700,
-                    fontSize: 14.5,
-                    textTransform: "none",
-                    color: joinCode.trim() ? "#fff" : DK.faint,
-                    bgcolor: joinCode.trim() ? DK.ember : "transparent",
-                    "&:hover": {
-                      bgcolor: joinCode.trim() ? DK.emberDark : DK.surface2,
-                    },
-                    "&.Mui-disabled": { color: DK.faint },
-                    transition: "background-color 0.2s, color 0.2s",
-                  }}>
-                  Join
+                  startIcon={<VideocamIcon />}
+                  onClick={handleNewMeeting}
+                  disabled={creating}
+                  aria-describedby={createError ? "create-meeting-error" : undefined}
+                  sx={{ ...primaryBtn, width: { xs: "100%", md: "auto" } }}>
+                  {creating ? "Starting…" : "New meeting"}
                 </Button>
+                {createError && (
+                  <Typography id="create-meeting-error" role="alert" sx={fieldErrorSx}>
+                    {createError}
+                  </Typography>
+                )}
+              </Box>
+
+              {/* Join-by-code pill */}
+              <Box sx={{ width: { xs: "100%", md: "auto" } }}>
+                <Box
+                  component="form"
+                  onSubmit={handleJoin}
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    height: 56,
+                    width: { xs: "100%", md: 440 },
+                    pl: 2,
+                    pr: 0.75,
+                    borderRadius: "999px",
+                    bgcolor: DK.surface,
+                    backdropFilter: "blur(12px)",
+                    border: `1px solid ${DK.line2}`,
+                    transition: "border-color 0.2s",
+                    "&:focus-within": { borderColor: DK.ember },
+                  }}>
+                  <KeyboardIcon
+                    sx={{ color: DK.dim, fontSize: 21, mr: 1.25, flexShrink: 0 }}
+                  />
+                  <InputBase
+                    fullWidth
+                    placeholder="Enter a code or link"
+                    value={joinCode}
+                    onChange={(e) => {
+                      setJoinCode(e.target.value);
+                      if (joinError) setJoinError("");
+                    }}
+                    autoComplete="off"
+                    inputProps={{
+                      autoCapitalize: "none",
+                      autoCorrect: "off",
+                      spellCheck: false,
+                      "aria-label": "Meeting code or link",
+                      "aria-invalid": joinError ? true : undefined,
+                      "aria-describedby": joinError ? "join-code-error" : undefined,
+                    }}
+                    sx={{
+                      fontFamily: DK.font,
+                      fontSize: 15,
+                      color: DK.ink,
+                      "& input::placeholder": { color: DK.faint, opacity: 1 },
+                    }}
+                  />
+                  <Button
+                    type="submit"
+                    disabled={!joinCode.trim()}
+                    endIcon={<ArrowIcon sx={{ fontSize: "18px !important" }} />}
+                    sx={{
+                      flexShrink: 0,
+                      borderRadius: "999px",
+                      px: 2.25,
+                      height: 44,
+                      ml: 1,
+                      fontFamily: DK.font,
+                      fontWeight: 700,
+                      fontSize: 14.5,
+                      textTransform: "none",
+                      color: joinCode.trim() ? "#fff" : DK.faint,
+                      bgcolor: joinCode.trim() ? DK.ember : "transparent",
+                      "&:hover": {
+                        bgcolor: joinCode.trim() ? DK.emberDark : DK.surface2,
+                      },
+                      "&.Mui-disabled": { color: DK.faint },
+                      transition: "background-color 0.2s, color 0.2s",
+                    }}>
+                    Join
+                  </Button>
+                </Box>
+                {joinError && (
+                  <Typography id="join-code-error" role="alert" sx={fieldErrorSx}>
+                    {joinError}
+                  </Typography>
+                )}
               </Box>
             </Stack>
 

@@ -51,6 +51,10 @@ export function formatTranscript({ entries, roomId, meetingTitle }: FormatTransc
   return `${lines.join('\n')}\n`;
 }
 
+// Keep the blob URL alive past the click. Revoking on a 0ms timer races the
+// browser starting the download, and Firefox/Safari then save nothing.
+const TRANSCRIPT_URL_REVOKE_MS = 1000;
+
 export function downloadTranscript(options: FormatTranscriptOptions): void {
   const text = formatTranscript(options);
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
@@ -58,6 +62,8 @@ export function downloadTranscript(options: FormatTranscriptOptions): void {
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = `a-meet-${options.roomId}-transcript.txt`;
+  document.body.appendChild(anchor);
   anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), TRANSCRIPT_URL_REVOKE_MS);
 }

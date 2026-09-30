@@ -37,19 +37,33 @@ export function formatMeetingTime(date: DateInput, now = new Date()): string {
   return `${dayLabel(date, now)}, ${timeLabel(date)}`;
 }
 
-// Relative hint: "in 20 min" / "in 2 hours" / "3 days ago" / "Starting now".
+// Relative hint: "in 20 min" / "in 1 hour" / "3 days ago" / "Starting now".
+// Hours and days are whole units already elapsed or remaining, so 90 minutes
+// reads "in 1 hour" (not "in 2 hours") and a meeting that already started is
+// never described as "Starting now".
 export function relativeTime(date: DateInput, now = new Date()): string {
-  const ms = new Date(date).getTime() - now.getTime();
+  const target = new Date(date).getTime();
+  if (Number.isNaN(target)) return '';
+  const ms = target - now.getTime();
   const abs = Math.abs(ms);
-  if (abs < 60_000) return 'Starting now';
-  const mins = Math.round(abs / 60_000);
-  const hrs = Math.round(abs / 3_600_000);
-  const days = Math.round(abs / MS_PER_DAY);
-  let phrase;
-  if (mins < 60) phrase = `${mins} min`;
-  else if (hrs < 24) phrase = `${hrs} hour${hrs === 1 ? '' : 's'}`;
-  else phrase = `${days} day${days === 1 ? '' : 's'}`;
-  return ms >= 0 ? `in ${phrase}` : `${phrase} ago`;
+  const ahead = ms >= 0;
+  const wrap = (phrase: string) => (ahead ? `in ${phrase}` : `${phrase} ago`);
+
+  if (abs < 60_000) return ahead ? 'Starting now' : 'Just started';
+
+  if (abs < 3_600_000) {
+    const minutes = Math.max(1, Math.round(abs / 60_000));
+    if (minutes < 60) return wrap(`${minutes} min`);
+    return wrap('1 hour');
+  }
+
+  if (abs < MS_PER_DAY) {
+    const hours = Math.floor(abs / 3_600_000);
+    return wrap(`${hours} hour${hours === 1 ? '' : 's'}`);
+  }
+
+  const days = Math.floor(abs / MS_PER_DAY);
+  return wrap(`${days} day${days === 1 ? '' : 's'}`);
 }
 
 // Value for a native <input type="datetime-local">, which wants local wall-clock
