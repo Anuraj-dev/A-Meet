@@ -385,6 +385,70 @@ describe('useMediasoup', () => {
     expect(H.request).toHaveBeenCalledWith('sfu-close-producer', expect.objectContaining({ producerId: expect.any(String) }));
   });
 
+  it('asks the picker for audio and shares video-only when none is picked', async () => {
+    vi.mocked(navigator.mediaDevices.getDisplayMedia).mockResolvedValue(
+      new FakeMediaStream([fakeTrack('video', 'screen-1')]) as unknown as MediaStream,
+    );
+    const { result } = mount();
+    await waitForSetup();
+
+    await act(async () => { await result.current.shareScreen(); });
+
+    const [constraints] = vi.mocked(navigator.mediaDevices.getDisplayMedia).mock.calls[0];
+    expect(constraints?.audio).toBeTruthy();
+    expect(result.current.isScreenSharing).toBe(true);
+    expect(H.produced.map((p: any) => p.appData?.mediaTag)).not.toContain('screen-audio');
+  });
+
+  it('shares tab audio as a second screen producer and stops both together', async () => {
+    const screenVideo = fakeTrack('video', 'screen-1');
+    const screenAudio = fakeTrack('audio', 'tab-audio-1');
+    vi.mocked(navigator.mediaDevices.getDisplayMedia).mockResolvedValue(
+      new FakeMediaStream([screenVideo, screenAudio]) as unknown as MediaStream,
+    );
+    const { result } = mount();
+    await waitForSetup();
+
+    await act(async () => { await result.current.shareScreen(); });
+
+    const audioProduce = H.produced.find((p: any) => p.appData?.mediaTag === 'screen-audio');
+    expect(audioProduce?.track).toBe(screenAudio);
+    expect(audioProduce?.appData?.source).toBe('screen');
+    expect(result.current.localScreenStream?.getAudioTracks()).toEqual([screenAudio]);
+
+    act(() => { result.current.stopScreenShare(); });
+
+    const closed = H.request.mock.calls
+      .filter(([event]: [string]) => event === 'sfu-close-producer')
+      .map(([, data]: [string, { producerId: string }]) => data.producerId);
+    expect(closed).toHaveLength(2);
+    expect(closed.some((id: string) => id.startsWith('producer-screen-audio-'))).toBe(true);
+    expect(screenVideo.stop).toHaveBeenCalled();
+    expect(screenAudio.stop).toHaveBeenCalled();
+    expect(result.current.isScreenSharing).toBe(false);
+  });
+
+  it('keeps the screen share going when its audio producer fails', async () => {
+    const screenAudio = fakeTrack('audio', 'tab-audio-1');
+    vi.mocked(navigator.mediaDevices.getDisplayMedia).mockResolvedValue(
+      new FakeMediaStream([fakeTrack('video', 'screen-1'), screenAudio]) as unknown as MediaStream,
+    );
+    const { result } = mount();
+    await waitForSetup();
+    const sendTransport = H.sendTransports[0];
+    const produce = sendTransport.produce.getMockImplementation();
+    sendTransport.produce.mockImplementation(async (opts: any) => {
+      if (opts.appData?.mediaTag === 'screen-audio') throw new Error('too many producers');
+      return produce(opts);
+    });
+
+    await act(async () => { await result.current.shareScreen(); });
+
+    expect(result.current.isScreenSharing).toBe(true);
+    expect(screenAudio.stop).toHaveBeenCalled();
+    expect(result.current.localScreenStream?.getAudioTracks()).toHaveLength(0);
+  });
+
   it('reflects peer pause/resume, hand-raise, and active-speaker events', async () => {
     const { result } = mount();
     await waitForSetup();

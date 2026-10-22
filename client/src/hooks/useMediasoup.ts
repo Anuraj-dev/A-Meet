@@ -32,6 +32,36 @@ const CAM_VIDEO_ENCODINGS = [
 ];
 const CAM_VIDEO_CODEC_OPTIONS = { videoGoogleStartBitrate: 1000 };
 
+// Screen-share capture. Asking for audio makes Chrome/Edge show "Also share tab
+// audio" (and, with `systemAudio`, "system audio" for whole-screen shares); the
+// stream carries an audio track only when the presenter ticks it. Shared audio
+// is music or a video soundtrack, not a voice, so the mic's voice processing is
+// off, and the presenter keeps hearing their own tab. `systemAudio`, `cursor`
+// and `suppressLocalAudioPlayback` are Chromium hints missing from lib.dom.
+type DisplayCaptureOptions = DisplayMediaStreamOptions & {
+  video: MediaTrackConstraints & { cursor?: 'always' | 'motion' | 'never' };
+  audio: MediaTrackConstraints & { suppressLocalAudioPlayback?: boolean };
+  systemAudio?: 'include' | 'exclude';
+};
+const DISPLAY_CAPTURE_OPTIONS: DisplayCaptureOptions = {
+  video: { cursor: 'always' },
+  audio: {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    suppressLocalAudioPlayback: false,
+  },
+  systemAudio: 'include',
+};
+// Stereo music-grade Opus. DTX stays off: it treats quiet passages as silence
+// and drops them, which voice tolerates and a soundtrack does not.
+const SCREEN_AUDIO_CODEC_OPTIONS = {
+  opusStereo: true,
+  opusFec: true,
+  opusDtx: false,
+  opusMaxAverageBitrate: 128_000,
+};
+
 // First-connection recovery: a failed setup (incl. the very first one, which the
 // 2026-07-05 incident stranded media-less) is retried with capped exponential
 // backoff while the socket is connected. A socket drop pauses the ladder — the
@@ -133,6 +163,7 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
   const producerInfoRef = useRef(new Map<string, ProducerInfo>());
   const pendingProducersRef = useRef(new Map<string, SfuProducerDescriptor>());
   const screenProducerRef = useRef<Producer | null>(null);
+  const screenAudioProducerRef = useRef<Producer | null>(null);
   const localScreenStreamRef = useRef<MediaStream | null>(null);
   const handRaisedRef = useRef(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -280,10 +311,13 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
   const stopScreenShare = useCallback(() => {
     const producer = screenProducerRef.current;
     if (!producer) return;
-    const producerId = producer.id;
-    try { producer.close(); } catch { /* gone */ }
+    const audioProducer = screenAudioProducerRef.current;
     screenProducerRef.current = null;
-    request('sfu-close-producer', { producerId }).catch(() => {});
+    screenAudioProducerRef.current = null;
+    for (const p of audioProducer ? [producer, audioProducer] : [producer]) {
+      try { p.close(); } catch { /* gone */ }
+      request('sfu-close-producer', { producerId: p.id }).catch(() => {});
+    }
     const stream = localScreenStreamRef.current;
     if (stream) stream.getTracks().forEach((t) => t.stop());
     localScreenStreamRef.current = null;
@@ -297,14 +331,31 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
     const sendTransport = sendTransportRef.current;
     if (!sendTransport) return;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: 'always' } as MediaTrackConstraints,
-        audio: false,
-      });
+      const stream = await navigator.mediaDevices.getDisplayMedia(DISPLAY_CAPTURE_OPTIONS);
       const track = stream.getVideoTracks()[0];
       if (!track) { stream.getTracks().forEach((t) => t.stop()); return; }
       const producer = await sendTransport.produce({ track, appData: { source: 'screen' } });
       screenProducerRef.current = producer;
+      // Shared audio is a second `source: 'screen'` producer, so receivers file
+      // it with the share rather than the mic, and the server already keeps it
+      // out of active-speaker and host-mute. The share is already live, so a
+      // failed audio produce degrades to video-only instead of cancelling it.
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        try {
+          const audioProducer = await sendTransport.produce({
+            track: audioTrack,
+            codecOptions: SCREEN_AUDIO_CODEC_OPTIONS,
+            appData: { source: 'screen', mediaTag: 'screen-audio' },
+          });
+          screenAudioProducerRef.current = audioProducer;
+          audioProducer.on('transportclose', stopScreenShare);
+        } catch (err: unknown) {
+          stream.removeTrack(audioTrack);
+          audioTrack.stop();
+          if (import.meta.env.DEV) console.warn('[sfu] screen audio failed:', errorMessage(err));
+        }
+      }
       localScreenStreamRef.current = stream;
       setLocalScreenStream(stream);
       setLocalScreenSurface(track.getSettings().displaySurface ?? null);
@@ -968,7 +1019,9 @@ export function useMediasoup(roomId: string, devices: MediaDevicesOptions = {}) 
       pendingProducers.clear();
 
       try { screenProducerRef.current?.close(); } catch { /* gone */ }
+      try { screenAudioProducerRef.current?.close(); } catch { /* gone */ }
       screenProducerRef.current = null;
+      screenAudioProducerRef.current = null;
       localScreenStreamRef.current?.getTracks().forEach((t) => t.stop());
       localScreenStreamRef.current = null;
 

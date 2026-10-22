@@ -831,9 +831,12 @@ export default function RoomPage() {
                   </Box>
                 ) : (
                   <>
+                    {/* Shared tab/system audio plays through <RemoteAudio> so it
+                        survives layout switches and unpinned shares; the stage
+                        <video> stays muted to avoid playing it twice. */}
                     <VideoTile
                       stream={pinnedShare.stream}
-                      muted={pinnedShare.isLocal}
+                      muted
                       name={pinnedShare.isLocal ? 'Your screen' : `${pinnedShare.name}'s screen`}
                       videoOn
                       audioOn
@@ -1190,7 +1193,12 @@ export default function RoomPage() {
     >
       {/* Remote audio: dedicated hidden <audio> per peer, mounted once outside
           the tile layout so audio survives layout switches and late tracks. */}
-      <RemoteAudio streams={remoteStreams} masterVolume={outputVolume} peerVolumes={peerVolumes} />
+      <RemoteAudio
+        streams={remoteStreams}
+        screenStreams={remoteScreens}
+        masterVolume={outputVolume}
+        peerVolumes={peerVolumes}
+      />
 
       {/* Dev-only WebRTC stats overlay (no-op in production builds). */}
       <RtcStatsOverlay stats={rtcStats} />
