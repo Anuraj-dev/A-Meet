@@ -109,17 +109,28 @@ jobs:
           node-version: '22'
       # --ignore-scripts keeps installs fast (no native builds needed for audit).
       - run: npm ci --ignore-scripts
-        working-directory: server
-      - run: npm audit --audit-level=high
-        working-directory: server
-      - run: npm ci --ignore-scripts
-        working-directory: client
-      - run: npm audit --audit-level=high
-        working-directory: client
-      - run: npm ci --ignore-scripts
-        working-directory: bot
-      - run: npm audit --audit-level=high
-        working-directory: bot
+      # npm exits 1 both for findings and for a registry failure. A slow advisory
+      # endpoint used to hang for npm's 5-minute default and then fail the gate
+      # with no finding at all, so time out after 60s and retry only when npm
+      # reports the endpoint error. Any real finding still fails on the first try.
+      - name: npm audit --audit-level=high (server, client, bot)
+        run: |
+          for ws in server client bot; do
+            for attempt in 1 2 3; do
+              echo "::group::$ws (attempt $attempt)"
+              set +e
+              (cd "$ws" && npm audit --audit-level=high --fetch-timeout=60000) 2>&1 | tee audit.log
+              status=${PIPESTATUS[0]}
+              set -e
+              echo "::endgroup::"
+              [ "$status" -eq 0 ] && break
+              if ! grep -q "audit endpoint returned an error" audit.log || [ "$attempt" -eq 3 ]; then
+                exit "$status"
+              fi
+              echo "::warning::npm audit registry error for $ws; retrying"
+              sleep 20
+            done
+          done
 
   client:
     name: Client tests + build
