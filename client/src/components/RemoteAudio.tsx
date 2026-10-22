@@ -58,13 +58,20 @@ function PeerAudio({ socketId, stream, volume = 1 }: PeerAudioProps) {
 // masterVolume: global speaker slider (0–1).
 // peerVolumes: per-peer overrides keyed by socketId (0–1, default 1).
 // Final per-peer gain = clamp(masterVolume × peerVolume, 0, 1).
+// screenStreams: remote screen shares keyed by socketId. A share's audio (tab or
+// system audio) gets its own graph at masterVolume only: the per-peer override is
+// for that person's voice, and turning down a talker shouldn't silence the video
+// they're presenting. Video-only shares are skipped — a stream with no audio
+// track can't feed createMediaStreamSource.
 interface RemoteAudioProps {
   streams: Record<string, MediaStream>;
+  screenStreams?: Record<string, MediaStream>;
   masterVolume?: number;
   peerVolumes?: Record<string, number>;
 }
 
-export default function RemoteAudio({ streams, masterVolume = 1, peerVolumes = {} }: RemoteAudioProps) {
+export default function RemoteAudio({ streams, screenStreams = {}, masterVolume = 1, peerVolumes = {} }: RemoteAudioProps) {
+  const master = Math.max(0, Math.min(1, masterVolume));
   return (
     <>
       {Object.entries(streams).map(([socketId, stream]) => {
@@ -74,6 +81,11 @@ export default function RemoteAudio({ streams, masterVolume = 1, peerVolumes = {
           <PeerAudio key={socketId} socketId={socketId} stream={stream} volume={finalVol} />
         );
       })}
+      {Object.entries(screenStreams)
+        .filter(([, stream]) => stream.getAudioTracks().length > 0)
+        .map(([socketId, stream]) => (
+          <PeerAudio key={`screen:${socketId}`} socketId={`${socketId}:screen`} stream={stream} volume={master} />
+        ))}
     </>
   );
 }
