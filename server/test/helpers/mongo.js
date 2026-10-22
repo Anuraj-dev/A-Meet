@@ -18,8 +18,9 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
  * `mongod` binary into its cache (~/.cache/mongodb-binaries) from
  * fastdl.mongodb.org, then reuses it on later runs. That fetch is a *runtime*
  * step performed by the test, not an npm postinstall — so it is unaffected by
- * CI's `npm ci --ignore-scripts` and keeps installs fast. The first CI run on
- * a cold cache pays the one-time download.
+ * CI's `npm ci --ignore-scripts` and keeps installs fast. `test/global-setup.js`
+ * performs that download once before the workers start, so this hook never
+ * races other suites for it.
  */
 export function useMongoMemoryServer() {
   let mongod;
