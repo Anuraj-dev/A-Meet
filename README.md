@@ -274,3 +274,7 @@ Set `DISCORD_BOT_API_KEY` to the same value in `server/.env`. Invite the bot wit
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a PR. The project uses strict TDD. Each change starts with a failing test, and each bug fix starts with a test that reproduces the bug. Tests check what a user or another participant observes, not internal state.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
