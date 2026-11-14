@@ -1,383 +1,223 @@
-# A-Meet
+<p align="center">
+  <img src="client/public/favicon.svg" alt="A-Meet logo" width="88" height="88" />
+</p>
 
-> A full-stack video conferencing platform built from scratch — not a tutorial, not a template.
+<h1 align="center">A-Meet</h1>
 
-A-Meet is a production-grade Google Meet alternative engineered with a real SFU (Selective Forwarding Unit), end-to-end auth, scheduled meetings, and a handcrafted UI. Built as a deep-dive learning project to understand exactly how platforms like Google Meet, Whereby, and Daily.co work under the hood — and then build one.
+<p align="center">
+  Video calls in the style of Google Meet, running on a server you control.<br />
+  Sign in with Google, share a meeting link, and the media runs through a mediasoup SFU you host.
+</p>
 
----
+<p align="center">
+  <a href="https://ameet.raja-dev.me/">Live demo</a>
+  ·
+  <a href="#running-it-locally">Run it locally</a>
+  ·
+  <a href="#configuration">Configuration</a>
+  ·
+  <a href="#deployment">Deployment</a>
+</p>
 
-## Why A-Meet instead of just... using Google Meet?
+A-Meet is a video call app. You sign in with Google, click "New meeting", and send the link. Everyone who opens the link signs in, waits in the lobby, and joins the room. The room has camera and microphone controls, screen share with optional tab audio, chat, emoji reactions, raise hand, a Picture-in-Picture mini player, and a shared transcript.
 
-Google Meet is a product. A-Meet is an understanding.
+The API server is Express and Socket.io. It starts mediasoup worker subprocesses for the media, so audio and video pass through the machine you run it on. You need MongoDB, a Google OAuth client, and a JWT secret. Transcription also needs Deepgram and Groq API keys. Without a Deepgram key, the server logs a warning and transcription stays unavailable.
 
-Most "video calling" tutorials stop at a 2-person WebRTC peer connection. A-Meet goes further:
+## What you get
 
-| What Google Meet hides | What A-Meet exposes |
-|---|---|
-| The SFU routing every stream | mediasoup running in your own process — you can read every line |
-| Simulcast + layer switching | Three spatial layers × L3 temporal per camera, SFU sheds layers per-viewer's downlink |
-| Audio priority over video | `consumer.setPriority(255)` on every audio consumer — voice survives bandwidth drops |
-| Presence & reconnect handling | `join-room` re-emitted on every socket reconnect; grace-window debounce kills churn noise |
-| Per-person volume | Discord-style per-tile volume slider — independent of master volume |
-| Mic gain | GainNode always in the signal chain (Google Meet / Discord model) — fully synchronous, no `replaceTrack` races |
-| Auto Picture-in-Picture | Canvas composites all tiles; `requestPictureInPicture` on tab hide, auto-close on return |
-| Observability | Grafana + Loki + Promtail wired to structured server logs — watch SFU events in real time |
+- **Calls run through a mediasoup SFU.** Each browser uploads its camera at three resolutions, a quarter, half and full size, capped at 200, 500 and 1500 kbps. The SFU forwards to each viewer the layer that fits their connection, without decoding or re-encoding. Audio consumers get priority 255, so voice keeps its share of bandwidth when video layers drop.
+- **A shared transcript from each speaker's own microphone.** The meeting admin starts the transcript, and each participant's browser sends its microphone as 16 kHz PCM. Deepgram Nova-3 streams English text while people talk. When a turn ends, Groq Whisper transcribes it again, and a second Groq model merges the two results when they differ. The panel shows finals only. Anyone in the room can download the transcript as a `.txt` file. The server keeps it in memory and drops it six hours after the last participant leaves. Nothing goes to MongoDB.
+- **Google sign-in with an httpOnly cookie.** Passport's Google OAuth strategy creates or updates the user, and the server sets a JWT in the `ameet_token` cookie for 7 days. Page scripts cannot read the cookie. Socket connections check the same cookie during the handshake.
+- **Scheduled meetings with calendar links.** You schedule a meeting with a title and a time. It appears in the upcoming list on the landing page, and the lobby shows the scheduled time. Each meeting also gets an "Add to Google Calendar" link.
+- **Admin controls.** The meeting admin can mute one participant or everyone, remove a participant, spotlight a speaker, and end the meeting. Muting pauses the participant's producer on the server. Nobody is switched back on. A muted participant can only ask to unmute.
+- **In-call audio and video tools.** Each participant has a volume slider, and the call has a master output volume. Mic gain runs through a GainNode, and a speaking ring follows an AnalyserNode. The chat panel has an unread badge, reactions float over the call, and the layout chooser switches between auto, tiled, spotlight and sidebar.
+- **Picture-in-Picture and structured logs.** Auto Picture-in-Picture opens a mini player when the tab is hidden and closes it when you come back. The app draws all camera tiles onto a canvas and sends that canvas to a hidden video element, so it works only in Chromium-based browsers. The server writes Pino JSON logs with fields such as `roomId` and `socketId`. `/api/health` reports liveness, and `/api/health/ready` returns 503 when MongoDB is down or a mediasoup worker has died.
 
-You can self-host it, read every line, break it, and understand why it broke. That's the point.
+## Running it locally
 
----
+You need Node.js 22.13 or newer, Docker with Compose, and a Google OAuth client. In the Google Cloud console, add `http://localhost:5000/api/auth/google/callback` as an authorized redirect URI.
 
-## Feature Set
+### Clone and install
 
-### Core call
-- **Google OAuth → JWT** auth (httpOnly cookie, zero client-side token storage)
-- **mediasoup SFU** — scales beyond 2 peers; the same architecture used by production conferencing platforms
-- **Simulcast** (3 spatial layers × L1T3 temporal) — video degrades gracefully on bad connections; audio stays
-- **Screen sharing** with multi-share support, name attribution, and presentation layout
-- **Auto Picture-in-Picture** — tab switch opens a mini player; returning closes it
-
-### Audio / Video controls
-- Master output volume (all remote peers)
-- Per-participant output volume (Discord-style hover slider)
-- Mic input gain via GainNode (no `replaceTrack`, no races)
-- Camera + mic device switching mid-call
-- Speaking indicator — level-reactive pulsing ring via `AnalyserNode` (no audio feedback)
-
-### In-call UX
-- Emoji reactions — per-tile popup + Google Meet-style floating emoji stream
-- Raise hand with visual indicator across all layouts
-- Chat panel with unread badge
-- Screenshot to clipboard (canvas composite of all visible tiles, with download fallback)
-- "Stop presenting" header chip (matches Google Meet top-bar behaviour)
-- Auto-hide control bar during screen share; hover to reveal; pin/unpin toggle
-- RTC stats overlay for debugging
-- Shared English transcript — each browser streams only its own microphone as 16 kHz PCM;
-  Deepgram Nova-3 supplies background transcription and Groq Whisper refines completed turns
-- Background meeting transcription + reconnect-safe transcript panel; every participant can download the same
-  canonical `.txt` transcript (ephemeral in v1, not saved to MongoDB)
-
-### Meetings
-- Schedule future meetings with title, date/time, and shareable invite link
-- Upcoming meetings list on landing page
-- Lobby shows meeting title and scheduled time when joining a scheduled meeting
-- Post-login redirect — invited users land back on the meeting after signing in
-
-### Infrastructure
-- **Docker Compose** — MongoDB, Promtail, Loki, Grafana all in one command
-- **TURN server** support (coturn config included)
-- **EC2-aware announced IP** — auto-detects public IPv4 via IMDSv2 on deploy; actionable error off-EC2
-- **Structured logging** — Pino JSON; local → Promtail/Loki/Grafana, production → CloudWatch
-
----
-
-## Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | React (Vite) + Material UI + Socket.io-client |
-| Backend | Node.js + Express + Socket.io |
-| Database | MongoDB + Mongoose |
-| Media | mediasoup (SFU) |
-| Auth | Passport `google-oauth20` → JWT (httpOnly cookie) |
-| Validation | Joi (API) + Mongoose (schema) |
-| Observability | Local: Grafana + Loki + Promtail · Production: CloudWatch + SNS/Telegram |
-| Infra | Docker Compose + coturn |
-
----
-
-## Getting Started
-
-### Prerequisites
-- Node.js 20+
-- Docker + Docker Compose
-- A Google OAuth app (Client ID + Secret)
-
-### 1. Clone and install
-```bash
+```sh
 git clone https://github.com/Anuraj-dev/A-Meet.git
 cd A-Meet
 npm install
-npm --prefix client install
-npm --prefix server install
 ```
 
-### 2. Configure environment
+The root `package.json` declares the client, server, shared, bot and e2e packages as npm workspaces, so one install covers all of them.
 
-Three env files, with distinct jobs:
+### Create the environment files
 
-```bash
-cp .env.example .env               # repo root — local Docker Mongo credentials (read by Compose)
-cp server/.env.example server/.env # server app config (read by the Node server)
-cp client/.env.example client/.env # client app config (Vite reads VITE_SERVER_URL for Socket.io)
+```sh
+cp .env.example .env                 # Docker Compose: local MongoDB credentials
+cp server/.env.example server/.env   # API server
+cp client/.env.example client/.env   # Vite client
 ```
 
-`docker compose` reads the **repo-root `.env`** for the Mongo container credentials, so those
-live there — not in `server/.env`. Keep the two in sync: the username/password in the root
-`.env` must match the ones embedded in the server's `MONGO_URI` (both default to
-`admin` / `change-me`).
-
-The **`client/.env`** supplies `VITE_SERVER_URL` — the origin the browser opens the Socket.io
-connection to. There is no built-in fallback, so on a fresh clone signaling silently fails to
-connect until this file exists; the default points at the local server (`http://localhost:5000`).
-
-Repo-root `.env` (local Docker Mongo only — unused in production):
+Set these values in `server/.env`:
 
 ```env
-MONGO_ROOT_USERNAME=admin
-MONGO_ROOT_PASSWORD=change-me
-```
-
-Open `server/.env` and fill in:
-
-```env
-# MongoDB — local dev points at the Docker Mongo container; credentials must match
-# the repo-root .env above. In production, set MONGO_URI to your Atlas SRV string
-# instead (see Deployment).
 MONGO_URI=mongodb://admin:change-me@localhost:27017/ameet?authSource=admin
-
-# Auth
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-JWT_SECRET=a_long_random_string
-CLIENT_URL=http://localhost:5173
-SERVER_URL=http://localhost:5000
-
-# mediasoup
-MEDIASOUP_ANNOUNCED_IP=   # leave blank on localhost; set to EC2 public IP on deploy
-
-# Session
-SESSION_SECRET=another_long_random_string
+JWT_SECRET=a-long-random-string
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
 ```
 
-To get a Google OAuth client:
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a project → APIs & Services → Credentials → Create OAuth 2.0 Client ID
-3. Authorized redirect URI: `http://localhost:5000/auth/google/callback`
+The credentials in `MONGO_URI` must match `MONGO_ROOT_USERNAME` and `MONGO_ROOT_PASSWORD` in the root `.env`. Both default to `admin` and `change-me`. Change them before you use the stack for anything real.
 
-### 3. Start infrastructure (local dev)
-```bash
+In `client/.env`, set `VITE_SERVER_URL=http://localhost:5000`. Without it, the client has no signaling server to reach, and calls never connect.
+
+To enable transcription, add `DEEPGRAM_API_KEY` and `GROQ_API_KEY` to `server/.env`.
+
+### Start the stack
+
+```sh
 npm run docker:up
-```
-
-This starts the **local development** stack from `docker-compose.yml`: MongoDB (27017),
-mongo-express (8081), Loki (3100), Promtail, and Grafana (3000). This is the one documented
-way to run MongoDB locally for offline/full-stack work.
-
-> **Dev vs production database:** the local Mongo container above is for development only.
-> In production the database is **MongoDB Atlas** (set `MONGO_URI` to the Atlas connection
-> string) and no Mongo container runs on the server — see [Deployment](#deployment-ec2-containerized).
-
-### 4. Run the app
-```bash
 npm run dev
 ```
 
-- **Client:** http://localhost:5173
-- **Server:** http://localhost:5000
-- **Grafana (logs):** http://localhost:3000
-- **mongo-express:** http://localhost:8081
+`docker:up` starts MongoDB on 27017, mongo-express on 8081, Loki on 3100, and Grafana on 3000. `dev` starts the API on port 5000 and the Vite client on port 5173.
 
-### 5. Create a meeting
-1. Sign in with Google
-2. Click **New meeting** on the landing page
-3. Share the link with anyone — they sign in and land directly in the meeting
+Open http://localhost:5173, sign in with Google, and click "New meeting". To test with a second participant, open the same link in another browser window. The default announced IP, `127.0.0.1`, works when every tab runs on the same machine.
 
----
+## Configuration
 
-## Linting & tests
+The server reads `server/.env`, and the client reads `client/.env`. The server exits at startup if `MONGO_URI` or `JWT_SECRET` is missing.
 
-Each package has its own ESLint flat config (ESLint 10) and test suite. The same
-commands run locally and in CI:
+### Server
 
-```bash
-# Server (Express + Socket.io + mediasoup)
-npm --prefix server run lint    # ESLint over src/, test/, and config files
-npm --prefix server test        # Vitest
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `MONGO_URI` | none, required | MongoDB connection string. |
+| `JWT_SECRET` | none, required | Signs the session JWT. |
+| `JWT_EXPIRES_IN` | `7d` | JWT lifetime. |
+| `GOOGLE_CLIENT_ID` | empty | Google OAuth client. Without it, login stays disabled. |
+| `GOOGLE_CLIENT_SECRET` | empty | Google OAuth client secret. |
+| `CLIENT_URL` | `http://localhost:5173` | Where the server sends the browser after login. Also the CORS origin. |
+| `SERVER_URL` | `http://localhost:5000` | Base URL for the OAuth callback. |
+| `PORT` | `5000` | HTTP and Socket.io port. |
+| `MEDIASOUP_ANNOUNCED_IP` | `127.0.0.1` | Address advertised to browsers for media. See [How the SFU works](#how-the-sfu-works). |
+| `MEDIASOUP_MIN_PORT` | `40000` | Start of the RTC port range. Open it in the firewall. |
+| `MEDIASOUP_MAX_PORT` | `40100` | End of the RTC port range. |
+| `MEDIASOUP_NUM_WORKERS` | CPU core count | Number of mediasoup worker subprocesses. |
+| `DEEPGRAM_API_KEY` | empty | Enables live transcription. |
+| `GROQ_API_KEY` | empty | Enables the Groq re-transcription and merge step. |
+| `DEEPGRAM_TRANSCRIPTION_MODEL` | `nova-3` | Deepgram model. |
+| `GROQ_TRANSCRIPTION_MODEL` | `whisper-large-v3` | Groq Whisper model. |
+| `GROQ_TRANSCRIPT_MERGE_MODEL` | `qwen/qwen3.6-27b` | Groq model that merges the two transcripts. |
+| `DISCORD_BOT_API_KEY` | empty | Shared key the Discord bot sends. Empty disables the integration. |
+| `DISCORD_LINK_TOKEN_TTL` | `10m` | Lifetime of the Discord account link token. |
+| `LOG_LEVEL` | `debug` in development, `info` in production | Pino log level. |
 
-# Client (React + Vite)
-npm --prefix client run lint
-npm --prefix client test
-```
+Rate limits have generous defaults in `server/src/config/env.ts`. The `RATE_LIMIT_*` variables in `server/.env.example` override them.
 
-The server lint config (`server/eslint.config.js`) uses Node globals for source and
-Vitest globals for `test/**`, and ignores generated/dependency dirs
-(`node_modules`, `logs`, `coverage`, `dist`). `npm --prefix server run lint` exits zero
-on a clean checkout and runs as a CI gate.
+### Client
 
-### Full pre-merge suite
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `VITE_SERVER_URL` | none, required | Origin of the API and Socket.io server. |
+| `VITE_TURN_DOMAIN` | empty | TURN hostname. Adds relay servers to the ICE configuration. |
+| `VITE_TURN_USERNAME` | `ameet` | TURN username. |
+| `VITE_TURN_SECRET` | empty | TURN credential. |
+| `VITE_TURN_TRANSPORT` | empty | Set to `udp`, `tcp` or `tls` to advertise only that relay path. Leave empty to advertise all three. |
+| `VITE_FORCE_RELAY` | empty | Set to `1` to send all media through TURN. Has no effect unless TURN is configured. |
 
-Run the CI gates that fire on every PR in one command:
+## How the SFU works
 
-```bash
-# One-time: download Playwright browsers (not part of npm ci)
-npm run test:e2e:install
+Each room gets its own mediasoup router. The server spreads routers across the worker pool in round-robin order. Every browser opens one send transport and one receive transport. It produces its camera, microphone and screen tracks on the send transport, and it consumes everyone else's tracks on the receive transport. The router forwards RTP packets without mixing or re-encoding them.
 
-# lint (server + client) → npm audit (server + client) → typecheck → unit/coverage → client build → E2E smoke
-npm run verify
-```
+Camera video uses simulcast with three spatial layers. Audio consumers get priority 255, so the SFU reserves voice bitrate before it drops video layers.
 
-`verify` fails fast — the first failing phase stops the run. It mirrors the CI jobs that
-run on every PR: `Server lint`, `Client lint`, `npm audit (high)`, `Workspaces typecheck`,
-`Client tests + build`, `Server tests` (coverage ratchet), and the `Playwright smoke`. It does **not** run
-the path-scoped `Server image smoke` (a ~15-min Docker build that spawns a real mediasoup
-worker), which CI runs only when server-image files change. A green `verify` locally means
-those every-PR gates are satisfied.
+The announced IP is the setting most likely to break a cloud deployment. mediasoup binds `0.0.0.0`, but it advertises `MEDIASOUP_ANNOUNCED_IP` to browsers, and browsers send media to that address. On EC2, the network interface only holds the private address. A loopback or private announced IP leaves remote peers unable to connect media. At startup, the server replaces such a value with the instance's public IPv4, read from IMDSv2. If that lookup fails, it logs an error in production. Set `MEDIASOUP_ANNOUNCED_IP` explicitly to avoid the lookup.
 
----
-
-## Project Structure
-
-```
-A-Meet/
-├── client/                  # React (Vite) frontend
-│   └── src/
-│       ├── pages/           # LandingPage, LobbyPage, RoomPage
-│       ├── components/      # VideoTile, ControlBar, ChatPanel, …
-│       ├── hooks/           # useMediasoup, usePictureInPicture, useAudioLevel, …
-│       ├── context/         # AuthContext, RoomMetaContext
-│       └── utils/           # video-composite, logger
-├── server/                  # Express + Socket.io + mediasoup
-│   └── src/
-│       ├── routes/          # auth, meetings, rooms
-│       ├── socket/          # room events, SFU signalling
-│       ├── models/          # User, Room
-│       └── middleware/      # JWT cookie auth
-├── docker-compose.yml       # LOCAL DEV: MongoDB + observability stack
-├── docker-compose.prod.yml  # PRODUCTION: server only (DB is Atlas via MONGO_URI)
-├── docker-compose.coturn.yml
-├── docs/
-│   ├── STATE.md              # current status (source of truth — read first)
-│   ├── decisions.md          # load-bearing decision log
-│   └── old_plan.md           # archived milestone-by-milestone history
-└── CLAUDE.md / AGENTS.md     # agent entry point
-```
-
----
-
-## Architecture — How the SFU works
+## Repository layout
 
 ```
-Browser A                mediasoup Router              Browser B
-    │                          │                           │
-    │── produce (camera) ──▶   │                           │
-    │                          │◀── consume (B's recv) ──  │
-    │                          │── stream A's layers ──▶   │
-    │                          │   (layer switch per B's   │
-    │                          │    available bandwidth)   │
+client/   React, Vite and Material UI frontend
+server/   Express, Socket.io and mediasoup API server
+shared/   @a-meet/contracts, the socket event and REST types shared by client and server
+bot/      Discord bot, a thin discord.js client for the API
+e2e/      Playwright end-to-end tests
+deploy/   EC2, TURN and observability scripts
 ```
 
-Every participant **produces** one video track (simulcast: 3 quality layers) and one audio track. Every other participant **consumes** those tracks via the router. The SFU forwards only the right layer — no mixing, no re-encoding, low latency. Audio consumers get `priority(255)` so the SFU always reserves voice bitrate before dropping video layers.
+## Tests and checks
 
----
-
-## Observability
-
-Local logs flow: **Pino (server)** → JSON files → **Promtail** → **Loki** → **Grafana**.
-
-Open Grafana at `http://localhost:3000`, go to Explore → Loki, and query:
-```
-{job="a-meet-server"}
+```sh
+npm test                    # server, client and bot unit tests (Vitest)
+npm run typecheck           # shared, server, client and bot
+npm run lint                # ESLint across all four packages
+npm run test:e2e:install    # once: install the Playwright Chromium build
+npm run test:e2e            # Playwright end-to-end tests
+npm run verify              # lint, audit, typecheck, coverage, client build and E2E in one run
 ```
 
-You can watch SFU `produce` / `consume` / `close-producer` events in real time while a call is live.
+Vitest transpiles without type checking, so run `npm run typecheck` as well. A green test run does not prove the types are correct.
 
-Production does not depend on this local stack. The container's structured JSON stdout uses
-Docker's `awslogs` driver and is sent to `/a-meet/prod/server` with 14-day retention. See
-[Production logs, alerts, and secrets](#production-logs-alerts-and-secrets).
+## Deployment
 
----
+Production runs the API as a Docker image on one EC2 instance. MongoDB Atlas stores the data, and SSM Parameter Store holds the secrets. The client is a Vite build deployed to Vercel. `client/vercel.json` rewrites every path to the root page, so client-side routes load.
 
-## Deployment (EC2, containerized)
+### Deploy the server image
 
-Production runs the backend as an **immutable Docker image** built from `server/Dockerfile`,
-supervised by Docker (not pm2). The container uses **host networking** so mediasoup's RTP
-port range is reachable, and the server's SIGTERM graceful-drain handles clean restarts.
+`.github/workflows/deploy-backend.yml` runs on pushes to `main` that touch `server/**`, `shared/**`, the root package files, `.dockerignore`, `docker-compose.prod.yml`, or the workflow itself. It builds the `runtime` target of `server/Dockerfile` and pushes two tags to ECR, `latest` and an immutable `<git-sha>`. Then it connects to the instance over SSH, pulls the SHA tag, and restarts the container. The deploy fails if the readiness check at `/api/health/ready` fails. The jobs skip until the `ECR_REPOSITORY` variable is set.
 
-Releases are **image-based**: CI builds the server image, publishes an immutable tag to
-**Amazon ECR**, and the EC2 node **pulls that tag** and restarts the container — it never
-rebuilds mediasoup on the box. Docker's `restart: unless-stopped` is the supervisor. In
-production the server logs **structured JSON to stdout only** and Docker's `awslogs` driver
-forwards it to CloudWatch rather than a bind-mounted file. (The local `docker-compose.yml`
-dev stack still uses the Loki/Promtail/Grafana file tail.)
+| Name | Kind | Purpose |
+| --- | --- | --- |
+| `AWS_REGION` | variable | ECR and deploy region. |
+| `ECR_REPOSITORY` | variable | ECR repository name. The repository must already exist. |
+| `HEALTH_URL` | variable | Optional. Defaults to the production readiness URL. |
+| `AWS_DEPLOY_ROLE_ARN` | secret | IAM role for GitHub OIDC, with ECR push access. |
+| `EC2_HOST` | secret | Public host or IP of the instance. |
+| `EC2_SSH_KEY` | secret | SSH key for the `ubuntu` user. |
 
-```bash
-# On the EC2 node (Docker + Docker Compose plugin + AWS CLI installed)
-git clone ... && cd A-Meet   # the node keeps a checkout for config (compose file + env)
+To deploy by hand on the instance:
 
-# Runtime secrets are loaded from SSM by the container entrypoint. No production
-# server/.env is required or copied into the image.
-# Open UDP ports 40000–40100 in the security group (mediasoup RTP range), plus 5000 (API).
-
-# Pull the published image tag and start (this is what CI automates on each deploy):
+```sh
 export SERVER_IMAGE=<account>.dkr.ecr.<region>.amazonaws.com/a-meet-server:<git-sha>
 aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
-
-docker compose -f docker-compose.prod.yml logs -f      # tail logs
-docker compose -f docker-compose.prod.yml down         # SIGTERM → graceful drain, then stop
 ```
 
-> For a local/manual build instead of pulling, leave `SERVER_IMAGE` unset and run
-> `docker compose -f docker-compose.prod.yml up -d --build`.
+The container runs with host networking. Open TCP 5000 for the API, which `deploy/nginx.conf` proxies behind HTTPS. Open UDP and TCP 40000 to 40100 for mediasoup media.
 
-### CI/CD: build → ECR → deploy by tag
+### Secrets and database
 
-The **Deploy backend** workflow (`.github/workflows/deploy-backend.yml`) runs on merges to
-`main` that touch `server/**`, the prod compose, or the workflow itself. It builds the
-Dockerfile's `runtime` target, pushes it to ECR, and SSHes to EC2 to pull and restart. The
-deploy **fails fast** if the image pull, container start, or the post-deploy health check fails.
+The container entrypoint, `server/src/ssm-entrypoint.ts`, reads every parameter under `SSM_PARAMETER_PREFIX`, which production sets to `/a-meet/prod/server`. It decrypts them into the environment before the server starts. A value already set in the environment wins.
 
-It activates only once the registry is configured — until `ECR_REPOSITORY` is set the jobs skip
-cleanly, so merges to `main` stay green. To enable it:
+Store each value as a SecureString:
 
-**Repository variables** (Settings → Secrets and variables → Actions → Variables):
+```sh
+aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
+  --name /a-meet/prod/server/MONGO_URI --value '<Atlas SRV URI>'
+```
 
-| Variable | Purpose |
-|---|---|
-| `AWS_REGION` | ECR / deploy region, e.g. `ap-south-1` |
-| `ECR_REPOSITORY` | ECR repo name, e.g. `a-meet-server` (must exist) |
-| `HEALTH_URL` | optional; defaults to `https://api.ameet.raja-dev.me/api/health/ready` |
+Repeat for `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `CLIENT_URL`, `SERVER_URL`, and `MEDIASOUP_ANNOUNCED_IP`. Add `DEEPGRAM_API_KEY` and `GROQ_API_KEY` if you use transcription.
 
-**Repository secrets:**
+Use a MongoDB Atlas SRV string for `MONGO_URI`, and add the instance's public IPv4 to the Atlas Network Access list. Production runs no MongoDB container. `MONGO_ROOT_USERNAME` and `MONGO_ROOT_PASSWORD` apply only to the local Docker stack.
 
-| Secret | Purpose |
-|---|---|
-| `AWS_DEPLOY_ROLE_ARN` | IAM role assumed via GitHub OIDC; needs `ecr:GetAuthorizationToken` + push to the repo |
-| `EC2_HOST` | public host/IP of the production node |
-| `EC2_SSH_KEY` | SSH private key for the `ubuntu` user |
+### Elastic IP and automatic recovery
 
-**On the EC2 node:** Docker + Compose plugin + AWS CLI, and an **IAM instance role with ECR
-pull**, SSM read, and CloudWatch Logs write permissions. `deploy/iam-instance-policy.json`
-contains the application-specific SSM/log permissions; no static AWS keys are used.
+Use one Elastic IP for the API DNS record, `MEDIASOUP_ANNOUNCED_IP`, and the Atlas allowlist entry. Then none of them change when EC2 recovers the instance.
 
-**Image-tag contract:** every build is pushed as both `:latest` and an **immutable `:<git-sha>`**
-tag; deploys pull the specific `:<git-sha>` so a release maps to exact bytes and can be rolled
-back by redeploying an older SHA.
+```sh
+export AWS_REGION=ap-south-1
+export INSTANCE_ID=i-0abc123...
+export EIP_ALLOCATION_ID=eipalloc-0abc123...
 
-### Database: MongoDB Atlas (production)
+deploy/aws-recovery.sh setup     # attach the EIP and create the recovery alarm
+deploy/aws-recovery.sh verify    # exits non-zero if the EIP, alarm or root device is wrong
+```
 
-Production persistence is **MongoDB Atlas**, decoupled from the application box — the server
-node runs **no Mongo container** (`docker-compose.prod.yml` has no `mongo`/`mongo-express`
-services). The local `docker-compose.yml` Mongo stack is for development only.
+The alarm watches `StatusCheckFailed_System` and triggers EC2 recovery. Recovery covers EBS-backed instances only. After a recovery event, run `verify`, then check `https://api.<domain>/api/health/ready`.
 
-1. Create an Atlas cluster and a database user.
-2. **Network allowlist:** in Atlas → *Network Access*, add the production node's **public IPv4**
-   (the same value you set for `MEDIASOUP_ANNOUNCED_IP`) so the EC2 box can reach the cluster.
-   On a fixed-IP node prefer that exact `/32`; if the IP can change, an Elastic IP keeps the
-   allowlist stable. (`0.0.0.0/0` works but is not recommended.)
-3. Store `MONGO_URI` at `/a-meet/prod/server/MONGO_URI` in SSM as the Atlas SRV
-   connection string, e.g.
-   `mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/ameet?retryWrites=true&w=majority`.
+### Logs and alarms
 
-`MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD` are local-Docker-Mongo credentials only and are
-not used in production.
+`deploy/aws-observability.sh` creates the `/a-meet/prod/server` log group with 14-day retention, log metric filters, a Route53 health check on `/api/health/ready`, CloudWatch alarms, and an SNS topic. A Lambda forwards each alarm to Telegram. Route53 health metrics only exist in us-east-1, so the script takes `ROUTE53_ALARM_REGION` as a separate setting. Store the Telegram token and chat ID as SecureStrings under `/a-meet/prod/telegram/`.
 
-### Production logs, alerts, and secrets
-
-Provision the production observability path once:
-
-```bash
+```sh
 export AWS_REGION=ap-south-1
 export ROUTE53_ALARM_REGION=us-east-1
 export ENVIRONMENT=prod
@@ -387,44 +227,7 @@ export LAMBDA_ROLE_ARN=arn:aws:iam::<account>:role/a-meet-telegram-lambda
 deploy/aws-observability.sh
 ```
 
-The script idempotently creates `/a-meet/prod/server` with 14-day retention, an SNS topic,
-the Telegram Lambda, log metric filters, a Route53 health check against
-`https://$READINESS_HOST/api/health/ready`, and alarms for process-down readiness,
-instance health, fatal logs, sustained Mongo disconnects, and a five-minute error count.
-Route53 health-check metrics are emitted in US East (N. Virginia), so the process-down
-alarm path defaults to `ROUTE53_ALARM_REGION=us-east-1` with its own SNS topic and
-Telegram Lambda there; that Lambda reads Telegram SSM parameters from the primary
-`AWS_REGION`.
-CloudWatch sends SNS only when alarm state changes, so an alarm produces one Telegram
-notification on `OK → ALARM` and does not repeat until it returns to `OK` and alarms again.
-The Lambda message contains the alarm name, environment, state, and reason.
-
-Attach `deploy/iam-instance-policy.json` to the EC2 instance role. Attach
-`deploy/iam-telegram-lambda-policy.json` to the Lambda role. Replace wildcard account/region
-segments with narrower values if your IAM deployment requires them.
-
-Store application configuration as SecureStrings. Only parameter names are committed:
-
-```bash
-aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
-  --name /a-meet/prod/server/MONGO_URI --value '<Atlas URI>'
-aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
-  --name /a-meet/prod/server/JWT_SECRET --value '<secret>'
-# Repeat for GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, CLIENT_URL, SERVER_URL,
-# MEDIASOUP_ANNOUNCED_IP, DEEPGRAM_API_KEY, and GROQ_API_KEY as applicable.
-
-aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
-  --name /a-meet/prod/telegram/token --value '<bot token>'
-aws ssm put-parameter --region "$AWS_REGION" --type SecureString --overwrite \
-  --name /a-meet/prod/telegram/chat-id --value '<chat id>'
-```
-
-`SSM_PARAMETER_PREFIX` defaults to `/a-meet/prod/server`. The entrypoint decrypts that
-one-level path before importing `config/env.ts`; an explicit Compose environment value wins
-for emergency overrides. Local development still uses `server/.env` because the prefix is
-unset outside `docker-compose.prod.yml`.
-
-Query production logs with CloudWatch Logs Insights:
+Query production logs in CloudWatch Logs Insights:
 
 ```text
 fields @timestamp, level, msg, roomId, socketId, reqId
@@ -433,152 +236,41 @@ fields @timestamp, level, msg, roomId, socketId, reqId
 | limit 100
 ```
 
-Staging smoke:
+### TURN over TLS
 
-1. Run `deploy/aws-observability.sh`, deploy the container, and confirm `/api/health/ready` is healthy.
-2. Emit one structured `logger.info({ roomId, socketId, reqId }, ...)` and one
-   `logger.error({ roomId, socketId, reqId }, ...)` event through the staging application.
-3. Confirm both appear in `/a-meet/staging/server` and the fields are queryable.
-4. Set a test alarm to `ALARM` with `aws cloudwatch set-alarm-state`; confirm one Telegram
-   message. Set `ALARM` again and confirm no second state-transition notification; set `OK`,
-   then `ALARM`, and confirm a new notification.
-5. Confirm local `docker-compose.yml` still runs Loki/Grafana/Promtail without AWS settings.
+Some networks block direct media. A TURN relay gives those clients a path through TCP or TLS. `deploy/setup-coturn-tls.sh` obtains a certificate for the TURN hostname with HTTP-01 through the existing Nginx setup, copies it into `coturn/certs/`, and starts coturn. Copy `coturn/turnserver.conf.example` to `coturn/turnserver.conf` and fill in the placeholders first. The TURN secret must match `TURN_SECRET` in `server/.env`.
 
-### TURN over TLS (5349)
-
-coturn exposes UDP and TCP on `3478` plus TURN-over-TLS on `5349`. The TLS
-certificate is for the public TURN hostname (for example, `turn.example.com`), which must
-have an A record pointing to the node's Elastic IP before issuance. The certificate is
-obtained with **HTTP-01**, not DNS-01: the existing Nginx configuration already owns port
-80, so `deploy/nginx.conf` explicitly lists both the API and TURN hostnames and serves only
-`/.well-known/acme-challenge/` from
-`/var/www/certbot` and redirects every other HTTP request to HTTPS. This avoids DNS
-provider credentials while retaining the current API redirect.
-
-Before provisioning, ensure the EC2 security group allows TCP `80` (ACME), UDP and TCP
-`3478`, TCP `5349`, and UDP `49160-49200` (the configured relay range). Copy the coturn
-template into the ignored host-local config and replace its placeholders, including the
-public/private `external-ip` mapping and TURN secret:
-
-```bash
-cd ~/ameet
-cp coturn/turnserver.conf.example coturn/turnserver.conf
-# edit coturn/turnserver.conf: YOUR_DOMAIN, YOUR_PUBLIC_IP, TURN_SECRET_PLACEHOLDER
-
-# Apply deploy/nginx.conf with API_DOMAIN and TURN_DOMAIN replaced, then make its ACME webroot available.
-sudo install -d -m 0755 /var/www/certbot
-sudo nginx -t && sudo systemctl reload nginx
-
-# Installs certbot if needed, obtains/reuses the certificate, copies the certificate and
-# private key to coturn/certs/, starts coturn, and enables the standard certbot.timer.
+```sh
 sudo env TURN_DOMAIN=turn.example.com TURN_EMAIL=ops@example.com \
   A_MEET_DIR="$HOME/ameet" ./deploy/setup-coturn-tls.sh setup
 ```
 
-`setup-coturn-tls.sh` first writes and fetches a temporary public HTTP-01 challenge, so it
-stops before Certbot if TURN DNS, Nginx, or TCP port 80 is not ready. It is idempotent: Certbot
-retains a valid certificate, then the script copies it into the bind-mounted `coturn/certs/`
-directory and recreates only the coturn container. It also installs a Certbot deploy hook at
-`/etc/letsencrypt/renewal-hooks/deploy/a-meet-coturn`; the normal `certbot.timer` invokes
-that hook only after a successful renewal of the TURN certificate, so coturn restarts with the
-new keypair. EC2 auto-recovery restarts the same EBS-backed instance but does not run this
-provisioning script; the operator must re-run `setup-coturn-tls.sh setup` after recovery if
-the TURN service needs to be restored. The certificate files and generated coturn config remain
-host-local and are gitignored.
+Open TCP 80, UDP and TCP 3478, TCP 5349, and UDP 49160 to 49200. The TLS relay uses TCP 5349, not 443.
 
-Verify the listener certificate itself before testing media:
+To test one relay path, build the client with `VITE_TURN_DOMAIN`, `VITE_TURN_USERNAME`, `VITE_TURN_SECRET`, `VITE_FORCE_RELAY=1`, and `VITE_TURN_TRANSPORT` set to `udp`, `tcp` or `tls`. Join the same meeting from two separate networks. In `chrome://webrtc-internals`, the selected candidate pair should use a `relay` candidate. Clear the variables and rebuild before you return to normal operation.
 
-```bash
-openssl s_client -connect turn.example.com:5349 -servername turn.example.com </dev/null
-sudo systemctl status certbot.timer
-docker compose -f docker-compose.coturn.yml logs --tail=100 coturn
+## Discord bot
+
+`bot/` is a discord.js process that calls the API with a shared key. It holds no meeting logic. It registers two slash commands. `/meet link` ties a Discord account to an A-Meet account through a confirmation link that expires after `DISCORD_LINK_TOKEN_TTL`. `/meet create` makes an instant meeting and posts the join link in the channel.
+
+```sh
+cp bot/.env.example bot/.env          # fill in the Discord and A-Meet values
+npm --prefix bot run register         # publish the /meet commands
+npm --prefix bot start                # run the bot
 ```
 
-#### Force-relay verification: UDP, TCP, and TLS
+Set `DISCORD_BOT_API_KEY` to the same value in `server/.env`. Invite the bot with the `bot` and `applications.commands` scopes.
 
-Build a test client with the real `VITE_TURN_DOMAIN`, `VITE_TURN_USERNAME`, and
-`VITE_TURN_SECRET`, then set `VITE_FORCE_RELAY=1`. For each row below, rebuild/redeploy the
-client with the listed `VITE_TURN_TRANSPORT`, join the same meeting from two independent
-networks, and confirm two-way audio and video. `VITE_FORCE_RELAY=1` makes the call fail
-instead of silently falling back to direct SFU media; `VITE_TURN_TRANSPORT` narrows the
-candidate list to prove the named path. Omit `VITE_TURN_TRANSPORT` in normal production
-builds so browsers receive all three fallback URIs.
+## Documentation
 
-| Path | Build-time environment | Expected URI |
-|---|---|---|
-| UDP | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=udp` | `turn:turn.example.com:3478?transport=udp` |
-| TCP | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=tcp` | `turn:turn.example.com:3478?transport=tcp` |
-| TLS | `VITE_FORCE_RELAY=1 VITE_TURN_TRANSPORT=tls` | `turns:turn.example.com:5349?transport=tcp` |
+- [Conventions](docs/conventions.md): stack, ports, and run and test commands.
+- [Decisions](docs/decisions.md): why the project chose the SFU, the auth model and other core designs.
+- [Current status](docs/STATE.md): what is done, what is in progress, and known gotchas.
+- [Chat and transcription spec](docs/specs/2026-07-30-chat-and-transcription-rework.md)
+- [Discord bot design](docs/specs/2026-07-23-discord-bot-design.md)
+- [Bot setup](bot/README.md)
+- [Docs index](docs/INDEX.md)
 
-For each successful call, browser `chrome://webrtc-internals` should show the selected ICE
-candidate pair using a `relay` candidate; coturn logs should show an allocation for that test.
-Clear both verification variables and rebuild before returning the client to normal operation.
-TLS TURN here uses TCP `5349`; it does not use port 443 and therefore is not a fallback for
-networks that permit only outbound 443. Serving TURN on 443 requires a separate listener or
-endpoint and is an out-of-scope follow-up.
+## Contributing
 
-### Host identity & automatic recovery
-
-The production node has a **stable identity** so it survives host failure without manual
-re-wiring. One **Elastic IP (EIP)** is the single fixed address used everywhere downstream, and
-a **CloudWatch auto-recovery alarm** rebuilds the instance onto healthy hardware while keeping
-that address.
-
-- **The EIP is the canonical address** for all three of:
-  - the `api.<domain>` **DNS A record**,
-  - **`MEDIASOUP_ANNOUNCED_IP`** in `/a-meet/prod/server/MEDIASOUP_ANNOUNCED_IP`
-    (the IP browsers send media to), and
-  - the **MongoDB Atlas Network Access** allowlist entry.
-
-  Because the EIP is reassociated on recovery, none of these need to change after a recovery event.
-- A CloudWatch alarm on **`StatusCheckFailed_System`** (2× 60s) triggers the EC2 **recover**
-  action, which restarts the *same* instance (same EIP, same EBS root volume) on new hardware.
-  This only covers EBS-backed instances.
-
-Provision and verify both with the helper script (AWS CLI v2 + EC2/CloudWatch permissions):
-
-```bash
-export AWS_REGION=ap-south-1
-export INSTANCE_ID=i-0abc123...
-export EIP_ALLOCATION_ID=eipalloc-0abc123...
-
-deploy/aws-recovery.sh setup     # associate EIP + create the recovery alarm (idempotent)
-deploy/aws-recovery.sh verify    # print evidence: EIP association, alarm state + recover action, EBS root
-```
-
-`verify` prints the AWS-CLI evidence (EIP `InstanceId`/`AssociationId`, the alarm's `StateValue` +
-`AlarmActions`, and `RootDeviceType`) **and enforces** the contract — it **exits non-zero** if the
-EIP isn't associated to `INSTANCE_ID`, the alarm is missing or lacks the `ec2:recover` action, or
-the instance isn't `ebs`-backed. That makes it safe to use as an automated post-recovery gate.
-
-**Operator validation after a recovery event:**
-1. `deploy/aws-recovery.sh verify` — EIP still associated to the instance; alarm back to `OK`; root device `ebs`.
-2. **API health:** `curl -fsS https://api.<domain>/api/health/ready` returns `{"ok":true}` (the deploy health check uses the same readiness endpoint).
-3. **Container up:** on the box, `docker compose -f docker-compose.prod.yml ps` shows the server running, and `logs -f` shows mediasoup workers started.
-4. **Media connectivity:** join a meeting from two devices and confirm audio/video flows — i.e. `MEDIASOUP_ANNOUNCED_IP` still equals the EIP and the security-group UDP RTC range (40000–40100) is open.
-
-For HTTPS (required for camera/mic on non-localhost), put Nginx in front with a Let's Encrypt cert and proxy to `localhost:5000`.
-
----
-
-
-## Milestones
-
-| # | Focus | Status |
-|---|-------|--------|
-| M0 | Repo scaffold, Docker, DB | ✅ |
-| M1 | Google OAuth → JWT cookie | ✅ |
-| M2 | Socket rooms + WebRTC mesh | ✅ |
-| M3 | Auth hardening + meeting CRUD | ✅ |
-| M4 | mediasoup SFU migration | ✅ |
-| M5 | Screen share + reactions + raise hand + chat | ✅ |
-| M6 | Landing page + lobby UI overhaul | ✅ |
-| M7 | In-call UX (PiP, simulcast, gain, screenshot…) | ✅ |
-| M8 | Per-participant volume control | ✅ |
-| M9 | Connection stability + announced IP + UX fixes | ✅ |
-
----
-
-## License
-
-MIT
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a PR. The project uses strict TDD. Each change starts with a failing test, and each bug fix starts with a test that reproduces the bug. Tests check what a user or another participant observes, not internal state.
